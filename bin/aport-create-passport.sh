@@ -34,8 +34,14 @@ echo "--------------------"
 read -p "Your email or ID: " owner_id
 owner_id=${owner_id:-"user@example.com"}
 
-read -p "Owner type (user/team/org) [user]: " owner_type
+read -p "Owner type (user/org) [user]: " owner_type
 owner_type=${owner_type:-"user"}
+
+read -p "Agent name [OpenClaw Agent]: " agent_name
+agent_name=${agent_name:-"OpenClaw Agent"}
+
+read -p "Agent description: " agent_description
+agent_description=${agent_description:-"Local OpenClaw AI agent with APort guardrails"}
 
 echo
 
@@ -106,13 +112,26 @@ else
     passport_id="local-$(date +%s)-$(openssl rand -hex 4 2>/dev/null || echo $(( RANDOM )))"
 fi
 
-# Expiration date (30 days from now)
-if date -v+30d &> /dev/null 2>&1; then
-    # BSD date (macOS)
-    expires_at=$(date -u -v+30d +%Y-%m-%dT%H:%M:%SZ)
+# Ask about expiration
+read -p "Should this passport expire? [y/N]: " should_expire
+should_expire=${should_expire:-n}
+
+if [ "$should_expire" = "y" ] || [ "$should_expire" = "Y" ]; then
+    read -p "Days until expiration [30]: " expire_days
+    expire_days=${expire_days:-30}
+
+    # Calculate expiration date
+    if date -v+${expire_days}d &> /dev/null 2>&1; then
+        # BSD date (macOS)
+        expires_at=$(date -u -v+${expire_days}d +%Y-%m-%dT%H:%M:%SZ)
+    else
+        # GNU date (Linux)
+        expires_at=$(date -u -d "+${expire_days} days" +%Y-%m-%dT%H:%M:%SZ)
+    fi
+    never_expires="false"
 else
-    # GNU date (Linux)
-    expires_at=$(date -u -d "+30 days" +%Y-%m-%dT%H:%M:%SZ)
+    expires_at=""
+    never_expires="true"
 fi
 
 # Build capabilities array
@@ -164,8 +183,23 @@ fi
 # Remove trailing comma
 limits_json="${limits_json%,}}"
 
-# Create passport JSON
-cat > "$PASSPORT_FILE.tmp" <<EOF
+# Build metadata object
+metadata_json=$(cat <<METADATA_EOF
+{
+  "name": $(echo "$agent_name" | jq -R .),
+  "description": $(echo "$agent_description" | jq -R .),
+  "version": "1.0.0",
+  "created_by": "aport-create-passport.sh"
+}
+METADATA_EOF
+)
+
+# Create passport JSON (OAP v1.0 compliant)
+current_timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+if [ "$never_expires" = "true" ]; then
+    # Passport without expiration
+    cat > "$PASSPORT_FILE.tmp" <<EOF
 {
   "passport_id": "$passport_id",
   "kind": "template",
@@ -174,15 +208,38 @@ cat > "$PASSPORT_FILE.tmp" <<EOF
   "owner_type": "$owner_type",
   "assurance_level": "L2",
   "status": "active",
-  "expires_at": "$expires_at",
   "capabilities": $capabilities_json,
   "limits": $limits_json,
   "regions": ["US", "CA"],
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "metadata": $metadata_json,
+  "never_expires": true,
+  "created_at": "$current_timestamp",
+  "updated_at": "$current_timestamp",
   "version": "1.0.0"
 }
 EOF
+else
+    # Passport with expiration
+    cat > "$PASSPORT_FILE.tmp" <<EOF
+{
+  "passport_id": "$passport_id",
+  "kind": "template",
+  "spec_version": "oap/1.0",
+  "owner_id": "$owner_id",
+  "owner_type": "$owner_type",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": $capabilities_json,
+  "limits": $limits_json,
+  "regions": ["US", "CA"],
+  "metadata": $metadata_json,
+  "expires_at": "$expires_at",
+  "created_at": "$current_timestamp",
+  "updated_at": "$current_timestamp",
+  "version": "1.0.0"
+}
+EOF
+fi
 
 # Format JSON with jq if available
 if command -v jq &> /dev/null; then
@@ -199,9 +256,15 @@ echo "📋 Passport Summary"
 echo "-------------------"
 echo "  Location: $PASSPORT_FILE"
 echo "  Passport ID: $passport_id"
-echo "  Owner: $owner_id"
+echo "  Owner: $owner_id ($owner_type)"
+echo "  Agent: $agent_name"
 echo "  Status: active"
-echo "  Expires: $expires_at (30 days from now)"
+echo "  Spec Version: oap/1.0"
+if [ "$never_expires" = "true" ]; then
+    echo "  Expiration: Never expires"
+else
+    echo "  Expires: $expires_at"
+fi
 echo
 echo "🔐 Capabilities Enabled:"
 [ "$pr_cap" = "y" ] || [ "$pr_cap" = "Y" ] && echo "  • Create and merge pull requests"
@@ -212,12 +275,14 @@ echo
 echo "📝 Next Steps:"
 echo "  1. Review and customize limits:"
 echo "     vim $PASSPORT_FILE"
-echo "  2. Test verification:"
-echo "     aport-verify-passport.sh"
+echo "  2. Test policy enforcement:"
+echo "     aport-guardrail.sh git.create_pr '{\"repo\":\"test\",\"files_changed\":10}'"
 echo "  3. View status:"
 echo "     aport-status.sh"
 echo "  4. Add to AGENTS.md:"
-echo "     cat AGENTS.md.example >> ~/.openclaw/AGENTS.md"
+echo "     cat docs/AGENTS.md.example >> ~/.openclaw/AGENTS.md"
 echo
-echo "💡 Tip: Passport expires in 30 days. Renew with: aport-renew-passport.sh"
+if [ "$never_expires" != "true" ]; then
+    echo "💡 Tip: Passport expires in $expire_days days. Renew before expiration."
+fi
 echo
