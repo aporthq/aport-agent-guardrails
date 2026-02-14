@@ -183,16 +183,16 @@ fi
 # Remove trailing comma
 limits_json="${limits_json%,}}"
 
-# Build metadata object
-metadata_json=$(cat <<METADATA_EOF
-{
-  "name": $(echo "$agent_name" | jq -R .),
-  "description": $(echo "$agent_description" | jq -R .),
-  "version": "1.0.0",
-  "created_by": "aport-create-passport.sh"
-}
-METADATA_EOF
-)
+# Build metadata object using jq
+metadata_json=$(jq -n \
+  --arg name "$agent_name" \
+  --arg desc "$agent_description" \
+  '{
+    name: $name,
+    description: $desc,
+    version: "1.0.0",
+    created_by: "aport-create-passport.sh"
+  }')
 
 # Create passport JSON (OAP v1.0 compliant)
 current_timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
