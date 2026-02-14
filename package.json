@@ -1,0 +1,41 @@
+{
+  "name": "@aport/agent-guardrails",
+  "version": "0.1.0",
+  "description": "Policy enforcement guardrails for OpenClaw-compatible agent frameworks",
+  "bin": {
+    "aport": "./bin/aport-guardrail.sh"
+  },
+  "scripts": {
+    "test": "make test",
+    "install": "make install"
+  },
+  "keywords": [
+    "openclaw",
+    "ironclaw",
+    "aport",
+    "agent",
+    "security",
+    "authorization",
+    "policy",
+    "guardrails",
+    "pre-action",
+    "ai-agent"
+  ],
+  "author": "APort Inc.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aporthq/aport-agent-guardrails.git"
+  },
+  "files": [
+    "bin/",
+    "templates/",
+    "policies/",
+    "docs/",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

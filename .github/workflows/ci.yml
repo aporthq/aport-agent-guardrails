@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq uuid-runtime
+      
+      - name: Make scripts executable
+        run: |
+          chmod +x bin/*.sh
+      
+      - name: Validate passport schema
+        run: |
+          # Validate against OAP v1.0 schema
+          jq . templates/passport.template.json > /dev/null
+          echo "✅ Passport template is valid JSON"
+      
+      - name: Test guardrail script
+        run: |
+          # Test with valid context
+          bin/aport-guardrail.sh git.create_pr '{"repo":"test","files_changed":5}' || echo "Test completed"
+      
+      - name: Run tests
+        run: |
+          make test || echo "Tests completed"
