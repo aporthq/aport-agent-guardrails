@@ -50,8 +50,10 @@ if ! command -v jq &> /dev/null; then
 fi
 
 echo "   ID: $(jq -r '.passport_id // "unknown"' $PASSPORT_FILE)"
-echo "   Owner: $(jq -r '.owner_id // "unknown"' $PASSPORT_FILE)"
-echo "   Type: $(jq -r '.owner_type // "unknown"' $PASSPORT_FILE)"
+echo "   Kind: $(jq -r '.kind // "unknown"' $PASSPORT_FILE)"
+echo "   Owner: $(jq -r '.owner_id // "unknown"' $PASSPORT_FILE) ($(jq -r '.owner_type // "unknown"' $PASSPORT_FILE))"
+echo "   Spec Version: $(jq -r '.spec_version // "unknown"' $PASSPORT_FILE)"
+echo "   Assurance Level: $(jq -r '.assurance_level // "unknown"' $PASSPORT_FILE)"
 
 # Status with color
 status=$(jq -r '.status // "unknown"' $PASSPORT_FILE)
@@ -65,11 +67,21 @@ else
     echo "   Status: ⚠️  $status"
 fi
 
-# Expiration with warning
-expires_at=$(jq -r '.expires_at // "unknown"' $PASSPORT_FILE)
-echo "   Expires: $expires_at"
+# Display agent metadata if available
+agent_name=$(jq -r '.metadata.name // ""' $PASSPORT_FILE)
+if [ -n "$agent_name" ] && [ "$agent_name" != "null" ]; then
+    echo "   Agent Name: $agent_name"
+fi
 
-if [ "$expires_at" != "unknown" ] && [ "$expires_at" != "null" ]; then
+# Expiration with warning
+never_expires=$(jq -r '.never_expires // "false"' $PASSPORT_FILE)
+expires_at=$(jq -r '.expires_at // "null"' $PASSPORT_FILE)
+
+if [ "$never_expires" = "true" ]; then
+    echo "   Expires: Never"
+elif [ "$expires_at" != "null" ] && [ "$expires_at" != "unknown" ]; then
+    echo "   Expires: $expires_at"
+
     # Calculate days until expiration
     if date -v+1d &> /dev/null 2>&1; then
         # BSD date (macOS)
@@ -83,12 +95,14 @@ if [ "$expires_at" != "unknown" ] && [ "$expires_at" != "null" ]; then
     days_left=$(( ($expires_ts - $now_ts) / 86400 ))
 
     if [ $days_left -le 0 ]; then
-        echo "   ⚠️  EXPIRED $((days_left * -1)) days ago - renew with: aport-renew-passport.sh"
+        echo "   ⚠️  EXPIRED $((days_left * -1)) days ago"
     elif [ $days_left -le 7 ]; then
         echo "   ⚠️  Expires in $days_left days - renew soon!"
     else
         echo "   ✅ $days_left days until expiration"
     fi
+else
+    echo "   Expires: Not set"
 fi
 
 echo
@@ -138,12 +152,12 @@ done
 
 echo
 
-# Latest decision
+# Latest decision (OAP v1.0 format)
 if [ -f "$DECISION_FILE" ]; then
     echo "🔍 Latest Decision"
     allow=$(jq -r '.allow // "unknown"' $DECISION_FILE)
     decision_id=$(jq -r '.decision_id // "unknown"' $DECISION_FILE)
-    reason=$(jq -r '.reason // "unknown"' $DECISION_FILE)
+    policy_id=$(jq -r '.policy_id // "unknown"' $DECISION_FILE)
 
     if [ "$allow" = "true" ]; then
         echo "   ✅ ALLOW"
@@ -151,7 +165,30 @@ if [ -f "$DECISION_FILE" ]; then
         echo "   ❌ DENY"
     fi
     echo "   Decision ID: $decision_id"
-    [ "$reason" != "unknown" ] && echo "   Reason: $reason"
+    echo "   Policy ID: $policy_id"
+
+    # Display OAP v1.0 reasons array
+    reasons_count=$(jq '.reasons | length' $DECISION_FILE 2>/dev/null || echo 0)
+    if [ "$reasons_count" -gt 0 ]; then
+        echo "   Reasons:"
+        jq -r '.reasons[] | "     - [\(.code)] \(.message)"' $DECISION_FILE
+    fi
+
+    # Display issued_at and expires_at
+    issued_at=$(jq -r '.issued_at // "unknown"' $DECISION_FILE)
+    expires_at_decision=$(jq -r '.expires_at // "unknown"' $DECISION_FILE)
+    if [ "$issued_at" != "unknown" ]; then
+        echo "   Issued: $issued_at"
+    fi
+    if [ "$expires_at_decision" != "unknown" ]; then
+        echo "   Expires: $expires_at_decision"
+    fi
+
+    # Display signature info
+    kid=$(jq -r '.kid // "unknown"' $DECISION_FILE)
+    if [ "$kid" != "unknown" ]; then
+        echo "   Key ID: $kid"
+    fi
     echo
 fi
 
@@ -201,8 +238,7 @@ fi
 echo "💡 Useful Commands"
 echo "   • View full audit log: tail -f $AUDIT_LOG"
 echo "   • Edit passport: vim $PASSPORT_FILE"
-echo "   • Verify passport: aport-verify-passport.sh"
-echo "   • Renew passport: aport-renew-passport.sh"
+echo "   • Test policy: aport-guardrail.sh <tool_name> '<context_json>'"
 echo "   • Activate kill switch: touch $KILL_SWITCH"
 echo "   • Deactivate kill switch: rm $KILL_SWITCH"
 echo
