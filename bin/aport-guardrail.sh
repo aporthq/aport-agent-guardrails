@@ -18,19 +18,37 @@ LOCAL_POLICIES_DIR="$SCRIPT_DIR/local-overrides/policies"
 TOOL_NAME="$1"
 CONTEXT_JSON="${2:-{}}"
 
+# DEBUG: Print received arguments
+if [ -n "$DEBUG_APORT" ]; then
+    echo "DEBUG: TOOL_NAME=$TOOL_NAME" >&2
+    echo "DEBUG: CONTEXT_JSON=$CONTEXT_JSON" >&2
+    echo "DEBUG: CONTEXT length=${#CONTEXT_JSON}" >&2
+fi
+
 # Ensure audit log directory exists
 mkdir -p "$(dirname "$AUDIT_LOG")"
 
 # Function to load policy from upstream or local-overrides
 load_policy() {
-    local policy_id="$1"
+    local policy_base="$1"
     local policy_file=""
 
-    # Try official policy from submodule first
-    if [ -f "$POLICIES_DIR/${policy_id}.v1/policy.json" ]; then
-        policy_file="$POLICIES_DIR/${policy_id}.v1/policy.json"
-    elif [ -f "$LOCAL_POLICIES_DIR/${policy_id}.v1.json" ]; then
-        policy_file="$LOCAL_POLICIES_DIR/${policy_id}.v1.json"
+    # Try official policy from submodule first (with .v1, .v2, etc)
+    for version_dir in "$POLICIES_DIR/${policy_base}".v*/; do
+        if [ -f "${version_dir}policy.json" ]; then
+            policy_file="${version_dir}policy.json"
+            break
+        fi
+    done
+
+    # Fallback to local overrides
+    if [ -z "$policy_file" ] || [ ! -f "$policy_file" ]; then
+        for local_file in "$LOCAL_POLICIES_DIR/${policy_base}".v*.json; do
+            if [ -f "$local_file" ]; then
+                policy_file="$local_file"
+                break
+            fi
+        done
     fi
 
     if [ -n "$policy_file" ] && [ -f "$policy_file" ]; then
@@ -159,19 +177,24 @@ esac
 # Load policy definition
 POLICY_DEF=$(load_policy "$(echo "$POLICY_ID" | sed 's/\.v[0-9]*$//')")
 
-# Check if capability exists in passport
-HAS_CAPABILITY=false
-CAPABILITIES=$(echo "$PASSPORT" | jq -r '.capabilities[]?.id // empty')
-REQUIRED_CAP=$(echo "$POLICY_ID" | sed 's/\.v[0-9]*$//')
-for cap in $CAPABILITIES; do
-    if [[ "$cap" == "$REQUIRED_CAP"* ]] || [[ "$cap" == *"$REQUIRED_CAP"* ]]; then
-        HAS_CAPABILITY=true
-        break
-    fi
-done
+# Check if all required capabilities exist in passport
+REQUIRED_CAPS=$(echo "$POLICY_DEF" | jq -r '.requires_capabilities[]? // empty')
+PASSPORT_CAPS=$(echo "$PASSPORT" | jq -r '.capabilities[]?.id // empty')
 
-if [ "$HAS_CAPABILITY" = false ]; then
-    write_decision false "$POLICY_ID" "oap.unknown_capability" "Passport does not have required capability for policy '$POLICY_ID'"
+# If policy has required capabilities, check them all
+if [ -n "$REQUIRED_CAPS" ]; then
+    for req_cap in $REQUIRED_CAPS; do
+        HAS_CAP=false
+        for passport_cap in $PASSPORT_CAPS; do
+            if [ "$passport_cap" = "$req_cap" ]; then
+                HAS_CAP=true
+                break
+            fi
+        done
+        if [ "$HAS_CAP" = false ]; then
+            write_decision false "$POLICY_ID" "oap.unknown_capability" "Passport does not have required capability '$req_cap' for policy '$POLICY_ID'"
+        fi
+    done
 fi
 
 # Get policy limits from passport
