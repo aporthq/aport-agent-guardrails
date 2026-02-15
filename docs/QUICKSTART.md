@@ -1,39 +1,69 @@
 # Quick Start Guide
-**Get Started with APort Agent Guardrails in 5 Minutes**
+**Get started with APort Agent Guardrails in 5 minutes**
+
+---
+
+## Recommended: interactive OpenClaw setup (one command)
+
+From the repo root:
+
+```bash
+make openclaw-setup
+```
+
+Or:
+
+```bash
+./bin/openclaw
+```
+
+The script will:
+
+1. **Prompt for your OpenClaw config directory** — default `~/.openclaw`; you can use a different path (e.g. your project’s `.openclaw`).
+2. **Run the passport wizard** — guided by the OAP spec (`external/aport-spec`); you choose capabilities and limits.
+3. **Install wrappers** in your config dir (`.skills/`) so OpenClaw can call the guardrail with the correct passport/decision paths.
+4. **Update your passport** — the installer sets `allowed_commands: ["*"]` automatically (no manual editing needed); then runs a self-check and exits with a clear error if the check is denied.
+5. **Install the APort skill** in `~/.openclaw/skills/aport-guardrail/` so OpenClaw loads it; the agent knows to call the guardrail before effectful actions.
+6. **Print the tool → policy mapping** so you see how tool names map to policy packs in `external/aport-policies`. Full table: [TOOL_POLICY_MAPPING.md](TOOL_POLICY_MAPPING.md). If you have a workspace, the script saves an AGENTS.md snippet you can merge.
+
+Then test with the path it showed (e.g. `~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"ls"}'`).
+
+For **OpenClaw + API** (self-hosted or cloud), see [OpenClaw Local Integration](OPENCLAW_LOCAL_INTEGRATION.md).
+
+---
+
+## Copy-paste (no wizard)
+
+If you prefer a single block with no prompts (e.g. for automation or a different config dir):
+
+```bash
+git clone https://github.com/aporthq/aport-agent-guardrails.git && cd aport-agent-guardrails
+mkdir -p ~/.openclaw
+# Create minimal passport (see README for full JSON)
+make install
+~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"ls"}'
+```
+
+Note: `make install` copies scripts to `~/.openclaw/.skills`; the guardrail will look for policies in the **repo** (so run from repo or use `./bin/openclaw` for path-aware wrappers that point to the repo).
 
 ---
 
 ## Prerequisites
 
-- ✅ OpenClaw installed (or any compatible agent framework)
-- ✅ `jq` installed (`brew install jq` on macOS)
-- ✅ bash shell
+- `jq` (`brew install jq` on macOS)
+- Bash shell
 
 ---
 
-## Step 1: Install APort Agent Guardrails (30 seconds)
+## Step 1: Install (if not using openclaw script)
+
+From the repo root:
 
 ```bash
-cd /Users/uchi/Downloads/projects/aport-agent-guardrails
 make install
 ```
 
-**What this does:**
-- Copies CLI scripts to `~/.openclaw/.skills/`
-- Makes them executable
-- Ready to use!
-
-**Verify installation:**
-```bash
-ls -la ~/.openclaw/.skills/aport-*.sh
-```
-
-You should see:
-```
-aport-create-passport.sh
-aport-guardrail.sh
-aport-status.sh
-```
+This copies scripts to `~/.openclaw/.skills/`. For a **configurable path** and wrappers that always use this repo’s policies, use `./bin/openclaw` instead.
 
 ---
 
@@ -118,6 +148,8 @@ You should see:
 
 ## Step 4: Test Policy Evaluation (1 minute)
 
+Scripts exit **0** = allow, **1** = deny. The decision is written to `~/.openclaw/decision.json` (not printed to stdout).
+
 ### Test 1: Allow a small PR (should PASS)
 
 ```bash
@@ -127,16 +159,7 @@ You should see:
   "base_branch": "main",
   "files_changed": 10
 }'
-```
-
-**Expected output:**
-```json
-{
-  "allow": true,
-  "decision_id": "550e8400-...",
-  "policy": "code.repository.merge",
-  "tool": "git.create_pr"
-}
+echo "Exit: $? (0 = ALLOW)"
 ```
 
 **Check decision:**
@@ -159,43 +182,20 @@ tail -1 ~/.openclaw/audit.log
   "branch": "feature/large",
   "files_changed": 1000
 }'
+echo "Exit: $? (1 = DENY)"
+cat ~/.openclaw/decision.json | jq '.allow, .reasons'
 ```
 
-**Expected output:**
-```json
-{
-  "allow": false,
-  "decision_id": "660f9500-...",
-  "reason": "limit_exceeded",
-  "message": "PR size 1000 exceeds limit of 500 files"
-}
-```
-
-**Check decision:**
-```bash
-cat ~/.openclaw/decision.json | jq .
-```
-
-You should see `"allow": false` with deny reason.
+You should see `"allow": false` and a deny reason.
 
 ---
 
 ### Test 3: Block dangerous command (should FAIL)
 
 ```bash
-~/.openclaw/.skills/aport-guardrail.sh exec.run '{
-  "command": "rm -rf /tmp/test"
-}'
-```
-
-**Expected output:**
-```json
-{
-  "allow": false,
-  "decision_id": "770g0600-...",
-  "reason": "blocked_pattern",
-  "message": "Command contains blocked pattern: rm -rf"
-}
+~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"rm -rf /tmp/test"}'
+echo "Exit: $? (1 = DENY)"
+cat ~/.openclaw/decision.json | jq '.allow, .reasons[0].message'
 ```
 
 ---
@@ -209,21 +209,10 @@ touch ~/.openclaw/kill-switch
 
 ### Try any action (should be blocked):
 ```bash
-~/.openclaw/.skills/aport-guardrail.sh git.create_pr '{
-  "repo": "test",
-  "files_changed": 1
-}'
+~/.openclaw/.skills/aport-guardrail.sh git.create_pr '{"repo": "test", "files_changed": 1}'
+cat ~/.openclaw/decision.json | jq '.allow, .reasons[0].code'
 ```
-
-**Expected output:**
-```json
-{
-  "allow": false,
-  "decision_id": "880h0700-...",
-  "reason": "kill_switch_active",
-  "message": "Global kill switch is active. Remove /Users/uchi/.openclaw/kill-switch to resume."
-}
-```
+You should see `allow: false` and a kill_switch reason.
 
 ### Deactivate kill switch:
 ```bash
@@ -286,10 +275,9 @@ Should see `"allow": true` now.
 find ~ -name "AGENTS.md" -path "*/.openclaw/*" | head -1
 ```
 
-**2. Add APort section:**
+**2. Add APort section:** From the repo root:
 ```bash
-# Copy template
-cat /Users/uchi/Downloads/projects/aport-agent-guardrails/docs/AGENTS.md.example >> ~/.openclaw/AGENTS.md
+cat docs/AGENTS.md.example >> ~/.openclaw/AGENTS.md
 ```
 
 **3. Verify:**
@@ -397,6 +385,19 @@ chmod +x ~/.openclaw/.skills/aport-*.sh
 ~/.openclaw/.skills/aport-create-passport.sh
 ```
 
+### Problem: "Command must be in allowed list" (oap.command_not_allowed)
+The guardrail is blocking **exec** because the command (e.g. `mkdir`, `ls`) is not in your passport’s **allowed_commands**. OpenClaw uses **exec** for both guardrail invocations and real shell commands; we check real commands against the passport.
+
+**Fix:** The installer sets `allowed_commands: ["*"]` by default; this usually appears only if you intentionally tightened the allowlist. Re-add the commands you need to `limits.system.command.execute.allowed_commands`, or set `["*"]` (blocked patterns still apply). Alternatively, set **mapExecToPolicy: false** in the plugin config so exec is never checked (no command allowlist; use only if you rely on other controls). See [OPENCLAW_TOOLS_AND_POLICIES.md](OPENCLAW_TOOLS_AND_POLICIES.md).
+
+### Problem: "Missing required capabilities: messaging.send"
+If you see `oap.unknown_capability: Missing required capabilities: messaging.send`, your passport was created with the old capability/limits keys. Align with APort:
+
+- In `capabilities`, use `"id": "messaging.send"` (not `messaging.message.send`).
+- In `limits`, use the key `"messaging"` (not `messaging.message.send`) for `msgs_per_min`, `msgs_per_day`, etc.
+
+Re-run the passport wizard to create a new passport, or edit `~/.openclaw/passport.json` and fix those two places.
+
 ### Problem: "All actions denied"
 ```bash
 # Check passport status
@@ -445,10 +446,10 @@ chmod +x ~/.openclaw/.skills/aport-guardrail.sh
 
 ## Resources
 
-- [Full Documentation](APORT_OPENCLAW_INTEGRATION_PROPOSAL.md)
-- [Policy Pack Guide](POLICY_PACK_GUIDE.md)
-- [Upgrade to Cloud](UPGRADE_TO_CLOUD.md)
-- [Contributing Guidelines](../CONTRIBUTING.md)
+- [OpenClaw Local Integration](OPENCLAW_LOCAL_INTEGRATION.md) — Full OpenClaw + API setup
+- [QuickStart: OpenClaw Plugin](QUICKSTART_OPENCLAW_PLUGIN.md) — Plugin setup
+- [Tool / Policy Mapping](TOOL_POLICY_MAPPING.md)
+- [Contributing](../CONTRIBUTING.md)
 
 ---
 
@@ -456,7 +457,7 @@ chmod +x ~/.openclaw/.skills/aport-guardrail.sh
 
 - **GitHub Issues:** https://github.com/aporthq/aport-agent-guardrails/issues
 - **Discussions:** https://github.com/aporthq/aport-agent-guardrails/discussions
-- **Email:** support@aport.io
+- **Email:** uchi@aport.io
 
 ---
 

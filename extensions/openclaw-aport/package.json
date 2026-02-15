@@ -1,0 +1,36 @@
+{
+  "name": "@aport/openclaw-aport",
+  "version": "1.0.0",
+  "description": "OpenClaw plugin for deterministic pre-action authorization via APort guardrails",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "aport",
+    "security",
+    "guardrails",
+    "policy-enforcement"
+  ],
+  "author": "APort Technologies Inc.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aporthq/aport-agent-guardrails.git",
+    "directory": "extensions/openclaw-aport"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "openclaw-aport"
+    ]
+  }
+}

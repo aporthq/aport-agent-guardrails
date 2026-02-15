@@ -1,0 +1,16 @@
+#!/bin/bash
+# Pre-push hook: ensure submodules are initialized and updated to latest before pushing.
+# Install: make install-git-hooks  or  cp scripts/git-hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$REPO_ROOT" ]; then
+    exit 0
+fi
+
+# Only run if we have submodules
+if [ ! -f "$REPO_ROOT/.gitmodules" ]; then
+    exit 0
+fi
+
+"$REPO_ROOT/scripts/ensure-submodules-updated.sh" --update-remote
+exit $?

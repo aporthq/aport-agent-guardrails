@@ -1,8 +1,14 @@
 #!/bin/bash
 # aport-create-passport.sh
-# Interactive passport creation wizard for OpenClaw + APort integration
+# Interactive passport creation wizard (OAP v1.0).
+# Use for any framework; for OpenClaw with a custom config directory, run ./bin/openclaw instead.
 #
 # Usage: ./aport-create-passport.sh [--output FILE]
+#   --output FILE   Write passport to FILE (e.g. /path/to/my-openclaw/passport.json)
+#
+# When OPENCLAW_CONFIG_DIR is set (e.g. by bin/openclaw), the wizard reads defaults
+# from OPENCLAW_CONFIG_DIR/workspace/IDENTITY.md (Name, Vibe/description) and from
+# git/gh for email.
 
 set -e
 
@@ -12,45 +18,105 @@ if [ "$1" = "--output" ] && [ -n "$2" ]; then
     PASSPORT_FILE="$2"
 fi
 
-echo "🛂 APort Passport Creation Wizard"
-echo "=================================="
-echo
-echo "This wizard will create an Open Agent Passport (OAP v1.0) for your OpenClaw agent."
-echo "The passport defines what your agent can do and operational limits."
-echo
+# Repo root (for external/aport-spec submodule)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SPEC_SCHEMA="$SCRIPT_DIR/external/aport-spec/oap/passport-schema.json"
+# Defaults from OAP spec submodule. Local creation has no KYC/assurance proof → L0.
+# (L2+ implies KYC completed; APort cloud sets assurance from user/org when created via API.)
+if [ -f "$SPEC_SCHEMA" ] && command -v jq &>/dev/null; then
+    DEFAULT_SPEC_VERSION=$(jq -r '.properties.spec_version.const // "oap/1.0"' "$SPEC_SCHEMA")
+else
+    DEFAULT_SPEC_VERSION="oap/1.0"
+fi
+DEFAULT_ASSURANCE_LEVEL="L0"
+
+# Config dir: from env (set by bin/openclaw) or dirname of passport file
+CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-$(dirname "$PASSPORT_FILE")}"
+CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+IDENTITY_FILE="$CONFIG_DIR/workspace/IDENTITY.md"
+
+# --- Smart defaults ---
+get_default_email() {
+    local e
+    e=$(git config user.email 2>/dev/null)
+    if [ -n "$e" ]; then
+        echo "$e"
+        return
+    fi
+    if command -v gh &>/dev/null; then
+        e=$(gh api user --jq '.email // .login + "@users.noreply.github.com"' 2>/dev/null)
+        [ -n "$e" ] && echo "$e"
+    fi
+}
+
+get_identity_name() {
+    [ ! -f "$IDENTITY_FILE" ] && return
+    # OpenClaw IDENTITY.md: "Name: ..." or "**Name**: ..."
+    grep -iE '^\s*\*\{0,2\}Name\*\{0,2\}\s*:' "$IDENTITY_FILE" 2>/dev/null | head -1 | sed 's/^[^:]*:[[:space:]]*//; s/^[[:space:]]*//; s/[[:space:]]*$//' | tr -d '\n' | head -c 200
+}
+
+get_identity_description() {
+    [ ! -f "$IDENTITY_FILE" ] && return
+    # Prefer Vibe: or Description: line (case-insensitive)
+    local v
+    v=$(grep -iE '^\s*\*\{0,2\}(Vibe|Description)\*\{0,2\}\s*:' "$IDENTITY_FILE" 2>/dev/null | head -1 | sed 's/^[^:]*:[[:space:]]*//; s/^[[:space:]]*//; s/[[:space:]]*$//' | tr -d '\n')
+    if [ -n "$v" ]; then
+        echo "$v" | head -c 300
+        return
+    fi
+    awk '/^#/ { next } /^[[:space:]]*$/ { next } { print; exit }' "$IDENTITY_FILE" 2>/dev/null | head -c 300
+}
+
+DEFAULT_EMAIL=$(get_default_email)
+DEFAULT_EMAIL=${DEFAULT_EMAIL:-"user@example.com"}
+DEFAULT_OWNER_TYPE="user"
+DEFAULT_AGENT_NAME=$(get_identity_name)
+DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"OpenClaw Agent"}
+DEFAULT_AGENT_DESC=$(get_identity_description)
+DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
+
+echo ""
+echo "  🛂 APort Passport Creation Wizard"
+echo "  ══════════════════════════════════"
+echo ""
+echo "  Creates an Open Agent Passport (OAP v1.0) for your agent."
+echo "  Passport file: $PASSPORT_FILE"
+echo ""
 
 # Check if passport already exists
 if [ -f "$PASSPORT_FILE" ]; then
-    read -p "Passport already exists at $PASSPORT_FILE. Overwrite? [y/N]: " overwrite
+    read -p "  Passport already exists. Overwrite? [y/N]: " overwrite
     if [ "$overwrite" != "y" ] && [ "$overwrite" != "Y" ]; then
-        echo "Aborting. Use --output to specify a different file."
+        echo "  Aborting. Use --output to specify a different file."
         exit 1
     fi
+    echo ""
 fi
 
 # Collect user info
-echo "📋 Owner Information"
-echo "--------------------"
-read -p "Your email or ID: " owner_id
-owner_id=${owner_id:-"user@example.com"}
+echo "  📋 Owner & agent"
+echo "  ─────────────────"
+echo "  (Press Enter to use the default when shown in brackets.)"
+echo ""
+read -p "  Your email or ID [$DEFAULT_EMAIL]: " owner_id
+owner_id=${owner_id:-"$DEFAULT_EMAIL"}
 
-read -p "Owner type (user/org) [user]: " owner_type
-owner_type=${owner_type:-"user"}
+read -p "  Owner type (user/org) [$DEFAULT_OWNER_TYPE]: " owner_type
+owner_type=${owner_type:-"$DEFAULT_OWNER_TYPE"}
 
-read -p "Agent name [OpenClaw Agent]: " agent_name
-agent_name=${agent_name:-"OpenClaw Agent"}
+read -p "  Agent name [$DEFAULT_AGENT_NAME]: " agent_name
+agent_name=${agent_name:-"$DEFAULT_AGENT_NAME"}
 
-read -p "Agent description: " agent_description
-agent_description=${agent_description:-"Local OpenClaw AI agent with APort guardrails"}
+read -p "  Agent description [$DEFAULT_AGENT_DESC]: " agent_description
+agent_description=${agent_description:-"$DEFAULT_AGENT_DESC"}
 
-echo
+echo ""
 
 # Choose capabilities
-echo "🔐 Select Capabilities"
-echo "----------------------"
-echo "Choose what your agent can do (y/n for each):"
-echo
-
+echo "  🔐 Capabilities"
+echo "  ───────────────"
+echo "  Choose what your agent can do (y/n). Defaults: PRs and exec = yes, messages and data = no."
+echo ""
 read -p "  • Create and merge pull requests? [Y/n]: " pr_cap
 pr_cap=${pr_cap:-y}
 
@@ -63,38 +129,40 @@ msg_cap=${msg_cap:-n}
 read -p "  • Export data (database, files, etc.)? [y/N]: " data_cap
 data_cap=${data_cap:-n}
 
-echo
+echo ""
 
 # Configure limits
-echo "⚙️  Configure Limits"
-echo "--------------------"
+echo "  ⚙️  Limits"
+echo "  ─────────"
 
 if [ "$pr_cap" = "y" ] || [ "$pr_cap" = "Y" ]; then
-    read -p "Max PR size (files) [500]: " max_pr_size
+    read -p "  Max PR size (files) [500]: " max_pr_size
     max_pr_size=${max_pr_size:-500}
 
-    read -p "Max PRs per day [10]: " max_prs_per_day
+    read -p "  Max PRs per day [10]: " max_prs_per_day
     max_prs_per_day=${max_prs_per_day:-10}
 
-    read -p "Allowed repos (comma-separated, * for all) [*]: " allowed_repos_input
+    read -p "  Allowed repos (comma-separated, * for all) [*]: " allowed_repos_input
     allowed_repos_input=${allowed_repos_input:-"*"}
 fi
 
 if [ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ]; then
-    echo "  Default allowed commands: npm, yarn, git, node, pnpm"
-    echo "  Default blocked patterns: rm -rf, sudo, chmod 777"
+    echo "  Shell commands: default is allow any (*); blocked patterns (rm -rf, sudo, etc.) still apply."
+    echo "  Press Enter or type * for allow any; type 'list' for a fixed list (ls, mkdir, npm, …)."
+    read -p "  [Enter or *=allow any / list=fixed list]: " exec_allow_scope
+    exec_allow_scope=${exec_allow_scope:-*}
 fi
 
 if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then
-    read -p "Max messages per day [100]: " max_msgs_per_day
+    read -p "  Max messages per day [100]: " max_msgs_per_day
     max_msgs_per_day=${max_msgs_per_day:-100}
 fi
 
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
-    read -p "Max export rows [10000]: " max_export_rows
+    read -p "  Max export rows [10000]: " max_export_rows
     max_export_rows=${max_export_rows:-10000}
 
-    read -p "Allow PII export? [y/N]: " allow_pii
+    read -p "  Allow PII export? [y/N]: " allow_pii
     allow_pii=${allow_pii:-n}
     if [ "$allow_pii" = "y" ] || [ "$allow_pii" = "Y" ]; then
         allow_pii_bool="true"
@@ -103,7 +171,7 @@ if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
     fi
 fi
 
-echo
+echo ""
 
 # Generate passport ID
 if command -v uuidgen &> /dev/null; then
@@ -113,11 +181,13 @@ else
 fi
 
 # Ask about expiration
-read -p "Should this passport expire? [y/N]: " should_expire
+echo "  📅 Expiration"
+echo "  ─────────────"
+read -p "  Should this passport expire? [y/N]: " should_expire
 should_expire=${should_expire:-n}
 
 if [ "$should_expire" = "y" ] || [ "$should_expire" = "Y" ]; then
-    read -p "Days until expiration [30]: " expire_days
+    read -p "  Days until expiration [30]: " expire_days
     expire_days=${expire_days:-30}
 
     # Calculate expiration date
@@ -143,8 +213,9 @@ fi
 if [ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ]; then
     capabilities_json="$capabilities_json{\"id\": \"system.command.execute\"},"
 fi
+# Capability IDs must match agent-passport policy requires_capabilities (e.g. messaging.message.send.v1 → messaging.send)
 if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then
-    capabilities_json="$capabilities_json{\"id\": \"messaging.message.send\"},"
+    capabilities_json="$capabilities_json{\"id\": \"messaging.send\"},"
 fi
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
     capabilities_json="$capabilities_json{\"id\": \"data.export\"},"
@@ -169,11 +240,18 @@ if [ "$pr_cap" = "y" ] || [ "$pr_cap" = "Y" ]; then
 fi
 
 if [ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ]; then
-    limits_json="$limits_json\"system.command.execute\": {\"allowed_commands\": [\"npm\", \"yarn\", \"git\", \"node\", \"pnpm\", \"bash\", \"sh\"], \"blocked_patterns\": [\"rm -rf\", \"sudo\", \"chmod 777\", \"dd if=\", \"mkfs\"], \"max_execution_time\": 300},"
+    exec_allow_lower=$(echo "$exec_allow_scope" | tr 'A-Z' 'a-z')
+    if [ "$exec_allow_lower" = "list" ]; then
+        allowed_commands_json="[\"npm\", \"yarn\", \"git\", \"node\", \"pnpm\", \"npx\", \"bash\", \"sh\", \"mkdir\", \"cp\", \"ls\", \"cat\", \"echo\", \"pwd\", \"mv\", \"touch\", \"which\", \"open\"]"
+    else
+        # default: allow any (*); blocked_patterns still apply
+        allowed_commands_json="[\"*\"]"
+    fi
+    limits_json="$limits_json\"system.command.execute\": {\"allowed_commands\": $allowed_commands_json, \"blocked_patterns\": [\"rm -rf\", \"sudo\", \"chmod 777\", \"dd if=\", \"mkfs\"], \"max_execution_time\": 300},"
 fi
 
 if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then
-    limits_json="$limits_json\"messaging.message.send\": {\"msgs_per_min\": 5, \"msgs_per_day\": $max_msgs_per_day, \"allowed_recipients\": [\"*\"], \"approval_required\": false},"
+    limits_json="$limits_json\"messaging\": {\"msgs_per_min\": 5, \"msgs_per_day\": $max_msgs_per_day, \"allowed_recipients\": [\"*\"], \"approval_required\": false},"
 fi
 
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
@@ -197,16 +275,18 @@ metadata_json=$(jq -n \
 # Create passport JSON (OAP v1.0 compliant)
 current_timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+# API expects both agent_id and owner_id; use passport_id as agent_id for local passports
 if [ "$never_expires" = "true" ]; then
-    # Passport without expiration
+    # Passport without expiration (assurance_level and spec_version from external/aport-spec)
     cat > "$PASSPORT_FILE.tmp" <<EOF
 {
   "passport_id": "$passport_id",
+  "agent_id": "$passport_id",
   "kind": "template",
-  "spec_version": "oap/1.0",
+  "spec_version": "$DEFAULT_SPEC_VERSION",
   "owner_id": "$owner_id",
   "owner_type": "$owner_type",
-  "assurance_level": "L2",
+  "assurance_level": "$DEFAULT_ASSURANCE_LEVEL",
   "status": "active",
   "capabilities": $capabilities_json,
   "limits": $limits_json,
@@ -219,15 +299,16 @@ if [ "$never_expires" = "true" ]; then
 }
 EOF
 else
-    # Passport with expiration
+    # Passport with expiration (assurance_level and spec_version from external/aport-spec)
     cat > "$PASSPORT_FILE.tmp" <<EOF
 {
   "passport_id": "$passport_id",
+  "agent_id": "$passport_id",
   "kind": "template",
-  "spec_version": "oap/1.0",
+  "spec_version": "$DEFAULT_SPEC_VERSION",
   "owner_id": "$owner_id",
   "owner_type": "$owner_type",
-  "assurance_level": "L2",
+  "assurance_level": "$DEFAULT_ASSURANCE_LEVEL",
   "status": "active",
   "capabilities": $capabilities_json,
   "limits": $limits_json,
@@ -247,42 +328,38 @@ if command -v jq &> /dev/null; then
     rm "$PASSPORT_FILE.tmp"
 else
     mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"
-    echo "⚠️  Warning: jq not found. Passport JSON not pretty-printed."
+    echo "  ⚠️  jq not found; passport JSON not pretty-printed."
 fi
 
-echo "✅ Passport created successfully!"
-echo
-echo "📋 Passport Summary"
-echo "-------------------"
-echo "  Location: $PASSPORT_FILE"
-echo "  Passport ID: $passport_id"
-echo "  Owner: $owner_id ($owner_type)"
-echo "  Agent: $agent_name"
-echo "  Status: active"
-echo "  Spec Version: oap/1.0"
+echo ""
+echo "  ✅ Passport created successfully!"
+echo ""
+echo "  📋 Summary"
+echo "  ──────────"
+echo "    Location:    $PASSPORT_FILE"
+echo "    Passport ID: $passport_id"
+echo "    Owner:       $owner_id ($owner_type)"
+echo "    Agent:       $agent_name"
+echo "    Status:      active"
+echo "    Spec:        oap/1.0"
 if [ "$never_expires" = "true" ]; then
-    echo "  Expiration: Never expires"
+    echo "    Expiration:  Never"
 else
-    echo "  Expires: $expires_at"
+    echo "    Expires:     $expires_at"
 fi
-echo
-echo "🔐 Capabilities Enabled:"
-[ "$pr_cap" = "y" ] || [ "$pr_cap" = "Y" ] && echo "  • Create and merge pull requests"
-[ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ] && echo "  • Execute system commands"
-[ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ] && echo "  • Send messages"
-[ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ] && echo "  • Export data"
-echo
-echo "📝 Next Steps:"
-echo "  1. Review and customize limits:"
-echo "     vim $PASSPORT_FILE"
-echo "  2. Test policy enforcement:"
-echo "     aport-guardrail.sh git.create_pr '{\"repo\":\"test\",\"files_changed\":10}'"
-echo "  3. View status:"
-echo "     aport-status.sh"
-echo "  4. Add to AGENTS.md:"
-echo "     cat docs/AGENTS.md.example >> ~/.openclaw/AGENTS.md"
-echo
+echo ""
+echo "  🔐 Capabilities:"
+[ "$pr_cap" = "y" ] || [ "$pr_cap" = "Y" ] && echo "    • Create and merge pull requests"
+[ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ] && echo "    • Execute system commands"
+[ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ] && echo "    • Send messages"
+[ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ] && echo "    • Export data"
+echo ""
+echo "  📝 Next steps:"
+echo "    • Review limits:  vim $PASSPORT_FILE"
+echo "    • Test guardrail: aport-guardrail.sh system.command.execute '{\"command\":\"node --version\"}'; echo \"Exit: \$? (0=ALLOW, 1=DENY)\""
+echo "    • View status:    aport-status.sh"
+echo ""
 if [ "$never_expires" != "true" ]; then
-    echo "💡 Tip: Passport expires in $expire_days days. Renew before expiration."
+    echo "  💡 Passport expires in $expire_days days. Renew before then."
 fi
-echo
+echo ""

@@ -1,0 +1,46 @@
+{
+  "id": "openclaw-aport",
+  "name": "APort Guardrails",
+  "description": "Deterministic pre-action authorization via APort policy enforcement. Registers before_tool_call to block disallowed tools.",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["local", "api"],
+        "default": "local",
+        "description": "local = guardrail script, api = APort API"
+      },
+      "passportFile": {
+        "type": "string",
+        "default": "~/.openclaw/passport.json",
+        "description": "Path to passport JSON"
+      },
+      "guardrailScript": {
+        "type": "string",
+        "default": "~/.openclaw/.skills/aport-guardrail-bash.sh",
+        "description": "Path to guardrail script (local mode)"
+      },
+      "apiUrl": {
+        "type": "string",
+        "description": "APort API base URL (api mode)"
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Optional. Prefer APORT_API_KEY env var; do not put ${APORT_API_KEY} in config (OpenClaw requires the var to exist)."
+      },
+      "failClosed": {
+        "type": "boolean",
+        "default": true,
+        "description": "Block tool on guardrail error when true"
+      },
+      "allowUnmappedTools": {
+        "type": "boolean",
+        "default": true,
+        "description": "If true (default), allow tools with no policy mapping (custom skills, ClawHub, etc.). If false, block unmapped tools (strict mode)."
+      }
+    }
+  }
+}
