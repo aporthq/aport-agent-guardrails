@@ -1,0 +1,14 @@
+{
+  "decision_id": "BFF82842-2DE4-4D00-8446-5C4FB9F0D0E0",
+  "policy_id": "code.repository.merge.v1",
+  "passport_id": "CDE60F4E-49DC-4D97-AC05-190E693C202C",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "allow": false,
+  "reasons": [{"code": "oap.repo_not_allowed", "message": "Repository 'a/b' is not in allowed list"}],
+  "issued_at": "2026-02-14T22:45:54Z",
+  "expires_at": "2026-02-14T23:45:54Z",
+  "passport_digest": "sha256:2aa72644705c10dfaed97a85b97245313d54ece3ab71bda1268cb2157a4677b5",
+  "signature": "ed25519:local-unsigned",
+  "kid": "oap:local:dev-key"
+}
