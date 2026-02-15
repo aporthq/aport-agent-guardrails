@@ -11,7 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          submodules: recursive
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -33,5 +35,8 @@ jobs:
           bin/aport-guardrail.sh git.create_pr '{"repo":"test","files_changed":5}' || echo "Test completed"
       
       - name: Run tests
+        run: make test
+
+      - name: Run plugin tests
         run: |
-          make test || echo "Tests completed"
+          cd extensions/openclaw-aport && npm test

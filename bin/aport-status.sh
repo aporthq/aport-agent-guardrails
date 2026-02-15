@@ -196,12 +196,14 @@ fi
 echo "📊 Recent Activity (last 10)"
 if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
     tail -10 "$AUDIT_LOG" | while IFS= read -r line; do
-        # Parse log line format: [timestamp] tool=X decision_id=Y allow=Z reason=W
-        timestamp=$(echo "$line" | grep -oP '\\[\\K[^\\]]+' || echo "unknown")
-        tool=$(echo "$line" | grep -oP 'tool=\\K[^ ]+' || echo "unknown")
-        allow=$(echo "$line" | grep -oP 'allow=\\K[^ ]+' || echo "unknown")
+        # Parse log line format: [timestamp] tool=X decision_id=Y allow=Z (portable: no grep -P)
+        timestamp=$(echo "$line" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
+        tool=$(echo "$line" | sed -n 's/.*tool=\([^ ]*\).*/\1/p')
+        allow=$(echo "$line" | sed -n 's/.*allow=\([^ ]*\).*/\1/p')
+        timestamp=${timestamp:-unknown}
+        tool=${tool:-unknown}
+        allow=${allow:-unknown}
 
-        # Format timestamp (take date and time, drop microseconds)
         short_time=$(echo "$timestamp" | cut -d' ' -f1-2 | cut -d'.' -f1)
 
         if [ "$allow" = "true" ]; then
@@ -216,18 +218,23 @@ fi
 
 echo
 
-# Usage statistics
+# Usage statistics (sanitize numbers for macOS/BSD)
 if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
     echo "📈 Statistics (all time)"
-    total_actions=$(wc -l < "$AUDIT_LOG" | xargs)
-    allowed=$(grep -c "allow=true" "$AUDIT_LOG" 2>/dev/null || echo 0)
-    denied=$(grep -c "allow=false" "$AUDIT_LOG" 2>/dev/null || echo 0)
+    total_actions=$(wc -l < "$AUDIT_LOG" | tr -d '[:space:]')
+    total_actions=${total_actions:-0}
+    allowed=$(grep -c "allow=true" "$AUDIT_LOG" 2>/dev/null || true)
+    allowed=$(echo "$allowed" | tr -d '[:space:]')
+    allowed=${allowed:-0}
+    denied=$(grep -c "allow=false" "$AUDIT_LOG" 2>/dev/null || true)
+    denied=$(echo "$denied" | tr -d '[:space:]')
+    denied=${denied:-0}
 
     echo "   Total actions: $total_actions"
     echo "   Allowed: $allowed"
     echo "   Denied: $denied"
 
-    if [ "$total_actions" -gt 0 ]; then
+    if [ -n "$total_actions" ] && [ "$total_actions" -gt 0 ] 2>/dev/null; then
         allow_pct=$(( 100 * allowed / total_actions ))
         echo "   Allow rate: ${allow_pct}%"
     fi

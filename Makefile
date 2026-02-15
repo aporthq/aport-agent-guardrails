@@ -1,4 +1,9 @@
-.PHONY: install test clean
+.PHONY: install test clean install-git-hooks openclaw-setup
+
+# Interactive OpenClaw setup: prompts for config path, runs passport wizard, installs wrappers
+openclaw-setup:
+	@chmod +x bin/openclaw 2>/dev/null || true
+	@./bin/openclaw
 
 install:
 	@echo "Installing APort Agent Guardrails..."
@@ -9,14 +14,18 @@ install:
 	@echo "Run 'aport-create-passport.sh' to create your first passport"
 
 test:
-	@echo "Running tests..."
-	@chmod +x bin/*.sh
-	@bash tests/test-passport-creation.sh || true
-	@bash tests/test-policy-evaluation.sh || true
-	@bash tests/test-kill-switch.sh || true
+	@echo "Running OAP v1 tests..."
+	@chmod +x bin/*.sh tests/*.sh 2>/dev/null || true
+	@bash tests/run.sh
 	@echo "✅ Tests complete"
 
 clean:
 	@echo "Cleaning up..."
 	@rm -rf ~/.openclaw/.skills/aport-*.sh
 	@echo "✅ Cleanup complete"
+
+# Use repo's git hooks so every push runs submodule update check (run once per clone)
+install-git-hooks:
+	@git config core.hooksPath scripts/git-hooks
+	@echo "✅ Git hooks path set to scripts/git-hooks"
+	@echo "   Every git push will run scripts/ensure-submodules-updated.sh --update-remote"
