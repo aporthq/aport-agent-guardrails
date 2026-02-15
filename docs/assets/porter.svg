@@ -1,0 +1,54 @@
+<svg width="120" height="120" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.15"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <radialGradient id="innerGlow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="white" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="50" cy="50" r="48" fill="#0A84FF" opacity="0.05"/>
+  <rect x="30" y="35" width="40" height="40" rx="20" fill="#007AFF" filter="url(#softShadow)"/>
+  <rect x="30" y="35" width="40" height="40" rx="20" fill="url(#innerGlow)"/>
+  <rect x="33" y="38" width="34" height="34" rx="17" fill="#F5F5F7" opacity="0.12"/>
+  <line x1="38" y1="48" x2="54" y2="48" stroke="#0A84FF" stroke-width="1" opacity="0.3"/>
+  <line x1="38" y1="52" x2="62" y2="52" stroke="#0A84FF" stroke-width="1" opacity="0.3"/>
+  <line x1="38" y1="56" x2="58" y2="56" stroke="#0A84FF" stroke-width="1" opacity="0.3"/>
+  <g transform="translate(0, -2)">
+    <ellipse cx="50" cy="35" rx="22" ry="11" fill="#1D1D1F" opacity="0.9"/>
+    <ellipse cx="50" cy="37" rx="26" ry="6" fill="#1D1D1F" opacity="0.7"/>
+  </g>
+  <ellipse cx="50" cy="30" rx="6" ry="7" fill="#FF9500" opacity="0.9"/>
+  <text x="50" y="33" text-anchor="middle" font-size="5" fill="white" font-weight="bold">AP</text>
+  <ellipse cx="42" cy="48" rx="4" ry="4" fill="white" opacity="0.95"/>
+  <circle cx="42" cy="48" r="2.5" fill="#1D1D1F"/>
+  <ellipse cx="58" cy="48" rx="4" ry="4" fill="white" opacity="0.95"/>
+  <circle cx="58" cy="48" r="2.5" fill="#1D1D1F"/>
+  <circle cx="40.5" cy="46.5" r="0.8" fill="white" opacity="0.9"/>
+  <circle cx="56.5" cy="46.5" r="0.8" fill="white" opacity="0.9"/>
+  <ellipse cx="35" cy="56" rx="3.5" ry="2.5" fill="#FF9AA2" opacity="0.25"/>
+  <ellipse cx="65" cy="56" rx="3.5" ry="2.5" fill="#FF9AA2" opacity="0.25"/>
+  <path d="M 42 58 Q 50 63 58 58" fill="none" stroke="#1D1D1F" stroke-width="2" stroke-linecap="round" opacity="0.9"/>
+  <ellipse cx="50" cy="66" rx="8" ry="6" fill="#FF9500" opacity="0.9"/>
+  <text x="50" y="68" text-anchor="middle" font-size="3.5" fill="white" font-weight="bold">APORT</text>
+  <ellipse cx="26" cy="55" rx="6" ry="12" fill="#007AFF" opacity="0.95"/>
+  <ellipse cx="74" cy="55" rx="6" ry="12" fill="#007AFF" opacity="0.95"/>
+  <ellipse cx="42" cy="78" rx="7" ry="10" fill="#007AFF" opacity="0.95"/>
+  <ellipse cx="58" cy="78" rx="7" ry="10" fill="#007AFF" opacity="0.95"/>
+  <ellipse cx="42" cy="77" rx="5" ry="2" fill="#1D1D1F" opacity="0.3"/>
+  <ellipse cx="58" cy="77" rx="5" ry="2" fill="#1D1D1F" opacity="0.3"/>
+  <g>
+    <circle cx="50" cy="55" r="16" fill="#34C759" opacity="0.15"/>
+    <circle cx="50" cy="55" r="13" fill="none" stroke="#34C759" stroke-width="2.5" opacity="0.9"/>
+    <path d="M 42 55 L 48 61 L 60 48" fill="none" stroke="#34C759" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  </g>
+</svg>

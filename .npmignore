@@ -1,0 +1,29 @@
+# Development
+.git
+.github
+.gitignore
+.gitmodules
+
+# Tests
+tests/
+*.test.js
+test.js
+
+# Docs (launch-specific)
+docs/launch/
+_plan/
+APORT_GOOSE_ARCHITECTURE.md
+
+# Examples (keep in repo, exclude from npm)
+examples/
+
+# Build artifacts
+node_modules/
+*.log
+.DS_Store
+
+# Local overrides
+local-overrides/
+
+# External (submodules - users should git clone, not npm install)
+external/

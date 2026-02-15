@@ -1,0 +1,46 @@
+# OpenClaw Agent Configuration
+
+<!-- This block is auto-installed by `make openclaw-setup` into workspace/AGENTS.md. It instructs the agent to call the guardrail before effectful actions. That is best-effort (LLM may not follow). Deterministic enforcement requires OpenClaw to call the guardrail via a before_tool_call hook or core integration; see docs/OPENCLAW_COMPATIBILITY.md and docs/APORT_OPENCLAW_INTEGRATION_PROPOSAL.md. -->
+
+## Pre-Action Authorization (APort Guardrails) ✅ REQUIRED
+
+**CRITICAL RULE**: Before executing ANY tool that has side effects, you MUST verify authorization through APort Agent Guardrails.
+
+### Required Steps (in order):
+
+1. **Check Kill Switch** (highest priority)
+   - If `~/.openclaw/kill-switch` file exists: **REFUSE ALL ACTIONS** immediately
+   - Return: "Action blocked: Global kill switch is active"
+
+2. **Check Passport Status**
+   - Verify `~/.openclaw/passport.json` exists
+   - Verify `status == "active"`
+   - If missing or invalid: STOP and prompt user to create/update passport
+
+3. **Call APort Verification**
+   - Run: `~/.openclaw/.skills/aport-guardrail.sh <tool_name> '<context_json>'`
+   - Context JSON should include: tool parameters, resource identifiers, operation details
+
+4. **Read Decision**
+   - Read `~/.openclaw/decision.json`
+   - If `allow: false`: **STOP EXECUTION**, return denial reasons to user
+   - If `allow: true`: Proceed with tool execution, log receipt ID
+
+5. **Failure Behavior**
+   - APort script fails: DENY (fail-closed for security)
+   - Passport invalid: DENY with clear error message
+
+6. **Never reuse a previous decision**
+   - **Always invoke the tool** when the user requests an action. Do not skip or assume a tool will be denied because a previous invocation was denied.
+   - APort is re-evaluated on every tool call; passport or limits may have changed. When using the APort plugin, it never reuses a cached decision—each call gets a fresh verify.
+
+---
+
+## Effectful Tools (Require Verification)
+
+- **Git Operations**: `git.create_pr`, `git.merge`, `git.push`
+- **System Commands**: `exec.run`, `exec.*`, `system.*`
+- **Messaging**: `message.send`, `messaging.*`
+- **Data Operations**: `database.write`, `data.export`
+
+See full documentation: https://github.com/aporthq/aport-agent-guardrails
