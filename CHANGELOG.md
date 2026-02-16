@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-02-16
+
+### Added
+- `test-npm-package.sh`: installs `@aporthq/agent-guardrails` from registry, asserts package layout and guardrail ALLOW/DENY.
+- `test-remote-passport-api.sh`: remote passport (agent_id only) API tests.
+
+### Changed
+- Docs lead with npx; clone/setup from repo as alternative (README, QUICKSTART, QUICKSTART_OPENCLAW_PLUGIN).
+- README: npm badge and link to package; quick start and links section.
+- `package.json` install script: runs `make install` only when Makefile present (fixes `npm install` from tarball so npx works).
+- PUBLISHING.md: clarify wizard installs guardrail wrappers; install script note.
+- tests/README: document test-npm-package.sh.
+
 ## [1.0.1] - 2025-02-16
 
 ### Changed
