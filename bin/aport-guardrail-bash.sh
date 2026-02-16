@@ -245,7 +245,12 @@ fi
 
 # Get policy limits from passport
 POLICY_BASE=$(echo "$POLICY_ID" | sed 's/\.v[0-9]*$//')
-LIMITS=$(echo "$PASSPORT" | jq ".limits.\"$POLICY_BASE\" // {}")
+# Messaging: API/verifier use flat keys at limits top level; accept nested limits["messaging.message.send"] or flat
+if [[ "$POLICY_ID" == "messaging.message.send"* ]]; then
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["messaging.message.send"] then .["messaging.message.send"] else {msgs_per_min, msgs_per_day, allowed_recipients, approval_required} end')
+else
+    LIMITS=$(echo "$PASSPORT" | jq ".limits.\"$POLICY_BASE\" // {}")
+fi
 
 # Evaluate policy-specific limits
 if [[ "$POLICY_ID" == "code.repository.merge"* ]]; then

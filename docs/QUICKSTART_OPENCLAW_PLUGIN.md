@@ -285,6 +285,21 @@ Check:
 2. Script executable: `chmod +x ~/.openclaw/.skills/aport-guardrail-bash.sh`
 3. Script works: Run test command above
 
+### Guardrail DENY / `oap.passport_version_mismatch`
+
+If the guardrail denies every call and `~/.openclaw/decision.json` shows reason `oap.passport_version_mismatch` ("Passport spec version is 'unknown', expected 'oap/1.0'"):
+
+1. **Passport must have `spec_version: "oap/1.0"`** (OAP spec). If your passport has only `"version": "1.0.0"` in metadata and no top-level `spec_version`, it was created by an older or non–spec-compliant tool.
+2. **Limits must be nested per capability.** The verifier expects e.g. `limits["system.command.execute"]` with `allowed_commands`, `blocked_patterns`, not a flat `limits.allowed_commands` at the top level.
+
+**Fix:** Re-run the installer so it can normalize the passport:
+
+```bash
+npx @aporthq/agent-guardrails
+```
+
+Choose to overwrite the existing passport when prompted, or run the wizard with `--output` to a new file. The installer now ensures `spec_version: "oap/1.0"` and nested limits. If you prefer to fix the file manually, add `"spec_version": "oap/1.0"` at the top level and move any top-level `allowed_commands` / `blocked_patterns` under `limits["system.command.execute"]`. See [agent-passport/spec/oap](https://github.com/aporthq/agent-passport/tree/main/spec/oap) for the canonical schema.
+
 ---
 
 ## Configuration Reference
