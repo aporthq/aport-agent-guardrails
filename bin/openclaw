@@ -86,11 +86,9 @@ echo "    ⚠️  AI follows prompts to call guardrail"
 echo "    ⚠️  Can be bypassed via prompt injection"
 echo "    ⚠️  Not deterministic"
 echo ""
-read -p "  Install APort OpenClaw plugin? [Y/n]: " install_plugin
-install_plugin=${install_plugin:-y}
 
 PLUGIN_INSTALLED=false
-if [ "$install_plugin" = "y" ] || [ "$install_plugin" = "Y" ]; then
+if true; then
     # Check if openclaw CLI is available
     if ! command -v openclaw &> /dev/null; then
         echo ""
@@ -124,31 +122,25 @@ if [ "$install_plugin" = "y" ] || [ "$install_plugin" = "Y" ]; then
                 echo "  ⚠️  Plugin installed but not showing in 'openclaw plugins list'"
             fi
             echo ""
-            read -p "  Start or restart OpenClaw gateway now to load the plugin? [Y/n]: " do_restart
-            do_restart="${do_restart:-y}"
-            if [ "$do_restart" != "n" ] && [ "$do_restart" != "N" ]; then
-                export OPENCLAW_CONFIG_DIR="$CONFIG_DIR"
-                # Restart only works when gateway is already running; else start in background.
-                # Never let gateway start/restart fail the APort installation.
-                if openclaw gateway restart 2>/dev/null; then
-                    echo "  ✅ Gateway restarted; plugin is active."
-                else
-                    # Gateway was not running; start it in background so setup completes without blocking.
-                    # Any failure here must not break APort installation (no exit 1).
-                    mkdir -p "$CONFIG_DIR/logs" 2>/dev/null || true
-                    ( OPENCLAW_CONFIG_DIR="$CONFIG_DIR" nohup openclaw gateway start >> "$CONFIG_DIR/logs/gateway.log" 2>&1 & ) 2>/dev/null || true
-                    sleep 2
-                    if openclaw gateway probe 2>/dev/null; then
-                        echo "  ✅ Gateway started in background; plugin is active."
-                        echo "     Dashboard: http://127.0.0.1:18789/"
-                    else
-                        echo "  ⚠️  Gateway start was initiated; it may still be starting."
-                        echo "     If the dashboard is unreachable, run: openclaw doctor"
-                        echo "     Then start in a terminal: openclaw gateway start"
-                    fi
-                fi
+            export OPENCLAW_CONFIG_DIR="$CONFIG_DIR"
+            # Restart only works when gateway is already running; else start in background.
+            # Never let gateway start/restart fail the APort installation.
+            if openclaw gateway restart 2>/dev/null; then
+                echo "  ✅ Gateway restarted; plugin is active."
             else
-                echo "  To load the plugin, start or restart the gateway: openclaw gateway start"
+                # Gateway was not running; start it in background so setup completes without blocking.
+                # Any failure here must not break APort installation (no exit 1).
+                mkdir -p "$CONFIG_DIR/logs" 2>/dev/null || true
+                ( OPENCLAW_CONFIG_DIR="$CONFIG_DIR" nohup openclaw gateway start >> "$CONFIG_DIR/logs/gateway.log" 2>&1 & ) 2>/dev/null || true
+                sleep 2
+                if openclaw gateway probe 2>/dev/null; then
+                    echo "  ✅ Gateway started in background; plugin is active."
+                    echo "     Dashboard: http://127.0.0.1:18789/"
+                else
+                    echo "  ⚠️  Gateway start was initiated; it may still be starting."
+                    echo "     If the dashboard is unreachable, run: openclaw doctor"
+                    echo "     Then start in a terminal: openclaw gateway start"
+                fi
             fi
         fi
     fi
@@ -511,17 +503,12 @@ fi
 echo ""
 echo "  View status: $CONFIG_DIR/.skills/aport-status.sh"
 echo ""
-read -p "  Run the smoke test now? [Y/n]: " run_test
-run_test=${run_test:-y}
-if [ "$run_test" = "y" ] || [ "$run_test" = "Y" ]; then
-    echo ""
-    echo "  Running: $CONFIG_DIR/.skills/aport-guardrail.sh system.command.execute '{\"command\":\"node --version\"}'"
-    if "$CONFIG_DIR/.skills/aport-guardrail.sh" system.command.execute '{"command":"node --version"}'; then
-        echo "  ✅ Test passed (exit 0 = ALLOW)"
-    else
-        echo "  ❌ Test denied or failed (exit 1). Check passport/limits or run: $CONFIG_DIR/.skills/aport-status.sh"
-    fi
-    echo ""
+echo "  Running smoke test: $CONFIG_DIR/.skills/aport-guardrail.sh system.command.execute '{\"command\":\"node --version\"}'"
+if "$CONFIG_DIR/.skills/aport-guardrail.sh" system.command.execute '{"command":"node --version"}'; then
+    echo "  ✅ Smoke test passed (exit 0 = ALLOW)"
+else
+    echo "  ❌ Smoke test denied or failed (exit 1). Check passport/limits or run: $CONFIG_DIR/.skills/aport-status.sh"
 fi
+echo ""
 echo "  Done. OpenClaw config: $CONFIG_DIR"
 echo ""

@@ -600,4 +600,4 @@ OpenClaw is now secure with APort policy enforcement. All commands and MCP tools
 
 ---
 
-**Made with ❤️ by the APort team**
+**Made with ❤️ by Uchi (https://github.com/uchibeke/)**
