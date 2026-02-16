@@ -2,8 +2,8 @@
 
 # 🛡️ APort Agent Guardrails
 
+[![npm](https://img.shields.io/npm/v/@aporthq/agent-guardrails.svg)](https://www.npmjs.com/package/@aporthq/agent-guardrails)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](package.json)
 [![OpenClaw](https://img.shields.io/badge/OpenClaw-%3E%3D2026.2.0-blue.svg)](extensions/openclaw-aport/package.json)
@@ -11,6 +11,7 @@
 **Pre-action authorization for AI agents.** Verify permissions *before* every tool runs — works with [OpenClaw](https://github.com/openclaw/openclaw), [IronClaw](https://github.com/nearai/ironclaw), PicoClaw, and compatible frameworks.
 
 <p>
+  <a href="https://www.npmjs.com/package/@aporthq/agent-guardrails">npm</a> •
   <a href="https://aport.io">Website</a> •
   <a href="https://aport.io/docs">Docs</a> •
   <a href="https://aport.io/brand-mascot-agent/">Meet Porter</a> •
@@ -59,7 +60,7 @@ Your AI agent should **only do what you explicitly allow**. APort Agent Guardrai
 
 **Prerequisites:** Node 18+, `jq` (for bash guardrail). OpenClaw CLI in PATH for plugin install (optional; wizard will prompt).
 
-**One command (recommended)** — run the setup wizard via npx (no clone required):
+**One command (recommended)** — run the setup wizard via the [npm package](https://www.npmjs.com/package/@aporthq/agent-guardrails) (no clone required):
 
 ```bash
 npx @aporthq/agent-guardrails
@@ -424,7 +425,7 @@ Apache 2.0 — see [LICENSE](LICENSE).
 
 ## 🔗 Links
 
-- [APort](https://aport.io) · [Docs](https://aport.io/docs)
+- [npm package](https://www.npmjs.com/package/@aporthq/agent-guardrails) · [APort](https://aport.io) · [Docs](https://aport.io/docs)
 - [GitHub Issues](https://github.com/aporthq/aport-agent-guardrails/issues) · [Discussions](https://github.com/aporthq/aport-agent-guardrails/discussions)
 
 ---
