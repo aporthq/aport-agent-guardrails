@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-02-16
+
+### Fixed
+- **Passport OAP compliance:** Installer normalizes passports to `spec_version: "oap/1.0"` and nested `limits["system.command.execute"]`; migrates flat limits from older passports.
+- **Messaging guardrails:** Default passport includes `messaging.send` and messaging limits (interactive + non-interactive). Limits written as flat keys (`msgs_per_min`, `msgs_per_day`, `allowed_recipients`, `approval_required`) for API/verifier; local evaluator accepts nested or flat.
+- **Default allowed_commands:** Preserve `["*"]` when set by wizard; new exec block defaults to `["*"]` per README.
+
+### Changed
+- **Plugin logging:** Consistent `ALLOW` / `BLOCKED` lines with one-line summary (e.g. `ALLOW: system.command.execute - mkdir test`) for screenshot-friendly gateway logs.
+- **Docs:** Troubleshooting for `oap.passport_version_mismatch` in QUICKSTART_OPENCLAW_PLUGIN.
+
 ## [1.0.3] - 2026-02-16
 
 ### Fixed
