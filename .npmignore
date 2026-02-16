@@ -25,5 +25,4 @@ node_modules/
 # Local overrides
 local-overrides/
 
-# External (submodules - users should git clone, not npm install)
-external/
+# External/ is included in package "files" when publishing (submodules bundled at release)
