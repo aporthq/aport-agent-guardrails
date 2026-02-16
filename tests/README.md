@@ -48,6 +48,7 @@ cd extensions/openclaw-aport && node test.js
 | **`test-kill-switch.sh`** | Kill switch: absent → allow, present → deny (`oap.kill_switch_active`), removed → allow. |
 | **`test-passport-missing-and-invalid.sh`** | Missing passport → `oap.passport_not_found`, invalid JSON → `oap.passport_invalid`, suspended → `oap.passport_suspended`. |
 | **`test-api-evaluator.sh`** | API-powered evaluator (default: local agent-passport); skip if API unreachable. |
+| **`test-remote-passport-api.sh`** | **Remote passport (API mode):** Uses `APORT_AGENT_ID` only (no passport file). API fetches passport from registry. Set `APORT_TEST_REMOTE_AGENT_ID` to test a specific hosted passport; skip with `APORT_SKIP_REMOTE_PASSPORT_TEST=1`. |
 | **`test-plugin-guardrail-cli.sh`** | **Plugin-style CLI:** Same tool names and context as the OpenClaw plugin — `system.command.execute` (mkdir, ls) ALLOW; `messaging.message.send` ALLOW with `messaging.send` passport, DENY without. |
 
 **Plugin tests** (`extensions/openclaw-aport/test.js`):

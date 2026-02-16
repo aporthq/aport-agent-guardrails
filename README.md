@@ -12,7 +12,7 @@
 
 <p>
   <a href="https://aport.io">Website</a> •
-  <a href="https://docs.aport.io">Docs</a> •
+  <a href="https://aport.io/docs">Docs</a> •
   <a href="https://aport.io/brand-mascot-agent/">Meet Porter</a> •
   <a href="#-quick-start">Quick Start</a>
 </p>
@@ -57,9 +57,17 @@ Your AI agent should **only do what you explicitly allow**. APort Agent Guardrai
 
 ## 🚀 Quick Start
 
-**Prerequisites:** Node 18+, `jq` (for bash guardrail).
+**Prerequisites:** Node 18+, `jq` (for bash guardrail). OpenClaw CLI in PATH for plugin install (optional; wizard will prompt).
 
-**One command** — clone, init submodules, and run the installer (copy and paste the block):
+**One command (recommended)** — run the setup wizard via npx (no clone required):
+
+```bash
+npx @aporthq/agent-guardrails
+```
+
+This downloads the package (includes policies and plugin), runs the setup wizard, installs the APort OpenClaw plugin, restarts the gateway, and runs a smoke test.
+
+**Alternative: clone the repo** (e.g. to hack on it or use without npm):
 
 ```bash
 git clone https://github.com/aporthq/aport-agent-guardrails.git && \
@@ -67,11 +75,6 @@ git clone https://github.com/aporthq/aport-agent-guardrails.git && \
   git submodule update --init --recursive && \
   ./bin/openclaw
 ```
-
-- **`git clone ...`** — clone the repo  
-- **`cd aport-agent-guardrails`** — enter the repo  
-- **`git submodule update --init --recursive`** — fetch policy packs (aport-policies, aport-spec)  
-- **`./bin/openclaw`** — run the setup wizard (passport, plugin, config, self-check)
 
 *Already have the repo?* From the repo root run: `git submodule update --init --recursive && ./bin/openclaw`
 
@@ -121,7 +124,8 @@ Shows:
 - ⚙️ Configured limits
 - 📊 Recent activity log
 
-📖 **Full guide:** [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md)
+📖 **Full guide:** [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md)  
+📦 **Publishing:** [PUBLISHING.md](PUBLISHING.md) — what’s in the npm package and how we release.
 
 ---
 
@@ -146,6 +150,8 @@ Shows:
 |------|----------|-----------|---------|
 | **API (default)** | Production, full policy parity, new policy packs without code changes | ✅ | Yes (api.aport.io or self-hosted) |
 | **Local (bash)** | Privacy, offline, air-gapped | Subset only (hand-coded limits for exec, messaging, repo) | No |
+
+**API mode** can use either a **local passport file** (sent in the request body; not stored) or **agent_id only**: set `APORT_AGENT_ID` to your hosted passport’s agent ID and the API fetches the passport from the registry — no passport JSON file needed. See [tests/test-remote-passport-api.sh](tests/test-remote-passport-api.sh).
 
 Deep dive (what each supports, comparison table): [Verification methods](docs/VERIFICATION_METHODS.md).
 
@@ -418,7 +424,7 @@ Apache 2.0 — see [LICENSE](LICENSE).
 
 ## 🔗 Links
 
-- [APort](https://aport.io) · [Docs](https://docs.aport.io) · [Meet Porter](https://aport.io/brand-mascot-agent/)
+- [APort](https://aport.io) · [Docs](https://aport.io/docs)
 - [GitHub Issues](https://github.com/aporthq/aport-agent-guardrails/issues) · [Discussions](https://github.com/aporthq/aport-agent-guardrails/discussions)
 
 ---
