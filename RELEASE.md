@@ -1,12 +1,13 @@
 # How to release
 
-Same process every time. **Merges to main are not releases** — only pushing a tag triggers a release.
+Same process every time. **Merges to main are not releases** — only pushing a tag triggers a release. **Do not commit directly to main;** use the usual branch flow (e.g. dev → staging → main).
 
 ## Steps
 
-1. **Bump version** (in a PR, then merge to `main`):
+1. **Bump version** in a branch (e.g. `dev`), then merge via PRs to `main`:
    - `package.json`: set `"version": "X.Y.Z"` (e.g. `1.0.1`).
    - `CHANGELOG.md`: add/update the section for that version and release date.
+   - Open PR dev → staging, merge; then PR staging → main, merge.
 
 2. **Tag and push** (after the version bump is on `main`):
    ```bash
