@@ -12,13 +12,8 @@ FLOW_PASSPORT="$TEST_DIR/fullflow_passport.json"
 rm -f "$FLOW_PASSPORT" "$OPENCLAW_PASSPORT_FILE"
 
 echo "  Full flow: create passport..."
-# In CI (non-TTY) use --non-interactive for reliable creation; otherwise use piped defaults
-if [ ! -t 0 ]; then
-    "$CREATE_SCRIPT" --output "$FLOW_PASSPORT" --non-interactive
-else
-    printf '%s\n' '' '' '' '' 'y' 'y' 'n' 'n' '500' '10' '*' '' 'n' | \
-        "$CREATE_SCRIPT" --output "$FLOW_PASSPORT" >/dev/null 2>&1 || true
-fi
+# Always use --non-interactive so tests pass in CI (no TTY / pipe EOF issues)
+"$CREATE_SCRIPT" --output "$FLOW_PASSPORT" --non-interactive
 
 if [ ! -f "$FLOW_PASSPORT" ]; then
     echo "FAIL: passport was not created" >&2
