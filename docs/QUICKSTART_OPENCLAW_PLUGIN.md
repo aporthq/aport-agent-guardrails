@@ -8,6 +8,8 @@
 npx @aporthq/agent-guardrails
 ```
 
+If you already have an agent_id from aport.io (e.g. after creating a passport there), run `npx @aporthq/agent-guardrails <agent_id>` to use a hosted passport and skip the passport prompt. See [Hosted passport setup](HOSTED_PASSPORT_SETUP.md).
+
 This uses the [npm package](https://www.npmjs.com/package/@aporthq/agent-guardrails): it downloads the package (policies + plugin), runs the setup wizard, installs the APort OpenClaw plugin, and runs a smoke test.
 
 Then start OpenClaw with the generated config (e.g. `openclaw gateway start --config ~/.openclaw/config.yaml`). The plugin will enforce policies on every tool call.
