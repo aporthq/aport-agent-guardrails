@@ -64,6 +64,24 @@ export default function (api) {
   const warn = (msg) => api.logger?.warn?.(msg);
   const err = (msg) => api.logger?.error?.(msg);
 
+  /**
+   * One-line summary for ALLOW/BLOCKED logs — tool + context hint. No I/O, no heavy work.
+   * Keeps logs scannable and screenshot-friendly (e.g. "system.command.execute - mkdir test").
+   */
+  function decisionLogSummary(effectiveToolName, policyName, context) {
+    if (policyName === "system.command.execute.v1" && context?.command) {
+      const cmd = String(context.command).replace(/\s+/g, " ").trim();
+      return cmd.length > 52 ? cmd.slice(0, 52) + "…" : cmd;
+    }
+    if (policyName === "messaging.message.send.v1") {
+      const to = context?.recipient ?? context?.to ?? "";
+      return to ? `send → ${String(to).slice(0, 32)}` : "send";
+    }
+    if (policyName?.startsWith("code.repository.")) return "repo";
+    if (policyName?.startsWith("mcp.")) return "mcp tool";
+    return policyName?.replace(/\.v\d+$/, "") ?? effectiveToolName;
+  }
+
   /** Format decision.reasons (OAP code + message) for logs and UX; used for both allow and deny. */
   function formatReasons(decision) {
     const reasons = decision.reasons || [];
@@ -194,9 +212,7 @@ export default function (api) {
       if (!policyName) {
         // No policy mapping: allow by default so custom skills / ClawHub / built-in tools work; block only if allowUnmappedTools is false (strict)
         if (allowUnmappedTools) {
-          log(
-            `[${name}] No policy mapping for tool: ${toolName} - allowing (custom skills / unmapped)`,
-          );
+          log(`[${name}] ALLOW: ${toolName} - (unmapped, no policy)`);
           return {};
         }
         log(
@@ -248,9 +264,7 @@ export default function (api) {
         const cmdStr =
           typeof context.command === "string" ? context.command.trim() : "";
         if (!cmdStr) {
-          log(
-            `[${name}] ALLOWED: exec with empty command (skip guardrail, nothing to run)`,
-          );
+          log(`[${name}] ALLOW: exec - (empty command, skip)`);
           return {};
         }
       }
@@ -356,9 +370,12 @@ export default function (api) {
               .filter(Boolean)
               .join("\n")
           : undefined;
-      log(
-        `[${name}] ALLOWED: ${effectiveToolName}${codeList ? ` (${codeList})` : ""}${primaryMessage ? ` — ${primaryMessage}` : ""}`,
+      const allowSummary = decisionLogSummary(
+        effectiveToolName,
+        effectivePolicyName,
+        context,
       );
+      log(`[${name}] ALLOW: ${effectiveToolName} - ${allowSummary}`);
       return {
         reasons: decision.reasons?.length ? decision.reasons : undefined,
         reasonSummary: reasonSummary || undefined,

@@ -233,7 +233,7 @@ openclaw logs | grep "APort Guardrails"
 # Should see:
 # [APort Guardrails] Loaded: mode=local, passportFile=~/.openclaw/passport.json
 # [APort Guardrails] Checking tool: exec.run → policy: system.command.execute.v1
-# [APort Guardrails] ALLOWED: exec.run
+# [APort Guardrails] ALLOW: system.command.execute - mkdir test
 ```
 
 ---
