@@ -22,8 +22,11 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           node-version: "22"
 
-      - name: Publish to npm
-        run: npm publish
+      - name: Fix package.json for npm
+        run: npm pkg fix
+
+      - name: Publish to npm (public)
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

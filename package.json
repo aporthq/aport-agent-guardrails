@@ -30,7 +30,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aporthq/aport-agent-guardrails.git"
+    "url": "git+https://github.com/aporthq/aport-agent-guardrails.git"
   },
   "files": [
     "bin/",
