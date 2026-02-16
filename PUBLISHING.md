@@ -30,7 +30,7 @@ So after `npm install @aporthq/agent-guardrails` or `npx @aporthq/agent-guardrai
 
 **Merges to main are not releases.** A release happens only when you push a **tag** `v*`.
 
-1. **Bump version** in `package.json` and in `CHANGELOG.md` (in a PR, then merge to `main`).
+1. **Bump version** in `package.json` and in `CHANGELOG.md` in a branch (e.g. dev), then merge via PRs (dev → staging → main). Do not commit directly to main.
 2. **Tag and push** (from your local `main`, or from the merge commit):
    ```bash
    git checkout main && git pull
