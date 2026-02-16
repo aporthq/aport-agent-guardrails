@@ -10,14 +10,13 @@ CREATED_PASSPORT="$TEST_DIR/passport_created.json"
 rm -f "$OPENCLAW_PASSPORT_FILE"
 
 echo "  Passport creation: run wizard with piped input..."
-# Prompt order: owner_id, owner_type, agent_name, agent_description,
-#   pr_cap, exec_cap, msg_cap, data_cap,
-#   max_pr_size, max_prs_per_day, allowed_repos,
-#   exec_allow_scope (default or *),
-#   should_expire (n = never)
-# Empty line = use default; y/n for capabilities; n = never expire
-printf '%s\n' '' '' '' '' 'y' 'y' 'n' 'n' '500' '10' '*' '' 'n' | \
-    "$CREATE_SCRIPT" --output "$CREATED_PASSPORT" >/dev/null 2>&1 || true
+# In CI (non-TTY) use --non-interactive for reliable creation; otherwise use piped defaults
+if [ ! -t 0 ]; then
+    "$CREATE_SCRIPT" --output "$CREATED_PASSPORT" --non-interactive
+else
+    printf '%s\n' '' '' '' '' 'y' 'y' 'n' 'n' '500' '10' '*' '' 'n' | \
+        "$CREATE_SCRIPT" --output "$CREATED_PASSPORT" >/dev/null 2>&1 || true
+fi
 
 if [ ! -f "$CREATED_PASSPORT" ]; then
     echo "FAIL: passport file was not created at $CREATED_PASSPORT" >&2
