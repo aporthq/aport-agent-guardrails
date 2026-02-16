@@ -21,6 +21,8 @@ Each **GitHub Release** (e.g. `v1.0.0`) triggers the [Release workflow](.github/
 
 So after `npm install @aporthq/agent-guardrails` or `npx @aporthq/agent-guardrails`, the package is **self-contained**: no git clone or submodule init required.
 
+**Does the guardrail get installed without `make install`?** Yes. The **setup wizard** (`bin/openclaw`, run when you execute `npx @aporthq/agent-guardrails`) does the installation: it creates wrappers in your config dir (e.g. `~/.openclaw/.skills/`) that point back at the package’s `bin/` and `external/`. So the interactive setup does not use Make at all. The package’s `install` script runs `make install` only when a Makefile is present (i.e. when installed from a clone, to copy scripts into `~/.openclaw/.skills`); when installed from the npm tarball there is no Makefile, so the script no-ops and install succeeds.
+
 ## User-facing entrypoints
 
 - **`npx @aporthq/agent-guardrails`** — runs the setup wizard (`bin/openclaw`): passport, plugin install, gateway restart, smoke test. This is the recommended one-command flow.
