@@ -5,13 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**No official release has been published yet.** The first release will be **1.0.0**.
-
 ## [Unreleased]
 
-(Changes since the upcoming 1.0.0 release.)
+## [1.0.1] - 2025-02-16
 
-## [1.0.0] - TBD (first release)
+### Changed
+- **Release process:** Tag-driven; push tag `v*` triggers npm publish and GitHub Release (see RELEASE.md). Merges to main do not release.
+- **Scope:** npm package `@aporthq/agent-guardrails` and plugin `@aporthq/openclaw-aport` (GitHub org aporthq).
+- **npx:** Default bin is `openclaw` (setup wizard). Package includes `extensions/` and `external/` for self-contained `npx @aporthq/agent-guardrails`.
+- PUBLISHING.md and RELEASE.md for repeatable releases.
+
+## [1.0.0] - 2025-02-15 (first release)
 
 ### 🎉 Major Release - Production Ready
 
@@ -83,5 +87,6 @@ None (first release).
 
 ---
 
-[Unreleased]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/aporthq/aport-agent-guardrails/releases/tag/v1.0.1
 [1.0.0]: https://github.com/aporthq/aport-agent-guardrails/releases/tag/v1.0.0
