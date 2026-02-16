@@ -66,6 +66,8 @@ Your AI agent should **only do what you explicitly allow**. APort Agent Guardrai
 npx @aporthq/agent-guardrails
 ```
 
+If you already have an agent_id from [aport.io](https://aport.io) (e.g. after creating a passport there), you can run `npx @aporthq/agent-guardrails <agent_id>` to use a hosted passport and skip the wizard. See [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md).
+
 This downloads the package (includes policies and plugin), runs the setup wizard, installs the APort OpenClaw plugin, restarts the gateway, and runs a smoke test.
 
 **Alternative: clone the repo** (e.g. to hack on it or use without npm):
@@ -82,7 +84,7 @@ git clone https://github.com/aporthq/aport-agent-guardrails.git && \
 The installer will:
 
 1. Ask for your OpenClaw config dir (default `~/.openclaw`)
-2. Run the **passport wizard** (OAP v1.0 — capabilities and limits)
+2. Set up your passport: use a **hosted** one (paste agent_id from aport.io) or run the **passport wizard** (OAP v1.0) for a local file
 3. Install the **APort OpenClaw plugin** (deterministic enforcement)
 4. Install guardrail wrappers in `.skills/`
 5. **Update the passport** — the installer merges required commands automatically (no manual editing needed). Default is `allowed_commands: ["*"]` (blocked patterns like `rm -rf` still apply).
@@ -125,8 +127,9 @@ Shows:
 - ⚙️ Configured limits
 - 📊 Recent activity log
 
-📖 **Full guide:** [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md)  
-📦 **Publishing:** [PUBLISHING.md](PUBLISHING.md) — what’s in the npm package and how we release.
+📖 **Full guide:** [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md)
+🌐 **Hosted Passport:** [Already created passport at aport.io? Use agent_id only](docs/HOSTED_PASSPORT_SETUP.md)
+📦 **Publishing:** [PUBLISHING.md](PUBLISHING.md) — what's in the npm package and how we release.
 
 ---
 
@@ -345,6 +348,7 @@ See [Verification methods](docs/VERIFICATION_METHODS.md) for a detailed comparis
 | Doc | Description |
 |-----|-------------|
 | [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md) | 5-minute setup (recommended) |
+| [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md) | Use passport from aport.io — `npx ... <agent_id>` or choose hosted in wizard |
 | [Verification methods (local vs API)](docs/VERIFICATION_METHODS.md) | Deep dive: bash vs API evaluator |
 | [Quick Start Guide](docs/QUICKSTART.md) | Passport wizard, copy-paste option |
 | [OpenClaw Local Integration](docs/OPENCLAW_LOCAL_INTEGRATION.md) | API, Python example |

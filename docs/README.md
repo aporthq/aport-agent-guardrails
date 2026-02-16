@@ -5,6 +5,7 @@
 | Doc | Purpose |
 |-----|---------|
 | [QUICKSTART_OPENCLAW_PLUGIN.md](QUICKSTART_OPENCLAW_PLUGIN.md) | **OpenClaw plugin** — 5-minute setup, deterministic enforcement (RECOMMENDED) |
+| [**HOSTED_PASSPORT_SETUP.md**](HOSTED_PASSPORT_SETUP.md) | **Use passport from aport.io** — create at aport.io, then `npx @aporthq/agent-guardrails <agent_id>` (or choose hosted in wizard) |
 | [QUICKSTART.md](QUICKSTART.md) | Interactive setup and step-by-step with passport wizard |
 | [OPENCLAW_LOCAL_INTEGRATION.md](OPENCLAW_LOCAL_INTEGRATION.md) | Full OpenClaw setup: API, passport, policies, Python example |
 | [OPENCLAW_TOOLS_AND_POLICIES.md](OPENCLAW_TOOLS_AND_POLICIES.md) | exec, allowed_commands, unmapped tools, passport limits |
