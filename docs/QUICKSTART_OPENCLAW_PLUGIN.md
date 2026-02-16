@@ -2,7 +2,17 @@
 
 **5-minute setup for deterministic, platform-level policy enforcement in OpenClaw.**
 
-**One command to get started** (clone + submodules + installer):
+**One command to get started** (recommended — no clone):
+
+```bash
+npx @aporthq/agent-guardrails
+```
+
+This uses the [npm package](https://www.npmjs.com/package/@aporthq/agent-guardrails): it downloads the package (policies + plugin), runs the setup wizard, installs the APort OpenClaw plugin, and runs a smoke test.
+
+Then start OpenClaw with the generated config (e.g. `openclaw gateway start --config ~/.openclaw/config.yaml`). The plugin will enforce policies on every tool call.
+
+**Alternative: clone the repo** (e.g. to hack on the code or use without npm):
 
 ```bash
 git clone https://github.com/aporthq/aport-agent-guardrails.git && \
@@ -10,8 +20,6 @@ git clone https://github.com/aporthq/aport-agent-guardrails.git && \
   git submodule update --init --recursive && \
   ./bin/openclaw
 ```
-
-Then start OpenClaw with the generated config (e.g. `openclaw gateway start --config ~/.openclaw/config.yaml`). The plugin will enforce policies on every tool call.
 
 *Already have the repo?* From the repo root run: `./bin/openclaw`
 
@@ -30,7 +38,7 @@ Then start OpenClaw with the generated config (e.g. `openclaw gateway start --co
 
 ## Installation (Automatic)
 
-**Recommended:** Use the one-liner above, or from the repo root run:
+**Recommended:** Use `npx @aporthq/agent-guardrails` (see top of this doc). If you cloned the repo instead, from the repo root run:
 
 ```bash
 ./bin/openclaw

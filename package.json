@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "make test",
-    "install": "make install",
+    "install": "([ -f Makefile ] && make install) || true",
     "server": "node src/server/index.js",
     "dev": "node --watch src/server/index.js",
     "sync-submodules": "git submodule update --init --recursive",
