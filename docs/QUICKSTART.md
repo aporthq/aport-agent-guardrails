@@ -3,9 +3,15 @@
 
 ---
 
-## Recommended: interactive OpenClaw setup (one command)
+## Recommended: one command (npm, no clone)
 
-From the repo root:
+```bash
+npx @aporthq/agent-guardrails
+```
+
+This uses the [npm package](https://www.npmjs.com/package/@aporthq/agent-guardrails): downloads the package, runs the setup wizard, installs the plugin and wrappers, and runs a smoke test.
+
+**Alternative: from the repo** (if you cloned the repo):
 
 ```bash
 make openclaw-setup
