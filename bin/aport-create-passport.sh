@@ -24,16 +24,17 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# Repo root (for external/aport-spec submodule)
+# Repo root (for external/aport-spec submodule). Output aligns with agent-passport/spec/oap.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SPEC_SCHEMA="$SCRIPT_DIR/external/aport-spec/oap/passport-schema.json"
-# Defaults from OAP spec submodule. Local creation has no KYC/assurance proof → L0.
-# (L2+ implies KYC completed; APort cloud sets assurance from user/org when created via API.)
+# OAP spec: spec_version "oap/1.0", limits nested per capability (e.g. limits["system.command.execute"]).
+# Local creation has no KYC/assurance proof → L0.
 if [ -f "$SPEC_SCHEMA" ] && command -v jq &>/dev/null; then
     DEFAULT_SPEC_VERSION=$(jq -r '.properties.spec_version.const // "oap/1.0"' "$SPEC_SCHEMA")
 else
     DEFAULT_SPEC_VERSION="oap/1.0"
 fi
+[ -z "$DEFAULT_SPEC_VERSION" ] || [ "$DEFAULT_SPEC_VERSION" = "null" ] && DEFAULT_SPEC_VERSION="oap/1.0"
 DEFAULT_ASSURANCE_LEVEL="L0"
 
 # Config dir: from env (set by bin/openclaw) or dirname of passport file
@@ -83,17 +84,18 @@ DEFAULT_AGENT_DESC=$(get_identity_description) || true
 DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
 
 if [ -n "$NON_INTERACTIVE" ]; then
-    # CI/tests: use defaults, no prompts. Requires --output.
+    # CI/tests: use defaults, no prompts. Requires --output. Match interactive defaults (README: messaging out of the box).
     owner_id="$DEFAULT_EMAIL"
     owner_type="$DEFAULT_OWNER_TYPE"
     agent_name="$DEFAULT_AGENT_NAME"
     agent_description="$DEFAULT_AGENT_DESC"
     pr_cap=y
     exec_cap=y
-    msg_cap=n
+    msg_cap=y
     data_cap=n
     max_pr_size=500
     max_prs_per_day=10
+    max_msgs_per_day=100
     allowed_repos_input="*"
     exec_allow_scope="*"
     should_expire=n
@@ -140,7 +142,7 @@ echo ""
 # Choose capabilities
 echo "  🔐 Capabilities"
 echo "  ───────────────"
-echo "  Choose what your agent can do (y/n). Defaults: PRs and exec = yes, messages and data = no."
+echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes (matches README/docs); data export = no."
 echo ""
 read -p "  • Create and merge pull requests? [Y/n]: " pr_cap
 pr_cap=${pr_cap:-y}
@@ -148,8 +150,8 @@ pr_cap=${pr_cap:-y}
 read -p "  • Execute system commands (npm, git, etc.)? [Y/n]: " exec_cap
 exec_cap=${exec_cap:-y}
 
-read -p "  • Send messages (email, SMS, etc.)? [y/N]: " msg_cap
-msg_cap=${msg_cap:-n}
+read -p "  • Send messages (email, SMS, etc.)? [Y/n]: " msg_cap
+msg_cap=${msg_cap:-y}
 
 read -p "  • Export data (database, files, etc.)? [y/N]: " data_cap
 data_cap=${data_cap:-n}
@@ -279,7 +281,8 @@ if [ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ]; then
 fi
 
 if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then
-    limits_json="$limits_json\"messaging\": {\"msgs_per_min\": 5, \"msgs_per_day\": $max_msgs_per_day, \"allowed_recipients\": [\"*\"], \"approval_required\": false},"
+    # API/verifier expect flat keys at top level of limits (not nested under messaging.message.send)
+    limits_json="$limits_json\"msgs_per_min\": 5, \"msgs_per_day\": $max_msgs_per_day, \"allowed_recipients\": [\"*\"], \"approval_required\": false,"
 fi
 
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then

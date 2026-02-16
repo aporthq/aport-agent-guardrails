@@ -421,20 +421,49 @@ echo "  ✅ Wrappers installed in $CONFIG_DIR/.skills/"
 echo "     (They point to this repo and use your config dir for passport/decision/audit.)"
 echo ""
 
-# 4b. Ensure passport has default allowed_commands so normal exec (ls, mkdir, npm, etc.) works
+# 4b. Normalize passport to OAP spec (spec_version + nested limits) then ensure allowed_commands
 if [ -f "$PASSPORT_FILE" ] && command -v jq &>/dev/null; then
+    # 4b1. Ensure spec_version and nested limits (fix old or malformed passports)
+    # OAP spec: spec_version "oap/1.0", limits per capability e.g. limits["system.command.execute"]
+    NEED_FIX=0
+    if [ "$(jq -r '.spec_version // "missing"' "$PASSPORT_FILE")" != "oap/1.0" ]; then
+        NEED_FIX=1
+    fi
+    if jq -e '.limits.allowed_commands' "$PASSPORT_FILE" &>/dev/null; then
+        NEED_FIX=1
+    fi
+    if [ "$NEED_FIX" = "1" ]; then
+        echo "  📋 Normalizing passport to OAP spec (spec_version oap/1.0, nested limits)..."
+        jq '
+            (.spec_version = (.spec_version // "oap/1.0")) |
+            (if .limits.allowed_commands then
+                .limits["system.command.execute"] = ((.limits["system.command.execute"] // {}) |
+                    .allowed_commands = (.limits.allowed_commands // ["*"]) |
+                    .blocked_patterns = (.limits.blocked_patterns // ["rm -rf", "sudo"]) |
+                    .max_execution_time = (.limits.max_execution_time // 300)) |
+                .limits |= del(.allowed_commands, .blocked_patterns, .max_execution_time)
+            else . end)
+        ' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"
+        echo "  ✅ Passport normalized."
+    fi
     echo "  📋 Updating passport allowed_commands (default commands: bash, sh, ls, mkdir, npm, …)..."
     # Default commands so normal exec works; user can add more in passport or via wizard
     DEFAULT_CMDS='["npm","yarn","git","node","pnpm","npx","bash","sh","mkdir","cp","ls","cat","echo","pwd","mv","touch","which","open"]'
     if jq -e '.limits["system.command.execute"]' "$PASSPORT_FILE" &>/dev/null; then
         EXISTING=$(jq -r '.limits["system.command.execute"].allowed_commands // []' "$PASSPORT_FILE")
-        MERGED=$(jq -n \
-            --argjson existing "$EXISTING" \
-            --argjson default "$DEFAULT_CMDS" \
-            '$existing + $default | unique')
+        # Keep ["*"] if user chose allow-any in wizard; otherwise merge with default list
+        if echo "$EXISTING" | jq -e 'index("*") != null' &>/dev/null; then
+            MERGED="$EXISTING"
+        else
+            MERGED=$(jq -n \
+                --argjson existing "$EXISTING" \
+                --argjson default "$DEFAULT_CMDS" \
+                '$existing + $default | unique')
+        fi
         jq --argjson merged "$MERGED" '.limits["system.command.execute"].allowed_commands = $merged' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"
     else
-        MERGED=$(jq -n --argjson default "$DEFAULT_CMDS" '$default')
+        # New nested block: default to ["*"] per README (blocked_patterns still apply)
+        MERGED='["*"]'
         jq --argjson merged "$MERGED" \
             '.limits["system.command.execute"] = ((.limits["system.command.execute"] // {}) | .allowed_commands = $merged | .blocked_patterns = (.blocked_patterns // ["rm -rf", "sudo"]) | .max_execution_time = (.max_execution_time // 300))' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"
     fi
