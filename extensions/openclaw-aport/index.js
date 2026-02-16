@@ -16,7 +16,8 @@
  *         enabled: true
  *         config:
  *           mode: local        # "local" | "api"
- *           passportFile: ~/.openclaw/passport.json
+ *           passportFile: ~/.openclaw/passport.json   # Omit when using agentId (hosted)
+ *           agentId: ap_...     # Optional: hosted passport from aport.io (API fetches passport)
  *           guardrailScript: ~/.openclaw/.skills/aport-guardrail-bash.sh
  *           apiUrl: https://api.aport.io  # For API mode
  *           # apiKey optional: set APORT_API_KEY env var if your API requires it
@@ -41,6 +42,7 @@ export default function (api) {
   // Plugin config from plugins.entries.openclaw-aport.config (OpenClaw passes api.pluginConfig)
   const config = api.pluginConfig || {};
   const mode = config.mode || "local";
+  const agentId = config.agentId || null;
   const passportFile = expandPath(
     config.passportFile || "~/.openclaw/passport.json",
   );
@@ -65,8 +67,7 @@ export default function (api) {
   /** Format decision.reasons (OAP code + message) for logs and UX; used for both allow and deny. */
   function formatReasons(decision) {
     const reasons = decision.reasons || [];
-    const primaryMessage =
-      reasons[0]?.message || decision.reason || "";
+    const primaryMessage = reasons[0]?.message || decision.reason || "";
     const codes = reasons.map((r) => r.code).filter(Boolean);
     const codeList = codes.length ? codes.join(", ") : "";
     const lines =
@@ -74,7 +75,9 @@ export default function (api) {
         ? reasons
             .map((r) => `  • ${r.code || "oap.unknown"}: ${r.message || ""}`)
             .join("\n")
-        : primaryMessage ? `  • ${primaryMessage}` : "";
+        : primaryMessage
+          ? `  • ${primaryMessage}`
+          : "";
     return { reasons, codeList, lines, primaryMessage };
   }
 
@@ -86,8 +89,11 @@ export default function (api) {
    * @returns {{ innerToolName: string, innerContext: object } | null}
    */
   function parseGuardrailInvocation(command) {
-    if (typeof command !== "string" || !command.includes("aport-guardrail")) return null;
-    const match = command.match(/aport-guardrail[^\s]*\s+(\S+)\s+['"]([\s\S]*)['"]\s*$/);
+    if (typeof command !== "string" || !command.includes("aport-guardrail"))
+      return null;
+    const match = command.match(
+      /aport-guardrail[^\s]*\s+(\S+)\s+['"]([\s\S]*)['"]\s*$/,
+    );
     if (!match) return null;
     const innerToolName = match[1];
     let innerContext = {};
@@ -123,16 +129,25 @@ export default function (api) {
    * @param {object} [event] - full event in case gateway puts command on event.input/event.arguments
    */
   function normalizeExecContext(params, event) {
-    const src = event && typeof event === "object" ? { ...event, ...params } : params || {};
+    const src =
+      event && typeof event === "object"
+        ? { ...event, ...params }
+        : params || {};
     if (typeof src !== "object") return { command: "" };
     const raw =
       src.command ??
       src.cmd ??
-      (src.arguments && typeof src.arguments === "object" && src.arguments.command) ??
+      (src.arguments &&
+        typeof src.arguments === "object" &&
+        src.arguments.command) ??
       (src.input && typeof src.input === "object" && src.input.command) ??
-      (typeof src.input === "string" && src.input.trim().length > 0 ? src.input : null) ??
+      (typeof src.input === "string" && src.input.trim().length > 0
+        ? src.input
+        : null) ??
       (src.args && typeof src.args === "object" && src.args.command) ??
-      (src.invocation && typeof src.invocation === "object" && src.invocation.command) ??
+      (src.invocation &&
+        typeof src.invocation === "object" &&
+        src.invocation.command) ??
       (src.payload && typeof src.payload === "object" && src.payload.command) ??
       (Array.isArray(src.args) && src.args.length > 0
         ? src.args.join(" ")
@@ -140,8 +155,11 @@ export default function (api) {
     let full = typeof raw === "string" ? raw : raw != null ? String(raw) : "";
     if (!full) {
       const strings = collectStrings(src);
-      const likeCommand = (s) => typeof s === "string" && s.length > 2 && s.trim().length > 0;
-      const withSpace = strings.filter((s) => likeCommand(s) && s.includes(" "));
+      const likeCommand = (s) =>
+        typeof s === "string" && s.length > 2 && s.trim().length > 0;
+      const withSpace = strings.filter(
+        (s) => likeCommand(s) && s.includes(" "),
+      );
       const candidate = withSpace[0] ?? strings.find(likeCommand);
       if (candidate) full = candidate.trim();
     }
@@ -151,7 +169,9 @@ export default function (api) {
     return out;
   }
 
-  log(`[${name}] Loaded: mode=${mode}, passportFile=${passportFile}, unmapped=${allowUnmappedTools ? "allow" : "block"}, alwaysVerify=${alwaysVerifyEachToolCall}, mapExec=${mapExecToPolicy}`);
+  log(
+    `[${name}] Loaded: mode=${mode}, ${agentId ? `agentId=${agentId}` : `passportFile=${passportFile}`}, unmapped=${allowUnmappedTools ? "allow" : "block"}, alwaysVerify=${alwaysVerifyEachToolCall}, mapExec=${mapExecToPolicy}`,
+  );
 
   /**
    * before_tool_call hook - Runs before EVERY tool execution.
@@ -167,15 +187,21 @@ export default function (api) {
     try {
       // Map OpenClaw tool names to APort policy names. If mapExecToPolicy is false, exec is unmapped (never blocked).
       const policyName =
-        toolName === "exec" && !mapExecToPolicy ? null : mapToolToPolicy(toolName);
+        toolName === "exec" && !mapExecToPolicy
+          ? null
+          : mapToolToPolicy(toolName);
 
       if (!policyName) {
         // No policy mapping: allow by default so custom skills / ClawHub / built-in tools work; block only if allowUnmappedTools is false (strict)
         if (allowUnmappedTools) {
-          log(`[${name}] No policy mapping for tool: ${toolName} - allowing (custom skills / unmapped)`);
+          log(
+            `[${name}] No policy mapping for tool: ${toolName} - allowing (custom skills / unmapped)`,
+          );
           return {};
         }
-        log(`[${name}] BLOCKED: ${toolName} - no policy mapping (allowUnmappedTools=false)`);
+        log(
+          `[${name}] BLOCKED: ${toolName} - no policy mapping (allowUnmappedTools=false)`,
+        );
         return {
           block: true,
           blockReason: `🛡️ APort: Tool "${toolName}" has no policy mapping. Unmapped tools are blocked (allowUnmappedTools: false). Set allowUnmappedTools: true in config to allow custom skills and ClawHub tools.`,
@@ -202,8 +228,13 @@ export default function (api) {
           if (innerPolicy) {
             effectivePolicyName = innerPolicy;
             effectiveToolName = innerToolName;
-            context = innerPolicy === "system.command.execute.v1" ? normalizeExecContext(innerContext, { params: innerContext }) : innerContext;
-            log(`[${name}] exec delegates to inner tool: ${innerToolName} → policy: ${innerPolicy}`);
+            context =
+              innerPolicy === "system.command.execute.v1"
+                ? normalizeExecContext(innerContext, { params: innerContext })
+                : innerContext;
+            log(
+              `[${name}] exec delegates to inner tool: ${innerToolName} → policy: ${innerPolicy}`,
+            );
           }
         }
         const cmd = context.command || "";
@@ -214,9 +245,12 @@ export default function (api) {
 
       // Allow exec with no command (probe/placeholder) without calling guardrail so we don't block pre-checks.
       if (effectivePolicyName === "system.command.execute.v1") {
-        const cmdStr = typeof context.command === "string" ? context.command.trim() : "";
+        const cmdStr =
+          typeof context.command === "string" ? context.command.trim() : "";
         if (!cmdStr) {
-          log(`[${name}] ALLOWED: exec with empty command (skip guardrail, nothing to run)`);
+          log(
+            `[${name}] ALLOWED: exec with empty command (skip guardrail, nothing to run)`,
+          );
           return {};
         }
       }
@@ -229,7 +263,8 @@ export default function (api) {
         decision = await verifyViaAPI(effectivePolicyName, context, {
           apiUrl,
           apiKey,
-          passportFile,
+          passportFile: agentId ? null : passportFile,
+          agentId,
         });
       } else {
         decision = await verifyViaScript(scriptToolName, context, {
@@ -251,29 +286,46 @@ export default function (api) {
       }
 
       if (!decision.allow) {
-        const { reasons, codeList, lines: reasonLines, primaryMessage } =
-          formatReasons(decision);
+        const {
+          reasons,
+          codeList,
+          lines: reasonLines,
+          primaryMessage,
+        } = formatReasons(decision);
         const message = primaryMessage || "Policy denied";
-        log(`[${name}] BLOCKED: ${effectiveToolName} - ${message}${codeList ? ` (${codeList})` : ""}`);
+        log(
+          `[${name}] BLOCKED: ${effectiveToolName} - ${message}${codeList ? ` (${codeList})` : ""}`,
+        );
         const isCommandNotAllowed =
           effectivePolicyName === "system.command.execute.v1" &&
           reasons.some((r) => r.code === "oap.command_not_allowed");
         if (isCommandNotAllowed) {
-          try {
-            const passportData = await readFile(passportFile, "utf8");
-            const passport = JSON.parse(passportData);
-            const allowed =
-              passport?.limits?.["system.command.execute"]?.allowed_commands;
+          if (agentId) {
             warn(
-              `[${name}] Passport allowed_commands: ${JSON.stringify(allowed)} — add "*" or the command (e.g. ls) to fix. File: ${passportFile}`,
+              `[${name}] Hosted passport (agent_id: ${agentId}). Add allowed_commands at aport.io or use "*" to allow all (blocked patterns still apply).`,
             );
-          } catch (_) {
-            warn(`[${name}] Could not read passport for diagnostic: ${passportFile}`);
+          } else {
+            try {
+              const passportData = await readFile(passportFile, "utf8");
+              const passport = JSON.parse(passportData);
+              const allowed =
+                passport?.limits?.["system.command.execute"]?.allowed_commands;
+              warn(
+                `[${name}] Passport allowed_commands: ${JSON.stringify(allowed)} — add "*" or the command (e.g. ls) to fix. File: ${passportFile}`,
+              );
+            } catch (_) {
+              warn(
+                `[${name}] Could not read passport for diagnostic: ${passportFile}`,
+              );
+            }
           }
         }
         const hint = isCommandNotAllowed
           ? "\nFor shell commands (cp, mkdir, npm, etc.), add them to limits.allowed_commands in your passport."
           : "";
+        const passportHint = agentId
+          ? `To allow this action, update limits at aport.io (hosted passport: ${agentId})`
+          : `To allow this action, update limits in your passport: ${passportFile}`;
         const blockReason = [
           "🛡️ APort Policy Denied",
           "",
@@ -282,7 +334,7 @@ export default function (api) {
           "Reasons (OAP codes):",
           reasonLines || `  • ${message}`,
           "",
-          `To allow this action, update limits in your passport: ${passportFile}`,
+          passportHint,
           hint,
         ].join("\n");
         return {
@@ -292,11 +344,17 @@ export default function (api) {
         };
       }
 
-      const { reasons, codeList, lines: reasonLines, primaryMessage } =
-        formatReasons(decision);
+      const {
+        reasons,
+        codeList,
+        lines: reasonLines,
+        primaryMessage,
+      } = formatReasons(decision);
       const reasonSummary =
         reasonLines || primaryMessage
-          ? ["APort allowed", reasonLines || primaryMessage].filter(Boolean).join("\n")
+          ? ["APort allowed", reasonLines || primaryMessage]
+              .filter(Boolean)
+              .join("\n")
           : undefined;
       log(
         `[${name}] ALLOWED: ${effectiveToolName}${codeList ? ` (${codeList})` : ""}${primaryMessage ? ` — ${primaryMessage}` : ""}`,
@@ -487,21 +545,16 @@ function ensureIdempotencyKey(context) {
 
 /**
  * Verify action via APort API
+ * When agentId is set (hosted passport), API fetches passport from registry; no passport file.
  */
 async function verifyViaAPI(
   policyName,
   params,
-  { apiUrl, apiKey, passportFile },
+  { apiUrl, apiKey, passportFile, agentId },
 ) {
   try {
-    // Load passport
-    const passportData = await readFile(passportFile, "utf8");
-    const passport = JSON.parse(passportData);
-
-    // Agent-passport Joi validation requires idempotency_key for several policies (e.g. messaging.message.send.v1).
     const context = ensureIdempotencyKey(params);
 
-    // Call API
     const url = `${apiUrl}/api/verify/policy/${policyName}`;
     const headers = {
       "Content-Type": "application/json",
@@ -510,13 +563,24 @@ async function verifyViaAPI(
       headers["Authorization"] = `Bearer ${apiKey}`;
     }
 
+    let body;
+    if (agentId) {
+      body = JSON.stringify({
+        context: { agent_id: agentId, ...context },
+      });
+    } else {
+      const passportData = await readFile(passportFile, "utf8");
+      const passport = JSON.parse(passportData);
+      body = JSON.stringify({
+        passport,
+        context,
+      });
+    }
+
     const response = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        passport,
-        context,
-      }),
+      body,
     });
 
     if (!response.ok) {
@@ -526,7 +590,6 @@ async function verifyViaAPI(
     }
 
     const data = await response.json();
-    // API may return { decision: {...} } or decision object directly
     return data.decision || data;
   } catch (error) {
     throw new Error(`API verification failed: ${error.message}`);
