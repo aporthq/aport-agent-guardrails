@@ -25,8 +25,8 @@ jobs:
       
       - name: Validate passport schema
         run: |
-          # Validate against OAP v1.0 schema
-          jq . templates/passport.template.json > /dev/null
+          # Validate OAP v1 template from spec submodule is valid JSON
+          jq . external/aport-spec/oap/examples/passport.template.v1.json > /dev/null
           echo "✅ Passport template is valid JSON"
       
       - name: Test guardrail script
