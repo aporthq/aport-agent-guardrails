@@ -1,0 +1,35 @@
+{
+  "policy_id": "system.command.execute.v1",
+  "version": "1.0.0",
+  "description": "Policy for executing system commands",
+  "applies_to": ["exec.run", "exec.*", "system.*"],
+  "rules": [
+    {
+      "rule_id": "command_allowlist",
+      "priority": 1,
+      "condition": "context.command matches limits.allowed_commands",
+      "deny_reason": "Command '{{context.command}}' is not in allowed list",
+      "deny_code": "oap.command_not_allowed",
+      "remediation": "Add command to allowlist in passport or use an allowed command"
+    },
+    {
+      "rule_id": "blocked_patterns",
+      "priority": 2,
+      "condition": "context.command not contains limits.blocked_patterns",
+      "deny_reason": "Command contains blocked pattern",
+      "deny_code": "oap.blocked_pattern",
+      "remediation": "Remove dangerous patterns from command"
+    },
+    {
+      "rule_id": "execution_time_limit",
+      "priority": 3,
+      "condition": "context.estimated_time <= limits.max_execution_time",
+      "deny_reason": "Estimated execution time exceeds limit",
+      "deny_code": "oap.timeout_risk",
+      "remediation": "Reduce execution time or request limit increase"
+    }
+  ],
+  "evaluation": "ALL",
+  "allow_if": "All rules pass",
+  "deny_if": "Any rule fails"
+}

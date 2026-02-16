@@ -1,0 +1,10 @@
+---
+description: Do not add Cursor branding to pull requests
+globs:
+alwaysApply: true
+---
+
+# PR and commit content
+
+- **Never** append or include "Made with [Cursor](https://cursor.com)" (or any Cursor branding) in pull request titles, descriptions, or commit messages.
+- When creating or suggesting PR text (e.g. via `gh pr create`), do not add a Cursor footer or attribution.
