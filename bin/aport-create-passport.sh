@@ -73,12 +73,13 @@ get_identity_description() {
     awk '/^#/ { next } /^[[:space:]]*$/ { next } { print; exit }' "$IDENTITY_FILE" 2>/dev/null | head -c 300
 }
 
-DEFAULT_EMAIL=$(get_default_email)
+# Avoid set -e exit when git/gh unavailable (e.g. CI with no git user.email)
+DEFAULT_EMAIL=$(get_default_email) || true
 DEFAULT_EMAIL=${DEFAULT_EMAIL:-"user@example.com"}
 DEFAULT_OWNER_TYPE="user"
-DEFAULT_AGENT_NAME=$(get_identity_name)
+DEFAULT_AGENT_NAME=$(get_identity_name) || true
 DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"OpenClaw Agent"}
-DEFAULT_AGENT_DESC=$(get_identity_description)
+DEFAULT_AGENT_DESC=$(get_identity_description) || true
 DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
 
 if [ -n "$NON_INTERACTIVE" ]; then
@@ -300,6 +301,7 @@ metadata_json=$(jq -n \
   }')
 
 # Create passport JSON (OAP v1.0 compliant)
+mkdir -p "$(dirname "$PASSPORT_FILE")"
 current_timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # API expects both agent_id and owner_id; use passport_id as agent_id for local passports
