@@ -9,6 +9,8 @@
 npx @aporthq/agent-guardrails
 ```
 
+If you have an agent_id from aport.io, run `npx @aporthq/agent-guardrails <agent_id>` to use a hosted passport (no local file). See [HOSTED_PASSPORT_SETUP.md](HOSTED_PASSPORT_SETUP.md).
+
 This uses the [npm package](https://www.npmjs.com/package/@aporthq/agent-guardrails): downloads the package, runs the setup wizard, installs the plugin and wrappers, and runs a smoke test.
 
 **Alternative: from the repo** (if you cloned the repo):
