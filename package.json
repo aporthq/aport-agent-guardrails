@@ -1,9 +1,10 @@
 {
-  "name": "@aport/agent-guardrails",
+  "name": "@aporthq/agent-guardrails",
   "version": "1.0.0",
   "description": "Policy enforcement guardrails for OpenClaw-compatible agent frameworks",
   "bin": {
-    "aport": "./bin/aport-guardrail.sh"
+    "aport": "./bin/openclaw",
+    "aport-guardrail": "./bin/aport-guardrail.sh"
   },
   "scripts": {
     "test": "make test",
@@ -34,6 +35,8 @@
   "files": [
     "bin/",
     "src/",
+    "extensions/",
+    "external/",
     "templates/",
     "policies/",
     "docs/",
