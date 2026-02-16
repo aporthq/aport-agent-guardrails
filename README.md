@@ -318,22 +318,6 @@ See [Verification methods](docs/VERIFICATION_METHODS.md) for a detailed comparis
 
 ---
 
-## 🦐 Porter — APort Mascot
-
-<div align="center">
-
-![Porter — APort mascot](docs/assets/porter.svg)
-
-</div>
-
-[**Porter**](https://aport.io/brand-mascot-agent/) is the official passport guard for AI agents: trustworthy, fast, and friendly. Use Porter in your docs or dashboards; SVGs and an interactive playground are on the [brand page](https://aport.io/brand-mascot-agent/).
-
-<!-- Add a demo GIF here when you have one, e.g.:
-![Porter verifying a command](docs/assets/porter-demo.gif)
--->
-
----
-
 ## 📜 Scripts Reference
 
 | Script | Purpose |
@@ -439,4 +423,4 @@ Apache 2.0 — see [LICENSE](LICENSE).
 
 ---
 
-<p align="center">Made with ❤️ by the APort team</p>
+<p align="center">Made with ❤️ by [Uchi](https://github.com/uchibeke/)</p>
