@@ -1,0 +1,39 @@
+{
+  "passport_id": "CDE60F4E-49DC-4D97-AC05-190E693C202C",
+  "kind": "template",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "owner_type": "user",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [
+    {"id": "repo.pr.create"},
+    {"id": "repo.merge"},
+    {"id": "system.command.execute"}
+  ],
+  "limits": {
+    "code.repository.merge": {
+      "max_prs_per_day": 10,
+      "max_merges_per_day": 5,
+      "max_pr_size_kb": 500,
+      "allowed_repos": ["*"],
+      "allowed_base_branches": ["*"],
+      "require_review": false
+    },
+    "system.command.execute": {
+      "allowed_commands": ["mkdir", "ls", "bash", "npm", "git", "node", "pnpm"],
+      "blocked_patterns": ["rm -rf", "sudo"]
+    }
+  },
+  "regions": ["US", "CA"],
+  "metadata": {
+    "name": "Test Agent",
+    "description": "OAP v1.0 test fixture",
+    "version": "1.0.0",
+    "created_by": "tests/fixtures"
+  },
+  "never_expires": true,
+  "created_at": "2026-02-14T22:29:53Z",
+  "updated_at": "2026-02-14T22:29:53Z",
+  "version": "1.0.0"
+}
