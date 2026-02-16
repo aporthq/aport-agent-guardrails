@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-02-16
+
+### Fixed
+- **npx @aporthq/agent-guardrails:** Add `agent-guardrails` bin entry so `npx @aporthq/agent-guardrails` resolves to the OpenClaw setup wizard (npm only runs a bin that matches the package name; 1.0.2 had only `aport` and `aport-guardrail`).
+
 ## [1.0.2] - 2026-02-16
 
 ### Added

@@ -1,6 +1,6 @@
 # APort Agent Guardrails — Test Suite
 
-Tests for [OAP v1.0](https://github.com/aporthq/aport-spec) compliance and OpenClaw integration: guardrail scripts, passport wizard, plugin (tool→policy mapping, decision integrity), and verification paths.
+Tests for [OAP v1.0](https://github.com/aporthq/aport-spec) compliance and OpenClaw integration: guardrail scripts, passport wizard, plugin (tool→policy mapping, decision integrity), and verification paths. Coverage includes both local passports (wizard, fixture file) and hosted passports (agent_id only; API fetches passport from registry).
 
 ---
 
@@ -9,7 +9,7 @@ Tests for [OAP v1.0](https://github.com/aporthq/aport-spec) compliance and OpenC
 | Aspect | Approach |
 |--------|----------|
 | **Strategy** | Isolated temp directory + fixture passport; no mutation of `~/.openclaw` in CI. |
-| **Scope** | Unit (plugin helpers), integration (guardrail + passport + four verification modes), and flow (wizard → allow → deny → status). |
+| **Scope** | Unit (plugin helpers), integration (guardrail + passport + four verification modes), flow (wizard → allow → deny → status), and hosted flow (CLI with agent_id, remote API). |
 | **Determinism** | Tests use `APORT_TEST_DIR` or `mktemp` and fixture data so CI is reproducible. |
 
 ---
@@ -51,6 +51,7 @@ cd extensions/openclaw-aport && node test.js
 | **`test-remote-passport-api.sh`** | **Remote passport (API mode):** Uses `APORT_AGENT_ID` only (no passport file). API fetches passport from registry. Set `APORT_TEST_REMOTE_AGENT_ID` to test a specific hosted passport; skip with `APORT_SKIP_REMOTE_PASSPORT_TEST=1`. |
 | **`test-plugin-guardrail-cli.sh`** | **Plugin-style CLI:** Same tool names and context as the OpenClaw plugin — `system.command.execute` (mkdir, ls) ALLOW; `messaging.message.send` ALLOW with `messaging.send` passport, DENY without. |
 | **`test-npm-package.sh`** | **Published npm package:** In a temp dir, `npm install @aporthq/agent-guardrails` (with `--ignore-scripts` for current publish), asserts package layout (`bin/`, `external/`), runs guardrail for ALLOW and DENY. Requires network. |
+| **`test-openclaw-hosted-flow.sh`** | **Hosted passport CLI:** Run `bin/openclaw <agent_id>`; assert invalid agent_id rejected, config has `agentId` and no local `passport.json`, no `passportFile` in plugin config. |
 
 **Plugin tests** (`extensions/openclaw-aport/test.js`):
 
@@ -94,6 +95,7 @@ Suggested improvements and their status. Use this table to contribute: pick an i
 |----------|-------------|------------------|
 | **Verification paths** | Bash standalone, API standalone (optional), Plugin-local, Plugin-API (optional) | — |
 | **Passport** | Creation (wizard), fixture, missing/invalid/suspended, status script | — |
+| **Hosted passport** | CLI with agent_id (`test-openclaw-hosted-flow.sh`), API with agent_id only (`test-remote-passport-api.sh`) | — |
 | **Guardrail behavior** | Allow/deny, OAP decision shape, kill switch, policy loading, unknown tool | — |
 | **Plugin** | mapToolToPolicy, canonicalize, verifyDecisionIntegrity, unit perf, integration with script | — |
 | **E2E** | — | Real OpenClaw deploy + fake tool call (opt-in or nightly) |
