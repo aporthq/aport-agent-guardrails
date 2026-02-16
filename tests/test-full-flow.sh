@@ -12,9 +12,13 @@ FLOW_PASSPORT="$TEST_DIR/fullflow_passport.json"
 rm -f "$FLOW_PASSPORT" "$OPENCLAW_PASSPORT_FILE"
 
 echo "  Full flow: create passport..."
-# Prompt order includes exec_allow_scope when exec_cap=y (empty = default list)
-printf '%s\n' '' '' '' '' 'y' 'y' 'n' 'n' '500' '10' '*' '' 'n' | \
-    "$CREATE_SCRIPT" --output "$FLOW_PASSPORT" >/dev/null 2>&1 || true
+# In CI (non-TTY) use --non-interactive for reliable creation; otherwise use piped defaults
+if [ ! -t 0 ]; then
+    "$CREATE_SCRIPT" --output "$FLOW_PASSPORT" --non-interactive
+else
+    printf '%s\n' '' '' '' '' 'y' 'y' 'n' 'n' '500' '10' '*' '' 'n' | \
+        "$CREATE_SCRIPT" --output "$FLOW_PASSPORT" >/dev/null 2>&1 || true
+fi
 
 if [ ! -f "$FLOW_PASSPORT" ]; then
     echo "FAIL: passport was not created" >&2

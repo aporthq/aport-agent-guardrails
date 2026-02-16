@@ -3,8 +3,9 @@
 # Interactive passport creation wizard (OAP v1.0).
 # Use for any framework; for OpenClaw with a custom config directory, run ./bin/openclaw instead.
 #
-# Usage: ./aport-create-passport.sh [--output FILE]
-#   --output FILE   Write passport to FILE (e.g. /path/to/my-openclaw/passport.json)
+# Usage: ./aport-create-passport.sh [--output FILE] [--non-interactive]
+#   --output FILE       Write passport to FILE (e.g. /path/to/my-openclaw/passport.json)
+#   --non-interactive   Use defaults only; no prompts (for CI/tests).
 #
 # When OPENCLAW_CONFIG_DIR is set (e.g. by bin/openclaw), the wizard reads defaults
 # from OPENCLAW_CONFIG_DIR/workspace/IDENTITY.md (Name, Vibe/description) and from
@@ -12,11 +13,16 @@
 
 set -e
 
-PASSPORT_FILE="${1:-$HOME/.openclaw/passport.json}"
-
-if [ "$1" = "--output" ] && [ -n "$2" ]; then
-    PASSPORT_FILE="$2"
-fi
+PASSPORT_FILE="$HOME/.openclaw/passport.json"
+NON_INTERACTIVE=""
+# Parse --output and --non-interactive
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --output)   [ -n "${2:-}" ] && PASSPORT_FILE="$2" && shift ;;
+        --non-interactive) NON_INTERACTIVE=1 ;;
+    esac
+    shift
+done
 
 # Repo root (for external/aport-spec submodule)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -75,6 +81,24 @@ DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"OpenClaw Agent"}
 DEFAULT_AGENT_DESC=$(get_identity_description)
 DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
 
+if [ -n "$NON_INTERACTIVE" ]; then
+    # CI/tests: use defaults, no prompts. Requires --output.
+    owner_id="$DEFAULT_EMAIL"
+    owner_type="$DEFAULT_OWNER_TYPE"
+    agent_name="$DEFAULT_AGENT_NAME"
+    agent_description="$DEFAULT_AGENT_DESC"
+    pr_cap=y
+    exec_cap=y
+    msg_cap=n
+    data_cap=n
+    max_pr_size=500
+    max_prs_per_day=10
+    allowed_repos_input="*"
+    exec_allow_scope="*"
+    should_expire=n
+    never_expires="true"
+    expires_at=""
+else
 echo ""
 echo "  🛂 APort Passport Creation Wizard"
 echo "  ══════════════════════════════════"
@@ -203,6 +227,9 @@ else
     expires_at=""
     never_expires="true"
 fi
+
+fi
+# End of interactive branch; non-interactive already set never_expires/expires_at above.
 
 # Build capabilities array
 capabilities_json="["
