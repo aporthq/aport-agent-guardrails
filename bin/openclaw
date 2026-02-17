@@ -83,12 +83,23 @@ fi
 mkdir -p "$CONFIG_DIR"
 CONFIG_DIR="$(cd "$CONFIG_DIR" && pwd)"
 
+# APort data: passport, decision, audit, kill-switch in config_dir/aport/
+APORT_DIR="$CONFIG_DIR/aport"
+mkdir -p "$APORT_DIR"
+
 echo ""
 echo "  ✓ Using: $CONFIG_DIR"
 echo ""
 
 # 2. Passport setup (hosted or local)
-PASSPORT_FILE="$CONFIG_DIR/passport.json"
+# Resolve passport path: prefer aport/, fallback to config root (legacy)
+if [ -f "$APORT_DIR/passport.json" ]; then
+    PASSPORT_FILE="$APORT_DIR/passport.json"
+elif [ -f "$CONFIG_DIR/passport.json" ]; then
+    PASSPORT_FILE="$CONFIG_DIR/passport.json"
+else
+    PASSPORT_FILE="$APORT_DIR/passport.json"
+fi
 export OPENCLAW_CONFIG_DIR="$CONFIG_DIR"
 USE_HOSTED_PASSPORT=false
 
@@ -273,8 +284,8 @@ YAML
         else
             cat >> "$CONFIG_YAML" << YAML
 
-        # Passport file location
-        passportFile: $CONFIG_DIR/passport.json
+        # Passport file location (in aport/ subdir)
+        passportFile: $PASSPORT_FILE
 
         # For local mode: path to guardrail script
         guardrailScript: $CONFIG_DIR/.skills/aport-guardrail-bash.sh
@@ -318,7 +329,7 @@ YAML
             if [ "$USE_HOSTED_PASSPORT" = true ]; then
                 echo "        agentId: $HOSTED_AGENT_ID" >> "$CONFIG_YAML"
             else
-                echo "        passportFile: $CONFIG_DIR/passport.json" >> "$CONFIG_YAML"
+                echo "        passportFile: $PASSPORT_FILE" >> "$CONFIG_YAML"
                 echo "        guardrailScript: $CONFIG_DIR/.skills/aport-guardrail-bash.sh" >> "$CONFIG_YAML"
             fi
 
@@ -346,10 +357,10 @@ YAML
                 --arg allow_unmapped "$ALLOW_UNMAPPED" \
                 '{ mode: $mode, agentId: $agent_id, failClosed: true, allowUnmappedTools: ($allow_unmapped == "true") } + (if $mode == "api" then { apiUrl: $api_url } else {} end)')
         else
-            # Local passport config (passportFile)
+            # Local passport config (passportFile in aport/)
             CONFIG_JSON=$(jq -n \
                 --arg mode "$PLUGIN_MODE" \
-                --arg pf "$CONFIG_DIR/passport.json" \
+                --arg pf "$PASSPORT_FILE" \
                 --arg gs "$CONFIG_DIR/.skills/aport-guardrail-bash.sh" \
                 --arg api_url "$api_url_val" \
                 --arg allow_unmapped "$ALLOW_UNMAPPED" \
@@ -400,10 +411,10 @@ write_wrapper() {
 CONFIG_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
 APORT_REPO_ROOT="\$(cat "\$CONFIG_DIR/.aport-repo" 2>/dev/null)"
 [ -z "\$APORT_REPO_ROOT" ] && { echo "Error: \$CONFIG_DIR/.aport-repo missing. Re-run bin/openclaw from the guardrails repo." >&2; exit 1; }
-export OPENCLAW_PASSPORT_FILE="\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/passport.json}"
-export OPENCLAW_DECISION_FILE="\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/decision.json}"
-export OPENCLAW_AUDIT_LOG="\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/audit.log}"
-export OPENCLAW_KILL_SWITCH="\${OPENCLAW_KILL_SWITCH:-\$CONFIG_DIR/kill-switch}"
+export OPENCLAW_PASSPORT_FILE="\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}"
+export OPENCLAW_DECISION_FILE="\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/aport/decision.json}"
+export OPENCLAW_AUDIT_LOG="\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/aport/audit.log}"
+export OPENCLAW_KILL_SWITCH="\${OPENCLAW_KILL_SWITCH:-\$CONFIG_DIR/aport/kill-switch}"
 exec "\$APORT_REPO_ROOT/bin/$name" "\$@"
 WRAP
     chmod +x "$CONFIG_DIR/.skills/$name"
@@ -495,47 +506,15 @@ fi
 # 3b. Install APort skill so OpenClaw loads it (managed skill: ~/.openclaw/skills)
 #     OpenClaw loads from: workspace/skills, then ~/.openclaw/skills, then bundled
 #     See https://docs.openclaw.ai/tools/skills
+#     Copy from repo so installed skill matches skills/aport-guardrail/SKILL.md (single source of truth)
 SKILL_DIR="$CONFIG_DIR/skills/aport-guardrail"
+REPO_SKILL="$REPO_ROOT/skills/aport-guardrail/SKILL.md"
 mkdir -p "$SKILL_DIR"
-GUARDRAIL_PATH="$CONFIG_DIR/.skills/aport-guardrail.sh"
-cat > "$SKILL_DIR/SKILL.md" << SKILL
----
-name: aport-guardrail
-description: Pre-action authorization for tools (bash, messaging, git, etc.). Call before effectful actions.
-metadata: {"openclaw":{"requires":{"bins":["jq"]},"emoji":"🛡️"}}
----
-
-# APort Guardrail (pre-action authorization)
-
-Before running **effectful tools** (system commands, messaging, git, data export), call this guardrail so policy and passport are checked.
-
-## Invocation
-
-Run the script with **tool name** and **context JSON**:
-
-\`\`\`bash
-$GUARDRAIL_PATH <tool_name> '<context_json>'
-\`\`\`
-
-- **Exit 0** = allow (proceed with the action)
-- **Exit 1** = deny (read \`$CONFIG_DIR/decision.json\` for reasons)
-
-## Tool names (map to policy packs)
-
-| When you're about to…        | Use tool_name              |
-|-----------------------------|----------------------------|
-| Run a shell command / bash  | \`system.command.execute\` |
-| Send a message (WhatsApp…)  | \`messaging.message.send\` |
-| Create/merge PR, git push   | \`git.create_pr\` / \`git.merge\` |
-| MCP tool call               | \`mcp.tool.execute\`       |
-| Data export                 | \`data.export\`            |
-
-Context must be valid JSON, e.g. \`'{"command":"ls"}' \` or \`'{"channel":"whatsapp","to":"+1234567890"}'\`.
-
-## Optional (API mode)
-
-To use APort API (self-hosted or cloud), use \`$CONFIG_DIR/.skills/aport-guardrail-api.sh\` with the same args and set \`APORT_API_URL\` if needed.
-SKILL
+if [ -f "$REPO_SKILL" ]; then
+    cp "$REPO_SKILL" "$SKILL_DIR/SKILL.md"
+else
+    echo "  ⚠️  Repo SKILL.md not found at $REPO_SKILL; skipping skill install." >&2
+fi
 echo "✅ APort skill installed in $CONFIG_DIR/skills/aport-guardrail/"
 echo "   OpenClaw will load it (managed skill). Use it before effectful actions."
 echo

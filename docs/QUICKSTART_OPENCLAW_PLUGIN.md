@@ -68,7 +68,7 @@ If you prefer manual installation:
 ### 1. Create Passport
 
 ```bash
-./bin/aport-create-passport.sh --output ~/.openclaw/passport.json
+./bin/aport-create-passport.sh --output ~/.openclaw/aport/passport.json
 ```
 
 ### 2. Install Plugin
@@ -92,7 +92,7 @@ plugins:
         mode: api
 
         # Passport file location
-        passportFile: ~/.openclaw/passport.json
+        passportFile: ~/.openclaw/aport/passport.json
 
         # For local mode: path to guardrail script
         guardrailScript: ~/.openclaw/.skills/aport-guardrail-bash.sh
@@ -120,8 +120,8 @@ mkdir -p ~/.openclaw/.skills
 cat > ~/.openclaw/.skills/aport-guardrail-bash.sh << 'EOF'
 #!/bin/bash
 APORT_REPO_ROOT="/path/to/aport-agent-guardrails"
-export OPENCLAW_PASSPORT_FILE="${OPENCLAW_PASSPORT_FILE:-$HOME/.openclaw/passport.json}"
-export OPENCLAW_DECISION_FILE="${OPENCLAW_DECISION_FILE:-$HOME/.openclaw/decision.json}"
+export OPENCLAW_PASSPORT_FILE="${OPENCLAW_PASSPORT_FILE:-$HOME/.openclaw/aport/passport.json}"
+export OPENCLAW_DECISION_FILE="${OPENCLAW_DECISION_FILE:-$HOME/.openclaw/aport/decision.json}"
 exec "$APORT_REPO_ROOT/bin/aport-guardrail-bash.sh" "$@"
 EOF
 chmod +x ~/.openclaw/.skills/aport-guardrail-bash.sh
@@ -204,7 +204,7 @@ Expected: Tool blocked with message:
 Policy: system.command.execute.v1
 Reason: Command exceeds allowed scope
 
-To override, update your passport at: ~/.openclaw/passport.json
+To override, update your passport at: ~/.openclaw/aport/passport.json (or ~/.openclaw/passport.json for legacy)
 ```
 
 ---
@@ -220,7 +220,7 @@ To override, update your passport at: ~/.openclaw/passport.json
 ```yaml
 config:
   mode: api
-  passportFile: ~/.openclaw/passport.json
+  passportFile: ~/.openclaw/aport/passport.json
   apiUrl: https://api.aport.io
 ```
 Set `APORT_API_KEY` in the environment only if your API requires auth.
@@ -239,7 +239,7 @@ Set `APORT_API_KEY` in the environment only if your API requires auth.
 ```yaml
 config:
   mode: local
-  passportFile: ~/.openclaw/passport.json
+  passportFile: ~/.openclaw/aport/passport.json
   guardrailScript: ~/.openclaw/.skills/aport-guardrail-bash.sh
 ```
 
@@ -287,7 +287,7 @@ Check:
 
 ### Guardrail DENY / `oap.passport_version_mismatch`
 
-If the guardrail denies every call and `~/.openclaw/decision.json` shows reason `oap.passport_version_mismatch` ("Passport spec version is 'unknown', expected 'oap/1.0'"):
+If the guardrail denies every call and `~/.openclaw/aport/decision.json` (or `~/.openclaw/decision.json`) shows reason `oap.passport_version_mismatch` ("Passport spec version is 'unknown', expected 'oap/1.0'"):
 
 1. **Passport must have `spec_version: "oap/1.0"`** (OAP spec). If your passport has only `"version": "1.0.0"` in metadata and no top-level `spec_version`, it was created by an older or non–spec-compliant tool.
 2. **Limits must be nested per capability.** The verifier expects e.g. `limits["system.command.execute"]` with `allowed_commands`, `blocked_patterns`, not a flat `limits.allowed_commands` at the top level.
@@ -314,7 +314,7 @@ plugins:
       enabled: true
       config:
         mode: api
-        passportFile: ~/.openclaw/passport.json
+        passportFile: ~/.openclaw/aport/passport.json
         apiUrl: https://api.aport.io
         failClosed: true
 ```
@@ -332,7 +332,7 @@ plugins:
         mode: api
 
         # Passport file location
-        passportFile: ~/.openclaw/passport.json
+        passportFile: ~/.openclaw/aport/passport.json
 
         # For local mode: path to guardrail script
         guardrailScript: ~/.openclaw/.skills/aport-guardrail-bash.sh
@@ -355,7 +355,7 @@ plugins:
       enabled: true
       config:
         mode: local
-        passportFile: ~/.openclaw/passport.json
+        passportFile: ~/.openclaw/aport/passport.json
         guardrailScript: ~/.openclaw/.skills/aport-guardrail-bash.sh
         failClosed: true
 ```
@@ -432,7 +432,7 @@ plugins:
 2. **Choose "yes"** when prompted to install the plugin.
 3. **Start OpenClaw** with the generated config: `openclaw gateway start --config <your-config-dir>/config.yaml` (e.g. `~/.openclaw/config.yaml`).
 4. **Test enforcement:** Run the agent; try an allowed action (e.g. `node --version`) and one that should be blocked by your passport (e.g. `rm -rf /`). The plugin blocks before the tool runs.
-5. **Customize passport:** Edit `<config-dir>/passport.json` to adjust limits and allowed commands.
+5. **Customize passport:** Edit `<config-dir>/aport/passport.json` (or `<config-dir>/passport.json` for legacy) to adjust limits and allowed commands.
 
 ---
 
@@ -461,7 +461,7 @@ plugins:
 | Step | What happens |
 |------|----------------|
 | You run `./bin/openclaw` | Script asks for config dir, creates passport, installs plugin, writes `config.yaml`, installs wrappers in `<config-dir>/.skills/`, and **updates the passport** with default `allowed_commands` (bash, sh, ls, mkdir, npm, etc.) so normal exec works. |
-| `config.yaml` | Contains `passportFile` and `guardrailScript` pointing to `<config-dir>/passport.json` and `<config-dir>/.skills/aport-guardrail-bash.sh`. |
+| `config.yaml` | Contains `passportFile` and `guardrailScript` pointing to `<config-dir>/aport/passport.json` and `<config-dir>/.skills/aport-guardrail-bash.sh`. |
 | Passport allowlist | The installer sets `allowed_commands: ["*"]` automatically. No manual editing needed unless you want to restrict commands. |
 | Wrapper script | `<config-dir>/.skills/aport-guardrail-bash.sh` is a small script that calls this repo’s `bin/aport-guardrail-bash.sh` with the same args and env (passport path, etc.). |
 | You start OpenClaw | `openclaw gateway start --config <config-dir>/config.yaml` (or use that config when running the agent). |
