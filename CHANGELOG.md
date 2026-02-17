@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-02-17
+
+### Added
+- **SECURITY.md:** Expanded security documentation addressing Cisco findings, prompt injection attacks, and attack vectors. Maps Cisco's documented risks (silent data exfiltration, malicious skills, prompt injection) to APort mitigations. Includes CVE-2026-25253 and other attack vectors with scope clarification.
+
+### Changed
+- **README.md:** Problem-first lede highlighting Cisco's documented OpenClaw security risks. Opens with "OpenClaw skills can exfiltrate data without you knowing" and positions APort as the pre-action authorization layer that blocks attacks before execution. Added "See it in action" demo section with terminal examples.
+- **SKILL.md:** Aligned with README and OpenClaw feedback. Added "Before you install" section with remote code, what gets written, network/data, and credentials. Reformatted lists for scannability (one item per line). Added environment variables section and clarified slug vs product name.
+- **bin/openclaw:** Fixed skill path to use `skills/aport-agent-guardrail/SKILL.md` (matches repo structure).
+
 ## [1.0.6] - 2026-02-17
 
 ### Changed
