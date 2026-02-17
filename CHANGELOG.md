@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-02-17
+
+### Changed
+- **README:** Mermaid diagrams now use the same color and styling as [openai/openai-agents-python#2022](https://github.com/openai/openai-agents-python/issues/2022) (input guardrails blue, action/APort orange, output/audit purple, allow green, deny red, tool execution blue).
+
 ## [1.0.5] - 2026-02-17
 
 ### Added
