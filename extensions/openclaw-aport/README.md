@@ -61,8 +61,8 @@ plugins:
         # Mode: "local" (use guardrail script) or "api" (use APort cloud API)
         mode: local
 
-        # Passport file location
-        passportFile: ~/.openclaw/passport.json
+        # Passport file location (in aport/ subdir; legacy: ~/.openclaw/passport.json)
+        passportFile: ~/.openclaw/aport/passport.json
 
         # For local mode: path to guardrail script
         guardrailScript: ~/.openclaw/.skills/aport-guardrail-bash.sh
@@ -87,7 +87,7 @@ plugins:
 ## exec, allowed_commands, and unmapped tools
 
 - **exec** is OpenClaw’s main “run something” tool: it can run the guardrail script (we delegate to the inner tool) or a real shell command (e.g. `mkdir`, `npm install`). By default we map **exec** → **system.command.execute.v1** and check the **command** against your passport’s **limits.system.command.execute.allowed_commands**. If `mkdir` (or another command) is not in that list, the policy denies with `oap.command_not_allowed`.
-- **Fix:** Add every command you need to **allowed_commands** in your passport (e.g. `mkdir`, `cp`, `ls`, `cat`, `echo`, `pwd`, `mv`, `touch`, `npx`, `open`). Re-run the passport wizard to get an expanded default list, or edit `~/.openclaw/passport.json` and add to `limits.system.command.execute.allowed_commands`. If the guardrail is ever run via **exec** (e.g. a skill runs `bash ~/.openclaw/.skills/aport-guardrail.sh ...`), include **`bash`** (or the full script path) in **allowed_commands** so that invocation is allowed; the wizard default includes `bash` and `sh`.
+- **Fix:** Add every command you need to **allowed_commands** in your passport (e.g. `mkdir`, `cp`, `ls`, `cat`, `echo`, `pwd`, `mv`, `touch`, `npx`, `open`). Re-run the passport wizard to get an expanded default list, or edit `~/.openclaw/aport/passport.json` (or `~/.openclaw/passport.json` for legacy) and add to `limits.system.command.execute.allowed_commands`. If the guardrail is ever run via **exec** (e.g. a skill runs `bash ~/.openclaw/.skills/aport-guardrail.sh ...`), include **`bash`** (or the full script path) in **allowed_commands** so that invocation is allowed; the wizard default includes `bash` and `sh`.
 - **Optional:** Set **mapExecToPolicy: false** in plugin config so **exec** is not mapped; then exec is treated as an unmapped tool and allowed (no command allowlist). Use only if you rely on other controls; this disables guardrail protection for shell commands.
 - **read, write, edit, etc.** (OpenClaw file/browser tools) have **no policy mapping** in this plugin, so they are **allowed** by default when `allowUnmappedTools` is true. A “read failed: ENOENT” is the tool failing (e.g. file not found), not the guardrail blocking. Tool→policy mapping and passport limits are documented in [TOOL_POLICY_MAPPING.md](../../docs/TOOL_POLICY_MAPPING.md) and [OPENCLAW_TOOLS_AND_POLICIES.md](../../docs/OPENCLAW_TOOLS_AND_POLICIES.md).
 

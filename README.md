@@ -434,4 +434,4 @@ Apache 2.0 — see [LICENSE](LICENSE).
 
 ---
 
-<p align="center">Made with ❤️ by [Uchi](https://github.com/uchibeke/)</p>
+<p align="center">Made with ❤️ by [Uchi](https://github.com/uchibeke/) </p>

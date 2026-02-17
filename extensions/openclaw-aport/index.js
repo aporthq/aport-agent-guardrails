@@ -16,7 +16,7 @@
  *         enabled: true
  *         config:
  *           mode: local        # "local" | "api"
- *           passportFile: ~/.openclaw/passport.json   # Omit when using agentId (hosted)
+ *           passportFile: ~/.openclaw/aport/passport.json   # Omit when using agentId (hosted)
  *           agentId: ap_...     # Optional: hosted passport from aport.io (API fetches passport)
  *           guardrailScript: ~/.openclaw/.skills/aport-guardrail-bash.sh
  *           apiUrl: https://api.aport.io  # For API mode
@@ -24,7 +24,8 @@
  *           failClosed: true               # Block on error
  *
  * Decisions (local mode): Written to <config_dir>/decisions/<timestamp>-<id>.json and left for
- * audit. The guardrail script also appends a one-line summary to <config_dir>/audit.log. Decisions
+ * audit. The guardrail script also appends a one-line summary to <config_dir>/audit.log (when
+ * passport is in config/aport/, audit lives in config/aport/audit.log). Decisions
  * follow OAP v1.0 schema (see agent-passport spec/oap/decision-schema.json). Local mode uses
  * unsigned/local-unsigned; API mode can return signed decisions (chained audit in agent-passport).
  */
@@ -44,7 +45,7 @@ export default function (api) {
   const mode = config.mode || "local";
   const agentId = config.agentId || null;
   const passportFile = expandPath(
-    config.passportFile || "~/.openclaw/passport.json",
+    config.passportFile || "~/.openclaw/aport/passport.json",
   );
   const guardrailScript = expandPath(
     config.guardrailScript || "~/.openclaw/.skills/aport-guardrail-bash.sh",
