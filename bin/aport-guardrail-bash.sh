@@ -5,13 +5,12 @@
 
 set -e
 
-PASSPORT_FILE="${OPENCLAW_PASSPORT_FILE:-$HOME/.openclaw/passport.json}"
-DECISION_FILE="${OPENCLAW_DECISION_FILE:-$HOME/.openclaw/decision.json}"
-AUDIT_LOG="${OPENCLAW_AUDIT_LOG:-$HOME/.openclaw/audit.log}"
-KILL_SWITCH="${OPENCLAW_KILL_SWITCH:-$HOME/.openclaw/kill-switch}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve paths: config_dir/aport/ (new) or config_dir (legacy)
+# shellcheck source=bin/aport-resolve-paths.sh
+. "${SCRIPT_DIR}/bin/aport-resolve-paths.sh"
 
 # Get script directory to find submodules (external/ per GIT_SUBMODULES_EXPLAINED.md)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 POLICIES_DIR="$SCRIPT_DIR/external/aport-policies"
 LOCAL_POLICIES_DIR="$SCRIPT_DIR/local-overrides/policies"
 
@@ -27,7 +26,7 @@ if [ -n "$DEBUG_APORT" ]; then
     echo "DEBUG: CONTEXT length=${#CONTEXT_JSON}" >&2
 fi
 
-# Ensure audit log directory exists
+# Ensure APort data dir exists (for decision.json, audit.log)
 mkdir -p "$(dirname "$AUDIT_LOG")"
 
 # Function to load policy from upstream or local-overrides
