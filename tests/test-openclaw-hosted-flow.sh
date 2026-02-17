@@ -63,7 +63,7 @@ if grep -q "passportFile:.*passport.json" "$CONFIG_DIR/config.yaml" 2>/dev/null;
 fi
 echo "  ✅ config does not set passportFile (hosted)"
 
-if [ -f "$CONFIG_DIR/passport.json" ]; then
+if [ -f "$CONFIG_DIR/passport.json" ] || [ -f "$CONFIG_DIR/aport/passport.json" ]; then
     echo "FAIL: hosted flow must not create local passport.json" >&2
     exit 1
 fi
