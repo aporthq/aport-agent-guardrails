@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/agent-guardrails",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Policy enforcement guardrails for OpenClaw-compatible agent frameworks",
   "bin": {
     "agent-guardrails": "./bin/openclaw",

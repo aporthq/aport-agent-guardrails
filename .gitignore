@@ -1,2 +1,4 @@
 docs/launch/**
 *.bk
+
+**/.DS_Store

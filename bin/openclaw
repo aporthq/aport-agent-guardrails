@@ -518,9 +518,9 @@ fi
 # 3b. Install APort skill so OpenClaw loads it (managed skill: ~/.openclaw/skills)
 #     OpenClaw loads from: workspace/skills, then ~/.openclaw/skills, then bundled
 #     See https://docs.openclaw.ai/tools/skills
-#     Copy from repo so installed skill matches skills/aport-guardrail/SKILL.md (single source of truth)
+#     Copy from repo so installed skill matches skills/aport-agent-guardrail/SKILL.md (single source of truth)
 SKILL_DIR="$CONFIG_DIR/skills/aport-guardrail"
-REPO_SKILL="$REPO_ROOT/skills/aport-guardrail/SKILL.md"
+REPO_SKILL="$REPO_ROOT/skills/aport-agent-guardrail/SKILL.md"
 mkdir -p "$SKILL_DIR"
 if [ -f "$REPO_SKILL" ]; then
     cp "$REPO_SKILL" "$SKILL_DIR/SKILL.md"
