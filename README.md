@@ -213,14 +213,14 @@ flowchart TB
   A --> B --> C --> D --> E --> F
   F --> G
   F --> H
-  style A stroke:#0284c7,stroke-width:2px
-  style B stroke:#0284c7,stroke-width:2px
-  style C stroke:#6b7280,stroke-width:2px
-  style D stroke:#0891b2,stroke-width:3px
-  style E stroke:#0891b2,stroke-width:2px
-  style F stroke:#7c3aed,stroke-width:2px
-  style G stroke:#059669,stroke-width:2px
-  style H stroke:#dc2626,stroke-width:2px
+  style A fill:#0277bd,stroke:#01579b,stroke-width:2px,color:#fff
+  style B fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:#fff
+  style C fill:#0288d1,stroke:#01579b,stroke-width:2px,color:#fff
+  style D fill:#ff6f00,stroke:#bf360c,stroke-width:3px,color:#fff
+  style E fill:#ff6f00,stroke:#bf360c,stroke-width:2px,color:#fff
+  style F fill:#7b1fa2,stroke:#4a148c,stroke-width:2px,color:#fff
+  style G fill:#388e3c,stroke:#1b5e20,stroke-width:2px,color:#fff
+  style H fill:#c62828,stroke:#b71c1c,stroke-width:2px,color:#fff
 ```
 
 </div>
@@ -279,9 +279,9 @@ graph TB
   G --> H
   H --> I
 
-  style A stroke:#059669,stroke-width:2px
-  style D stroke:#0891b2,stroke-width:2px
-  style G stroke:#7c3aed,stroke-width:2px
+  style A fill:#0277bd,stroke:#01579b,stroke-width:2px,color:#fff
+  style D fill:#ff6f00,stroke:#bf360c,stroke-width:2px,color:#fff
+  style G fill:#6a1b9a,stroke:#4a148c,stroke-width:2px,color:#fff
 ```
 
 </div>
@@ -376,10 +376,10 @@ flowchart LR
     AP --> P
   end
   Runtime <-->|before every tool| Policy
-  style OC stroke:#0284c7,stroke-width:2px
-  style S stroke:#7c3aed,stroke-width:1px
-  style AP stroke:#0891b2,stroke-width:3px
-  style P stroke:#0891b2,stroke-width:1px
+  style OC fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:#fff
+  style S fill:#6a1b9a,stroke:#4a148c,stroke-width:1px,color:#fff
+  style AP fill:#ff6f00,stroke:#bf360c,stroke-width:3px,color:#fff
+  style P fill:#ff6f00,stroke:#bf360c,stroke-width:1px,color:#fff
 ```
 
 **Where verification runs (this repo):**
@@ -396,11 +396,11 @@ flowchart TB
   end
   Guard -->|API mode| API[📡 api.aport.io<br/>or self-hosted]
   Guard -->|Local mode| Bash[📜 aport-guardrail-bash.sh]
-  style OC stroke:#0284c7,stroke-width:2px
-  style Plug stroke:#0891b2,stroke-width:3px
-  style Guard stroke:#0891b2,stroke-width:2px
-  style API stroke:#059669,stroke-width:1px
-  style Bash stroke:#6b7280,stroke-width:1px
+  style OC fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:#fff
+  style Plug fill:#ff6f00,stroke:#bf360c,stroke-width:3px,color:#fff
+  style Guard fill:#ff6f00,stroke:#bf360c,stroke-width:2px,color:#fff
+  style API fill:#2e7d32,stroke:#1b5e20,stroke-width:1px,color:#fff
+  style Bash fill:#6b7280,stroke:#374151,stroke-width:1px,color:#fff
 ```
 
 </div>
