@@ -30,27 +30,25 @@ DEPLOY="$(cd "$OPENCLAW_DEPLOYMENT_DIR" && pwd)"
 bootstrap_deploy_dir() {
     [ "$BOOTSTRAPPED" -eq 0 ] && return 0
     echo "  Bootstrap OpenClaw-like dir: $DEPLOY"
-    # Passport (copy fixture so allowed_commands include mkdir, npm, etc.)
-    cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$DEPLOY/passport.json"
-    # Repo path for wrappers
+    # APort data in aport/ (match bin/openclaw layout)
+    mkdir -p "$DEPLOY/aport"
+    cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$DEPLOY/aport/passport.json"
     echo "$REPO_ROOT" > "$DEPLOY/.aport-repo"
     mkdir -p "$DEPLOY/.skills"
-    # Wrapper: same as bin/openclaw write_wrapper for aport-guardrail-bash.sh
+    # Wrapper: same as bin/openclaw write_wrapper (defaults to config_dir/aport/)
     cat > "$DEPLOY/.skills/aport-guardrail-bash.sh" << WRAP
 #!/bin/bash
 CONFIG_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
 APORT_REPO_ROOT="\$(cat "\$CONFIG_DIR/.aport-repo" 2>/dev/null)"
 [ -z "\$APORT_REPO_ROOT" ] && { echo "Error: .aport-repo missing." >&2; exit 1; }
-export OPENCLAW_PASSPORT_FILE="\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/passport.json}"
-export OPENCLAW_DECISION_FILE="\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/decision.json}"
-export OPENCLAW_AUDIT_LOG="\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/audit.log}"
-export OPENCLAW_KILL_SWITCH="\${OPENCLAW_KILL_SWITCH:-\$CONFIG_DIR/kill-switch}"
+export OPENCLAW_PASSPORT_FILE="\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}"
+export OPENCLAW_DECISION_FILE="\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/aport/decision.json}"
+export OPENCLAW_AUDIT_LOG="\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/aport/audit.log}"
+export OPENCLAW_KILL_SWITCH="\${OPENCLAW_KILL_SWITCH:-\$CONFIG_DIR/aport/kill-switch}"
 exec "\$APORT_REPO_ROOT/bin/aport-guardrail-bash.sh" "\$@"
 WRAP
     chmod +x "$DEPLOY/.skills/aport-guardrail-bash.sh"
-    # Decision/audit dir
-    touch "$DEPLOY/decision.json" 2>/dev/null || true
-    rm -f "$DEPLOY/kill-switch"
+    rm -f "$DEPLOY/aport/kill-switch"
 }
 
 # Assert ALLOW (exit 0)
@@ -78,7 +76,7 @@ echo ""
 
 # Method 1: Bash guardrail standalone (direct repo bin, passport from deploy dir)
 echo "  Method 1: Bash guardrail standalone..."
-export OPENCLAW_PASSPORT_FILE="$DEPLOY/passport.json"
+export OPENCLAW_PASSPORT_FILE="$DEPLOY/aport/passport.json"
 export OPENCLAW_DECISION_FILE="$TEST_DIR/decision-m1.json"
 exit1=0; "$REPO_ROOT/bin/aport-guardrail-bash.sh" system.command.execute "$ALLOW_CMD" 2>/dev/null || exit1=$?
 assert_allow $exit1 || exit 1
@@ -94,7 +92,7 @@ echo "  Method 2: API guardrail standalone..."
 if [ -z "${APORT_API_URL:-}" ]; then
     echo "    SKIP (APORT_API_URL not set)"
 else
-    export OPENCLAW_PASSPORT_FILE="$DEPLOY/passport.json"
+    export OPENCLAW_PASSPORT_FILE="$DEPLOY/aport/passport.json"
     export OPENCLAW_DECISION_FILE="$TEST_DIR/decision-m2.json"
     exit2a=0; "$REPO_ROOT/bin/aport-guardrail-api.sh" system.command.execute "$ALLOW_CMD" 2>/dev/null || exit2a=$?
     if [ $exit2a -eq 0 ]; then
@@ -123,7 +121,7 @@ echo "  Method 4: Plugin-API (API with passport from deployment dir)..."
 if [ -z "${APORT_API_URL:-}" ]; then
     echo "    SKIP (APORT_API_URL not set)"
 else
-    export OPENCLAW_PASSPORT_FILE="$DEPLOY/passport.json"
+    export OPENCLAW_PASSPORT_FILE="$DEPLOY/aport/passport.json"
     export OPENCLAW_DECISION_FILE="$TEST_DIR/decision-m4.json"
     exit4=0; "$REPO_ROOT/bin/aport-guardrail-api.sh" system.command.execute "$ALLOW_CMD" 2>/dev/null || exit4=$?
     if [ $exit4 -eq 0 ]; then

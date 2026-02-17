@@ -10,13 +10,11 @@
 
 set -e
 
-PASSPORT_FILE="${OPENCLAW_PASSPORT_FILE:-$HOME/.openclaw/passport.json}"
-DECISION_FILE="${OPENCLAW_DECISION_FILE:-$HOME/.openclaw/decision.json}"
-AUDIT_LOG="${OPENCLAW_AUDIT_LOG:-$HOME/.openclaw/audit.log}"
-KILL_SWITCH="${OPENCLAW_KILL_SWITCH:-$HOME/.openclaw/kill-switch}"
-
-# Get script directory to find Node.js evaluator
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve paths: config_dir/aport/ (new) or config_dir (legacy); same as bash guardrail
+# shellcheck source=bin/aport-resolve-paths.sh
+. "${SCRIPT_DIR}/bin/aport-resolve-paths.sh"
+
 NODE_EVALUATOR="$SCRIPT_DIR/src/evaluator.js"
 
 TOOL_NAME="$1"
@@ -29,7 +27,7 @@ if [ -n "$DEBUG_APORT" ]; then
     echo "DEBUG: CONTEXT_JSON=$CONTEXT_JSON" >&2
 fi
 
-# Ensure audit log directory exists
+# Ensure APort data dir exists (for decision, audit)
 mkdir -p "$(dirname "$AUDIT_LOG")"
 
 # Check if Node.js is available

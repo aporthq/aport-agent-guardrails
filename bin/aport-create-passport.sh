@@ -4,7 +4,7 @@
 # Use for any framework; for OpenClaw with a custom config directory, run ./bin/openclaw instead.
 #
 # Usage: ./aport-create-passport.sh [--output FILE] [--non-interactive]
-#   --output FILE       Write passport to FILE (e.g. /path/to/my-openclaw/passport.json)
+#   --output FILE       Write passport to FILE (e.g. /path/to/my-openclaw/aport/passport.json)
 #   --non-interactive   Use defaults only; no prompts (for CI/tests).
 #
 # When OPENCLAW_CONFIG_DIR is set (e.g. by bin/openclaw), the wizard reads defaults
@@ -13,7 +13,7 @@
 
 set -e
 
-PASSPORT_FILE="$HOME/.openclaw/passport.json"
+PASSPORT_FILE="$HOME/.openclaw/aport/passport.json"
 NON_INTERACTIVE=""
 # Parse --output and --non-interactive
 while [ $# -gt 0 ]; do

@@ -6,10 +6,9 @@
 
 set -e
 
-PASSPORT_FILE="${OPENCLAW_PASSPORT_FILE:-$HOME/.openclaw/passport.json}"
-AUDIT_LOG="${OPENCLAW_AUDIT_LOG:-$HOME/.openclaw/audit.log}"
-KILL_SWITCH="${OPENCLAW_KILL_SWITCH:-$HOME/.openclaw/kill-switch}"
-DECISION_FILE="${OPENCLAW_DECISION_FILE:-$HOME/.openclaw/decision.json}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=bin/aport-resolve-paths.sh
+. "${SCRIPT_DIR}/bin/aport-resolve-paths.sh"
 
 if [ "$1" = "--passport" ] && [ -n "$2" ]; then
     PASSPORT_FILE="$2"
