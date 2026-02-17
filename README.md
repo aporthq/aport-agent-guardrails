@@ -8,23 +8,31 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](package.json)
 [![OpenClaw](https://img.shields.io/badge/OpenClaw-%3E%3D2026.2.0-blue.svg)](extensions/openclaw-aport/package.json)
 
-**Pre-action authorization for AI agents.** Verify permissions *before* every tool runs — works with [OpenClaw](https://github.com/openclaw/openclaw), [IronClaw](https://github.com/nearai/ironclaw), PicoClaw, and compatible frameworks.
-
 <p>
   <a href="https://www.npmjs.com/package/@aporthq/agent-guardrails">npm</a> •
   <a href="https://aport.io">Website</a> •
   <a href="https://aport.io/docs">Docs</a> •
   <a href="https://aport.io/brand-mascot-agent/">Meet Porter</a> •
-  <a href="#-quick-start">Quick Start</a>
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="SECURITY.md">Security</a>
 </p>
 
 </div>
 
 ---
 
-## 💡 Philosophy
+## The problem: OpenClaw skills can exfiltrate data without you knowing
 
-Your AI agent should **only do what you explicitly allow**. APort Agent Guardrails enforces that at the platform level: every tool call is checked against a **passport** (identity + capabilities + limits) *before* it runs. No “trust the prompt” — the guardrail runs in the hook; the model cannot skip it.
+[Cisco's AI security team](https://blogs.cisco.com/ai/personal-ai-agents-like-openclaw-are-a-security-nightmare) documented that **OpenClaw skills can perform silent data exfiltration and prompt-injection attacks**—third-party skills run with the same trust as the agent, so a malicious or compromised skill can read files, run commands, or call external APIs without user awareness. That finding has been amplified by [FourWeekMBA](https://fourweekmba.com/openclaws-security-nightmare-the-risk-openai-just-inherited/), [AuthMind](https://www.authmind.com/post/openclaw-malicious-skills-agentic-ai-supply-chain), [Bitsight](https://www.bitsight.com/blog), and others. Additional vulnerabilities (e.g. [CVE-2026-25253](https://www.securityweek.com/vulnerability-allows-hackers-to-hijack-openclaw-ai-assistant/) token exfiltration leading to gateway compromise) keep surfacing.
+
+**APort Agent Guardrails is the pre-action authorization layer that blocks this before it executes.** Every tool call is checked against a **passport** (identity + capabilities + limits) in the platform's `before_tool_call` hook. The model cannot skip it; malicious or injected commands are denied before they run. See [SECURITY.md](SECURITY.md) for how we address the Cisco findings, prompt injection, and related attack vectors.
+
+---
+
+## Why pre-action authorization?
+
+Your agent should **only do what you explicitly allow**. APort runs in the hook—not in the prompt—so enforcement is deterministic and cannot be bypassed by prompt injection. No “trust the prompt”. The guardrail runs in the hook; the model cannot skip it.
+
 
 | | Without APort | With APort (plugin) |
 |---|----------------|---------------------|
