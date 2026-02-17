@@ -1,0 +1,19 @@
+{
+  "decision_id": "local-error-1771291655471",
+  "policy_id": "system.command.execute.v1",
+  "passport_id": "unknown",
+  "owner_id": "unknown",
+  "assurance_level": "L0",
+  "allow": false,
+  "reasons": [
+    {
+      "code": "oap.evaluation_error",
+      "message": "API request failed (404): {\"error\":\"passport_not_found\",\"message\":\"Passport with the specified agent ID was not found\",\"details\":{\"requestId\":\"policy_1771291653775_ivjmlj\",\"agent_id\":\"ap_8955f5450cd542fe8f67bbbf07c3e103\"}}"
+    }
+  ],
+  "issued_at": "2026-02-17T01:27:35.471Z",
+  "expires_at": "2026-02-17T02:27:35.471Z",
+  "passport_digest": "sha256:error",
+  "signature": "ed25519:unsigned",
+  "kid": "oap:local:error"
+}

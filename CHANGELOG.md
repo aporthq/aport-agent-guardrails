@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-02-17
+
+### Added
+- **APort data directory:** Passport, decision, audit, and kill-switch files now live under `config_dir/aport/` (e.g. `~/.openclaw/aport/passport.json`) for a cleaner layout. New installs use this path; existing installs continue to work (backward compatible).
+- **Path resolver:** `bin/aport-resolve-paths.sh` — single source of truth for resolving APort paths; `aport-guardrail-bash.sh`, `aport-guardrail-api.sh`, and `aport-status.sh` source it (DRY, consistent behavior).
+- **SKILL from repo:** Installer copies `skills/aport-guardrail/SKILL.md` into the config dir instead of a hardcoded heredoc, so the installed skill always matches the repo.
+
+### Changed
+- **Default paths:** Plugin and create-passport default to `~/.openclaw/aport/passport.json`; wrappers default to `config_dir/aport/` for all four files.
+- **SKILL.md:** Removed shield emoji/references; clarified that users do not run the guardrail script manually (plugin enforces automatically); added `agent_id` option and OpenClaw docs links; document passport at `~/.openclaw/aport/passport.json` and repo clone for `./bin/openclaw`.
+- **Docs:** QUICKSTART_OPENCLAW_PLUGIN, extension README, and related docs updated for aport/ paths and legacy fallback.
+
+### Fixed
+- **API guardrail:** `aport-guardrail-api.sh` now sources the path resolver so it finds the passport at the legacy location when the wrapper points to `aport/` and the file exists only in the config root.
+
 ## [1.0.4] - 2026-02-16
 
 ### Fixed
@@ -116,6 +131,10 @@ None (first release).
 
 ---
 
-[Unreleased]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.4...v1.0.5
+[1.0.4]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/aporthq/aport-agent-guardrails/releases/tag/v1.0.1
 [1.0.0]: https://github.com/aporthq/aport-agent-guardrails/releases/tag/v1.0.0
