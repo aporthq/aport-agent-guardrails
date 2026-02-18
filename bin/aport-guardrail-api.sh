@@ -42,12 +42,6 @@ if [ ! -f "$NODE_EVALUATOR" ]; then
     exit 1
 fi
 
-# Check kill switch first (highest priority)
-if [ -f "$KILL_SWITCH" ]; then
-    echo "Error: Global kill switch is active. Remove $KILL_SWITCH to resume." >&2
-    exit 1
-fi
-
 # Passport required only for local mode (passport in request). Cloud mode uses APORT_AGENT_ID.
 if [ -z "$APORT_AGENT_ID" ] && [ ! -f "$PASSPORT_FILE" ]; then
     echo "Error: Passport file not found at $PASSPORT_FILE. Create one with aport-create-passport.sh, or set APORT_AGENT_ID for cloud mode." >&2

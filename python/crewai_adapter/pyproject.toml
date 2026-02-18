@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aport-agent-guardrails-crewai"
+version = "1.0.8"
+description = "APort Agent Guardrail for CrewAI — before_tool_call hook for AI agent and multi-agent crews"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "APort Technologies Inc." }]
+keywords = ["aport", "agent guardrail", "LLM guardrail", "crewai", "guardrails", "multi-agent", "AI agent"]
+requires-python = ">=3.10"
+dependencies = [
+    "aport-agent-guardrails",
+    "crewai>=0.80",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+aport-crewai = "crewai_adapter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["crewai_adapter*", "aport_guardrails_crewai*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

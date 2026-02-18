@@ -44,4 +44,4 @@ Local policy and passport templates that override or extend the submodule conten
 
 ## `tests/`
 
-OAP v1 test suite: guardrail allow/deny, passport creation, kill switch, four verification methods, API evaluator (when API is up). Run with `make test`.
+OAP v1 test suite: guardrail allow/deny, passport creation, suspend (passport status), four verification methods, API evaluator (when API is up). Run with `make test`.

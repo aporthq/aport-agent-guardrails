@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aport-agent-guardrails-langchain"
+version = "1.0.8"
+description = "APort Agent Guardrail for LangChain/LangGraph — AsyncCallbackHandler for AI agent tool calls"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "APort Technologies Inc.", email = "team@aport.io" }]
+keywords = ["aport", "agent guardrail", "LLM guardrail", "langchain", "langgraph", "guardrails", "agent", "AI agent"]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "aport-agent-guardrails",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+
+[project.scripts]
+aport-langchain = "langchain_adapter.cli:main"
+
+[project.urls]
+Homepage = "https://aport.io"
+Documentation = "https://github.com/aporthq/agent-guardrails#readme"
+Repository = "https://github.com/aporthq/agent-guardrails"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["langchain_adapter*", "aport_guardrails_langchain*"]

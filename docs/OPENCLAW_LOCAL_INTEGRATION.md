@@ -485,23 +485,20 @@ bin/aport-guardrail.sh mcp.tool.execute.v1 '{
 
 ---
 
-## 🚨 Kill Switch
+## 🚨 Suspend agent (kill switch = passport status)
 
-**Activate emergency stop:**
+**Passport is the source of truth.** To suspend the agent, set passport `status` to `suspended`:
 
 ```bash
-# Create kill switch file
-touch ~/.openclaw/kill-switch
+# Suspend: set passport status to suspended
+jq '.status = "suspended"' ~/.openclaw/aport/passport.json > /tmp/passport.tmp && mv /tmp/passport.tmp ~/.openclaw/aport/passport.json
 
-# All verifications will now DENY
-bin/aport-guardrail.sh system.command.execute.v1 '{
-  "command": "npm",
-  "args": ["install"]
-}'
-# Output: ❌ DENIED - Kill switch active
+# All verifications will now DENY with oap.passport_suspended
+bin/aport-guardrail.sh system.command.execute '{"command":"npm install"}'
+# Exit 1, decision has allow: false, reasons[0].code: oap.passport_suspended
 
-# Remove kill switch to resume
-rm ~/.openclaw/kill-switch
+# Resume: set status back to active
+jq '.status = "active"' ~/.openclaw/aport/passport.json > /tmp/passport.tmp && mv /tmp/passport.tmp ~/.openclaw/aport/passport.json
 ```
 
 ---
@@ -568,13 +565,9 @@ npm run dev
 
 ### Problem: "All commands denied"
 ```bash
-# Check passport status
-jq '.status' ~/.openclaw/passport.json
-# Should be "active"
-
-# Check kill switch
-ls ~/.openclaw/kill-switch
-# If exists, remove it
+# Check passport status (source of truth)
+jq '.status' ~/.openclaw/aport/passport.json
+# Should be "active"; if "suspended" or "revoked", set back to "active" to resume
 ```
 
 ---

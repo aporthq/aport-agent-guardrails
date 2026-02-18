@@ -14,8 +14,8 @@ install:
 	@echo "Run 'aport-create-passport.sh' to create your first passport"
 
 test:
-	@echo "Running OAP v1 tests..."
-	@chmod +x bin/*.sh tests/*.sh 2>/dev/null || true
+	@echo "Running tests (unit, OAP, integration)..."
+	@chmod +x bin/*.sh bin/lib/*.sh tests/*.sh tests/unit/*.sh tests/frameworks/openclaw/setup.sh 2>/dev/null || true
 	@bash tests/run.sh
 	@echo "✅ Tests complete"
 
