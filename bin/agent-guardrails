@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Main dispatcher: detect or prompt for framework, then run framework setup.
+# Usage:
+#   agent-guardrails                    # detect from cwd or prompt
+#   agent-guardrails openclaw           # explicit framework
+#   agent-guardrails openclaw ap_xxx    # openclaw with agent_id (pass-through)
+#   agent-guardrails --framework=langchain
+#   agent-guardrails -f crewai
+# Supported: openclaw | langchain | crewai | cursor (n8n coming soon)
+#
+# Backward compatibility: All arguments after the framework are passed through to
+# the framework script. For OpenClaw, bin/openclaw receives them (e.g. agent_id).
+# The "aport" bin still points at bin/openclaw directly for existing scripts.
+
+set -euo pipefail
+
+# Resolve script path so npx (node_modules/.bin/agent-guardrails -> package/bin/agent-guardrails) works
+SCRIPT_PATH="${BASH_SOURCE[0]:-.}"
+while [[ -L "$SCRIPT_PATH" ]]; do
+  TARGET="$(readlink "$SCRIPT_PATH")"
+  if [[ "$TARGET" == /* ]]; then
+    SCRIPT_PATH="$TARGET"
+  else
+    SCRIPT_PATH="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)/$TARGET"
+  fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+FRAMEWORKS_DIR="$SCRIPT_DIR/frameworks"
+LIB_DIR="$SCRIPT_DIR/lib"
+
+# Parse --framework= and -f (skip detection when set)
+framework=""
+REST=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --framework=*)
+      framework="${1#--framework=}"
+      shift
+      ;;
+    -f)
+      if [[ $# -gt 1 ]]; then
+        framework="$2"
+        shift 2
+      else
+        echo "[aport] ERROR: -f requires a value (e.g. -f openclaw)" >&2
+        exit 1
+      fi
+      ;;
+    *)
+      REST+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# If no framework from args, try APORT_FRAMEWORK (non-interactive) or detection
+if [[ -z "$framework" ]]; then
+  if [[ -n "${APORT_FRAMEWORK:-}" ]]; then
+    framework="$APORT_FRAMEWORK"
+  else
+    project_dir="${APORT_PROJECT_DIR:-$PWD}"
+    if [[ -f "$LIB_DIR/detect.sh" ]]; then
+      # shellcheck source=./lib/detect.sh
+      source "$LIB_DIR/detect.sh"
+      detected_list="$(detect_frameworks_list "$project_dir")"
+      framework="$(detect_framework "$project_dir")"
+      # Multiple detected: show conflict and all options
+      if [[ -n "$detected_list" ]]; then
+        count=$(echo "$detected_list" | wc -w)
+        if [[ "$count" -gt 1 ]]; then
+          noninteractive="${APORT_NONINTERACTIVE:-${CI:-}}"
+          if [[ -n "$noninteractive" ]]; then
+            echo "[aport] ERROR: Multiple frameworks detected: $detected_list" >&2
+            echo "  Set APORT_FRAMEWORK or use --framework=openclaw | langchain | crewai | cursor" >&2
+            exit 1
+          fi
+          echo ""
+          echo "  APort Agent Guardrails — Framework setup"
+          echo "  ─────────────────────────────────────────"
+          echo "  Multiple frameworks detected: $detected_list"
+          echo "  Choose one: openclaw | langchain | crewai | cursor"
+          echo "  Example: npx @aporthq/agent-guardrails --framework=openclaw"
+          echo ""
+          read -p "  Framework [${framework:-openclaw}]: " choice
+          framework="${choice:-${framework:-openclaw}}"
+        fi
+      fi
+    fi
+  fi
+fi
+
+# If still empty, prompt or exit (non-interactive)
+if [[ -z "$framework" ]]; then
+  noninteractive="${APORT_NONINTERACTIVE:-${CI:-}}"
+  if [[ -n "$noninteractive" ]]; then
+    echo "[aport] ERROR: No framework detected in current directory." >&2
+    echo "  Set APORT_FRAMEWORK or use --framework=openclaw | langchain | crewai | cursor" >&2
+    exit 1
+  fi
+  echo ""
+  echo "  APort Agent Guardrails — Framework setup"
+  echo "  ─────────────────────────────────────────"
+  echo "  No framework detected in current directory."
+  echo "  Choose: openclaw | langchain | crewai | cursor"
+  echo "  Example: npx @aporthq/agent-guardrails openclaw"
+  echo "           npx @aporthq/agent-guardrails --framework=langchain"
+  echo ""
+  read -p "  Framework [openclaw]: " framework
+  framework="${framework:-openclaw}"
+fi
+
+framework="$(echo "$framework" | tr '[:upper:]' '[:lower:]')"
+script="$FRAMEWORKS_DIR/${framework}.sh"
+
+# n8n: custom node not yet available; warn before running wizard-only script
+if [[ "$framework" == "n8n" ]]; then
+  echo "[aport] Note: n8n custom node is not yet available. This setup only runs the passport wizard and writes config." >&2
+fi
+
+# Run framework script if it exists and is executable (safe with empty REST)
+if [[ -x "$script" ]]; then
+  exec "$script" ${REST+"${REST[@]}"}
+fi
+
+# Fallback: OpenClaw uses the full installer (wizard + config + plugin + next steps)
+if [[ "$framework" == "openclaw" ]]; then
+  exec "$SCRIPT_DIR/openclaw" ${REST+"${REST[@]}"}
+fi
+
+echo "[aport] ERROR: Unknown or unsupported framework: $framework" >&2
+echo "  Supported: openclaw, langchain, crewai, cursor (n8n coming soon)" >&2
+exit 1

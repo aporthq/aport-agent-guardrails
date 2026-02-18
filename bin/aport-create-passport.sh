@@ -3,29 +3,60 @@
 # Interactive passport creation wizard (OAP v1.0).
 # Use for any framework; for OpenClaw with a custom config directory, run ./bin/openclaw instead.
 #
-# Usage: ./aport-create-passport.sh [--output FILE] [--non-interactive]
-#   --output FILE       Write passport to FILE (e.g. /path/to/my-openclaw/aport/passport.json)
-#   --non-interactive   Use defaults only; no prompts (for CI/tests).
+# Usage: ./aport-create-passport.sh [--output FILE] [--non-interactive] [--framework=NAME]
+#   --output FILE       Write passport to FILE (overrides framework default).
+#   --non-interactive   Use defaults only; no prompts (for CI/tests). Use --output or set APORT_FRAMEWORK for default path.
+#   --framework=NAME    Default passport path for this framework (cursor, openclaw, langchain, crewai, n8n).
 #
-# When OPENCLAW_CONFIG_DIR is set (e.g. by bin/openclaw), the wizard reads defaults
-# from OPENCLAW_CONFIG_DIR/workspace/IDENTITY.md (Name, Vibe/description) and from
-# git/gh for email.
+# In interactive mode the first question is "Passport file path [default]:"; you can press Enter for the
+# framework default or type a different path. In non-interactive mode, --output always overrides; if not
+# given and APORT_FRAMEWORK is set, the framework default path is used.
 
 set -e
 
-PASSPORT_FILE="$HOME/.openclaw/aport/passport.json"
+PASSPORT_FILE=""
 NON_INTERACTIVE=""
-# Parse --output and --non-interactive
+# Parse --output, --non-interactive, --framework=
 while [ $# -gt 0 ]; do
     case "$1" in
-        --output)   [ -n "${2:-}" ] && PASSPORT_FILE="$2" && shift ;;
+        --output)     [ -n "${2:-}" ] && PASSPORT_FILE="$2" && shift ;;
         --non-interactive) NON_INTERACTIVE=1 ;;
+        --framework=*) APORT_FRAMEWORK="${1#--framework=}" ;;
     esac
     shift
 done
 
-# Repo root (for external/aport-spec submodule). Output aligns with agent-passport/spec/oap.
+# Repo root and lib for get_default_passport_path
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LIB_DIR="$SCRIPT_DIR/bin/lib"
+if [ -f "$LIB_DIR/config.sh" ]; then
+    # shellcheck source=bin/lib/config.sh
+    . "$LIB_DIR/config.sh"
+fi
+
+# Default passport path: --output wins; else framework-specific default; else OpenClaw legacy path
+if [ -z "$PASSPORT_FILE" ]; then
+    if [ -n "${APORT_FRAMEWORK:-}" ] && type get_default_passport_path &>/dev/null; then
+        PASSPORT_FILE="$(get_default_passport_path "$APORT_FRAMEWORK")"
+    else
+        PASSPORT_FILE="$HOME/.openclaw/aport/passport.json"
+    fi
+fi
+PASSPORT_FILE="${PASSPORT_FILE/#\~/$HOME}"
+
+# Config dir: from env, or derived from passport path (e.g. .../aport/passport.json -> parent of aport)
+if [ -n "${OPENCLAW_CONFIG_DIR:-}" ]; then
+    CONFIG_DIR="${OPENCLAW_CONFIG_DIR/#\~/$HOME}"
+else
+    CONFIG_DIR="$(dirname "$PASSPORT_FILE")"
+    case "$PASSPORT_FILE" in
+        */aport/passport.json) CONFIG_DIR="$(dirname "$CONFIG_DIR")" ;;
+    esac
+    CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+fi
+IDENTITY_FILE="$CONFIG_DIR/workspace/IDENTITY.md"
+
+# Repo root for external/aport-spec submodule
 SPEC_SCHEMA="$SCRIPT_DIR/external/aport-spec/oap/passport-schema.json"
 # OAP spec: spec_version "oap/1.0", limits nested per capability (e.g. limits["system.command.execute"]).
 # Local creation has no KYC/assurance proof → L0.
@@ -36,11 +67,6 @@ else
 fi
 [ -z "$DEFAULT_SPEC_VERSION" ] || [ "$DEFAULT_SPEC_VERSION" = "null" ] && DEFAULT_SPEC_VERSION="oap/1.0"
 DEFAULT_ASSURANCE_LEVEL="L0"
-
-# Config dir: from env (set by bin/openclaw) or dirname of passport file
-CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-$(dirname "$PASSPORT_FILE")}"
-CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
-IDENTITY_FILE="$CONFIG_DIR/workspace/IDENTITY.md"
 
 # --- Smart defaults ---
 get_default_email() {
@@ -84,7 +110,7 @@ DEFAULT_AGENT_DESC=$(get_identity_description) || true
 DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
 
 if [ -n "$NON_INTERACTIVE" ]; then
-    # CI/tests: use defaults, no prompts. Requires --output. Match interactive defaults (README: messaging out of the box).
+    # CI/tests: use defaults, no prompts. Use --output or APORT_FRAMEWORK for default path. Match interactive defaults (README: messaging out of the box).
     owner_id="$DEFAULT_EMAIL"
     owner_type="$DEFAULT_OWNER_TYPE"
     agent_name="$DEFAULT_AGENT_NAME"
@@ -101,20 +127,39 @@ if [ -n "$NON_INTERACTIVE" ]; then
     should_expire=n
     never_expires="true"
     expires_at=""
+    if command -v uuidgen &>/dev/null; then
+        passport_id=$(uuidgen)
+    else
+        passport_id="local-$(date +%s)-$(openssl rand -hex 4 2>/dev/null || echo $(( RANDOM )))"
+    fi
 else
 echo ""
 echo "  🛂 APort Passport Creation Wizard"
 echo "  ══════════════════════════════════"
 echo ""
 echo "  Creates an Open Agent Passport (OAP v1.0) for your agent."
-echo "  Passport file: $PASSPORT_FILE"
+echo "  (Press Enter to use the default when shown in brackets.)"
+echo ""
+# First question: where to store the passport (default = framework-specific or OpenClaw path)
+read -p "  Passport file path [$PASSPORT_FILE]: " passport_input
+if [ -n "$passport_input" ]; then
+    PASSPORT_FILE="${passport_input/#\~/$HOME}"
+fi
+mkdir -p "$(dirname "$PASSPORT_FILE")"
+CONFIG_DIR="$(dirname "$PASSPORT_FILE")"
+# If passport is in .../aport/passport.json, config dir is parent of aport
+case "$PASSPORT_FILE" in
+    */aport/passport.json) CONFIG_DIR="$(dirname "$(dirname "$PASSPORT_FILE")")" ;;
+esac
+CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+IDENTITY_FILE="$CONFIG_DIR/workspace/IDENTITY.md"
 echo ""
 
 # Check if passport already exists
 if [ -f "$PASSPORT_FILE" ]; then
     read -p "  Passport already exists. Overwrite? [y/N]: " overwrite
     if [ "$overwrite" != "y" ] && [ "$overwrite" != "Y" ]; then
-        echo "  Aborting. Use --output to specify a different file."
+        echo "  Aborting. Re-run and choose a different path, or use --output to specify a file."
         exit 1
     fi
     echo ""
@@ -362,6 +407,8 @@ else
     mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"
     echo "  ⚠️  jq not found; passport JSON not pretty-printed."
 fi
+# Restrict permissions: passport holds allowlists and identity
+chmod 600 "$PASSPORT_FILE" 2>/dev/null || true
 
 echo ""
 echo "  ✅ Passport created successfully!"

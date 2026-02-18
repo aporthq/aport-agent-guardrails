@@ -1,0 +1,38 @@
+{
+  "name": "@aporthq/aport-agent-guardrails-core",
+  "version": "1.0.8",
+  "description": "Core evaluator, passport, and config for APort agent guardrails (shared across frameworks)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && cp src/core/tool-pack-mapping.json src/core/default-passport-paths.json dist/core/",
+    "clean": "rm -rf dist",
+    "test": "jest"
+  },
+  "keywords": [
+    "aport",
+    "agent",
+    "guardrails",
+    "authorization",
+    "policy"
+  ],
+  "author": "APort Technologies Inc.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -23,8 +23,6 @@ fi
 export OPENCLAW_PASSPORT_FILE="$FLOW_PASSPORT"
 export OPENCLAW_DECISION_FILE="$TEST_DIR/decision.json"
 export OPENCLAW_AUDIT_LOG="$TEST_DIR/audit.log"
-export OPENCLAW_KILL_SWITCH="$TEST_DIR/kill-switch"
-rm -f "$OPENCLAW_KILL_SWITCH"
 
 cd "$REPO_ROOT"
 

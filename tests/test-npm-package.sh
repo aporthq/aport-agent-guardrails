@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test the published npm package @aporthq/agent-guardrails: install and run guardrail.
+# Test the published npm package @aporthq/aport-agent-guardrails: install and run guardrail.
 # Run from repo root: bash tests/test-npm-package.sh
 # Requires: npm, jq. Uses a temp dir; does not pollute repo.
 
@@ -11,12 +11,12 @@ TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2>/dev/null || echo "$REPO_ROOT/tests/ou
 mkdir -p "$TEST_DIR"
 cd "$TEST_DIR"
 
-echo "  NPM package: install @aporthq/agent-guardrails in $TEST_DIR"
+echo "  NPM package: install @aporthq/aport-agent-guardrails in $TEST_DIR"
 npm init -y >/dev/null 2>&1
 # --ignore-scripts: avoid make install (for clone-from-repo); published package has conditional install
-npm install "@aporthq/agent-guardrails" --no-save --no-package-lock --ignore-scripts >/dev/null 2>&1
+npm install "@aporthq/aport-agent-guardrails" --no-save --no-package-lock --ignore-scripts >/dev/null 2>&1
 
-PKG_ROOT="$TEST_DIR/node_modules/@aporthq/agent-guardrails"
+PKG_ROOT="$TEST_DIR/node_modules/@aporthq/aport-agent-guardrails"
 if [ ! -d "$PKG_ROOT" ]; then
     echo "FAIL: package not found at $PKG_ROOT" >&2
     exit 1

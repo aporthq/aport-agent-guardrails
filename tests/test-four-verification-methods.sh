@@ -44,11 +44,9 @@ APORT_REPO_ROOT="\$(cat "\$CONFIG_DIR/.aport-repo" 2>/dev/null)"
 export OPENCLAW_PASSPORT_FILE="\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}"
 export OPENCLAW_DECISION_FILE="\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/aport/decision.json}"
 export OPENCLAW_AUDIT_LOG="\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/aport/audit.log}"
-export OPENCLAW_KILL_SWITCH="\${OPENCLAW_KILL_SWITCH:-\$CONFIG_DIR/aport/kill-switch}"
 exec "\$APORT_REPO_ROOT/bin/aport-guardrail-bash.sh" "\$@"
 WRAP
     chmod +x "$DEPLOY/.skills/aport-guardrail-bash.sh"
-    rm -f "$DEPLOY/aport/kill-switch"
 }
 
 # Assert ALLOW (exit 0)

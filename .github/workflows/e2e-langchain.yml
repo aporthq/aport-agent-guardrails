@@ -1,0 +1,52 @@
+# E2E: Install aport-agent-guardrails + aport-agent-guardrails-langchain, run aport-langchain setup --ci, run example and expect ALLOW.
+name: E2E LangChain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  e2e-langchain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install core and langchain adapter (editable)
+        run: |
+          pip install -e python/aport_guardrails -e "python/langchain_adapter[dev]"
+
+      - name: aport-langchain setup --ci
+        run: |
+          aport-langchain setup --ci
+          test -f ~/.aport/langchain/config.yaml && echo "✅ config written"
+
+      - name: Run example (ALLOW then DENY)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          out=$(PYTHONPATH=python:python/langchain_adapter python3 examples/langchain/run_with_guardrail.py 2>&1)
+          echo "$out"
+          echo "$out" | grep -q "Example: ALLOW and DENY paths OK" || { echo "FAIL: expected ALLOW/DENY success message"; exit 1; }
+          echo "✅ E2E: example script ALLOW/DENY OK"
+
+      - name: Run pytest (langchain adapter)
+        run: |
+          cd python/langchain_adapter
+          pytest tests/ -v --tb=short
+        env:
+          PYTHONPATH: "$GITHUB_WORKSPACE/python"
+
+      - name: Run pytest (core frameworks/langchain)
+        run: |
+          cd python/aport_guardrails
+          pip install pytest pytest-asyncio -q
+          pytest tests/ -v --tb=short

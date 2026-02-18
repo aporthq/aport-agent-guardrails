@@ -145,8 +145,13 @@ write_decision() {
     # Update chain state for next decision (best-effort; do not block or fail the script)
     echo "{\"last_decision_id\":\"$decision_id\",\"last_content_hash\":\"$content_hash\"}" > "$chain_state" 2>/dev/null || true
 
-    # Audit trail is non-core: append in background so it never blocks the tool call
-    ( echo "[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$decision_id allow=$allow policy=$policy_id code=$deny_code" >> "$AUDIT_LOG" ) 2>/dev/null &
+    # Audit trail is non-core: append in background so it never blocks the tool call.
+    # Include capability context (command, recipient, repo/branch) when set.
+    audit_context=""
+    if [ -n "${CONTEXT_SUMMARY:-}" ]; then
+        audit_context=" context=\"${CONTEXT_SUMMARY}\""
+    fi
+    ( echo "[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$decision_id allow=$allow policy=$policy_id code=$deny_code${audit_context}" >> "$AUDIT_LOG" ) 2>/dev/null &
 
     if [ "$allow" = "true" ]; then
         exit 0
@@ -161,12 +166,7 @@ if ! command -v jq &> /dev/null; then
     write_decision false "unknown" "oap.missing_dependency" "jq not found"
 fi
 
-# Check kill switch first (highest priority)
-if [ -f "$KILL_SWITCH" ]; then
-    write_decision false "unknown" "oap.kill_switch_active" "Global kill switch is active. Remove $KILL_SWITCH to resume."
-fi
-
-# Load passport
+# Load passport (source of truth; status checked first below)
 if [ ! -f "$PASSPORT_FILE" ]; then
     write_decision false "unknown" "oap.passport_not_found" "Passport file not found at $PASSPORT_FILE. Create one with aport-create-passport.sh"
 fi
@@ -178,10 +178,10 @@ if ! echo "$PASSPORT" | jq . > /dev/null 2>&1; then
     write_decision false "unknown" "oap.passport_invalid" "Passport file contains invalid JSON"
 fi
 
-# Check passport status
+# Check passport status first (kill switch = suspended/revoked; passport is source of truth per OAP spec)
 STATUS=$(echo "$PASSPORT" | jq -r '.status // "unknown"')
 if [ "$STATUS" != "active" ]; then
-    write_decision false "unknown" "oap.passport_suspended" "Passport status is '$STATUS', not 'active'"
+    write_decision false "unknown" "oap.passport_suspended" "Passport status is '$STATUS', not 'active'. Agent suspended."
 fi
 
 # Check spec version
@@ -213,6 +213,25 @@ case "$TOOL_NAME" in
         write_decision false "unknown" "oap.unknown_capability" "Tool '$TOOL_NAME' is not mapped to a policy pack"
         ;;
 esac
+
+# Capability-specific context summary for audit log (command, recipient, repo/branch, etc.)
+CONTEXT_SUMMARY=""
+if [ -n "$CONTEXT_JSON" ] && [ "$CONTEXT_JSON" != "{}" ]; then
+    if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
+        CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.command // .cmd // .args[0] // ""' 2>/dev/null || true)
+    elif [[ "$POLICY_ID" == "messaging.message.send"* ]]; then
+        CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.recipient // .to // ""' 2>/dev/null || true)
+    elif [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
+        REPO=$(echo "$CONTEXT_JSON" | jq -r '.repo // .repository // ""' 2>/dev/null || true)
+        BRANCH=$(echo "$CONTEXT_JSON" | jq -r '.branch // ""' 2>/dev/null || true)
+        [ -n "$REPO" ] && CONTEXT_SUMMARY="$REPO"
+        [ -n "$BRANCH" ] && CONTEXT_SUMMARY="${CONTEXT_SUMMARY:+$CONTEXT_SUMMARY }$BRANCH"
+    fi
+    # Sanitize for one-line audit: no newlines, truncate, escape double quotes
+    if [ -n "$CONTEXT_SUMMARY" ]; then
+        CONTEXT_SUMMARY=$(printf '%s' "$CONTEXT_SUMMARY" | tr '\n' ' ' | head -c 120 | sed 's/"/\\"/g')
+    fi
+fi
 
 # Load policy definition
 POLICY_DEF=$(load_policy "$(echo "$POLICY_ID" | sed 's/\.v[0-9]*$//')")

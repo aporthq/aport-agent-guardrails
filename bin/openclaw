@@ -95,7 +95,7 @@ fi
 mkdir -p "$CONFIG_DIR"
 CONFIG_DIR="$(cd "$CONFIG_DIR" && pwd)"
 
-# APort data: passport, decision, audit, kill-switch in config_dir/aport/
+# APort data: passport, decision, audit in config_dir/aport/ (passport status = source of truth for suspend)
 APORT_DIR="$CONFIG_DIR/aport"
 mkdir -p "$APORT_DIR"
 
@@ -426,7 +426,6 @@ APORT_REPO_ROOT="\$(cat "\$CONFIG_DIR/.aport-repo" 2>/dev/null)"
 export OPENCLAW_PASSPORT_FILE="\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}"
 export OPENCLAW_DECISION_FILE="\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/aport/decision.json}"
 export OPENCLAW_AUDIT_LOG="\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/aport/audit.log}"
-export OPENCLAW_KILL_SWITCH="\${OPENCLAW_KILL_SWITCH:-\$CONFIG_DIR/aport/kill-switch}"
 exec "\$APORT_REPO_ROOT/bin/$name" "\$@"
 WRAP
     chmod +x "$CONFIG_DIR/.skills/$name"

@@ -1,0 +1,30 @@
+{
+  "name": "@aporthq/aport-agent-guardrails-cursor",
+  "version": "1.0.8",
+  "description": "APort guardrails for Cursor IDE — VS Code extension",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "aport",
+    "cursor",
+    "ide",
+    "guardrails",
+    "vscode"
+  ],
+  "author": "APort Technologies Inc.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aporthq/aport-agent-guardrails-core": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

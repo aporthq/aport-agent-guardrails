@@ -1,9 +1,12 @@
 {
-  "name": "@aporthq/agent-guardrails",
-  "version": "1.0.7",
+  "name": "@aporthq/aport-agent-guardrails",
+  "version": "1.0.8",
   "description": "Policy enforcement guardrails for OpenClaw-compatible agent frameworks",
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
-    "agent-guardrails": "./bin/openclaw",
+    "agent-guardrails": "./bin/agent-guardrails",
     "aport": "./bin/openclaw",
     "aport-guardrail": "./bin/aport-guardrail.sh"
   },
@@ -13,7 +16,14 @@
     "server": "node src/server/index.js",
     "dev": "node --watch src/server/index.js",
     "sync-submodules": "git submodule update --init --recursive",
-    "sync-submodules:latest": "git submodule update --init --remote --recursive"
+    "sync-submodules:latest": "git submodule update --init --remote --recursive",
+    "changeset": "changeset",
+    "version": "changeset version && node scripts/sync-version.mjs",
+    "sync-version": "node scripts/sync-version.mjs",
+    "build": "npm run build --workspaces --if-present",
+    "build:core": "npm run build -w @aporthq/aport-agent-guardrails-core",
+    "release:version": "npm run version",
+    "prepublishOnly": "npm run build 2>/dev/null || true"
   },
   "keywords": [
     "openclaw",
@@ -50,7 +60,11 @@
   },
   "dependencies": {},
   "devDependencies": {
+    "@changesets/cli": "^2.27.0",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

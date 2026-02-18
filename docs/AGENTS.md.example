@@ -8,29 +8,23 @@
 
 ### Required Steps (in order):
 
-1. **Check Kill Switch** (highest priority)
-   - If `~/.openclaw/kill-switch` file exists: **REFUSE ALL ACTIONS** immediately
-   - Return: "Action blocked: Global kill switch is active"
+1. **Check Passport Status** (guardrail does this first; passport is source of truth)
+   - The guardrail checks passport `status` before any policy. If `status` is not `active` (e.g. `suspended` or `revoked`), it denies with `oap.passport_suspended`. No separate kill-switch file.
 
-2. **Check Passport Status**
-   - Verify `~/.openclaw/passport.json` exists
-   - Verify `status == "active"`
-   - If missing or invalid: STOP and prompt user to create/update passport
-
-3. **Call APort Verification**
+2. **Call APort Verification**
    - Run: `~/.openclaw/.skills/aport-guardrail.sh <tool_name> '<context_json>'`
    - Context JSON should include: tool parameters, resource identifiers, operation details
 
-4. **Read Decision**
+3. **Read Decision**
    - Read `~/.openclaw/decision.json`
    - If `allow: false`: **STOP EXECUTION**, return denial reasons to user
    - If `allow: true`: Proceed with tool execution, log receipt ID
 
-5. **Failure Behavior**
+4. **Failure Behavior**
    - APort script fails: DENY (fail-closed for security)
    - Passport invalid: DENY with clear error message
 
-6. **Never reuse a previous decision**
+5. **Never reuse a previous decision**
    - **Always invoke the tool** when the user requests an action. Do not skip or assume a tool will be denied because a previous invocation was denied.
    - APort is re-evaluated on every tool call; passport or limits may have changed. When using the APort plugin, it never reuses a cached decision—each call gets a fresh verify.
 
