@@ -42,7 +42,7 @@ def _make_crew_and_run(allow_then_deny: bool = True) -> list[str]:
     clear_before_tool_call_hooks()
     with tempfile.TemporaryDirectory() as tmp:
         config_path = Path(tmp) / "config.yaml"
-        write_config(config_path, {"mode": "local"})
+        write_config(config_path, {"mode": "local", "fail_open_when_missing_config": True})
 
         # Clear any cached evaluator from previous test runs
         import crewai_adapter.hook
