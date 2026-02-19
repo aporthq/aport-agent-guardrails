@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-cursor",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "APort guardrails for Cursor IDE — VS Code extension",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
