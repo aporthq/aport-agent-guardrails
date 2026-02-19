@@ -47,7 +47,7 @@ echo "  API: $APORT_API_URL"
 echo ""
 
 # Probe API reachability (agent-passport exposes GET /api/status, not /health)
-if ! curl -sf --connect-timeout 5 "${APORT_API_URL%/}/api/status" >/dev/null 2>&1; then
+if ! curl -sf --connect-timeout 5 "${APORT_API_URL%/}/api/status" > /dev/null 2>&1; then
     echo "  Skipping: API unreachable at $APORT_API_URL (set APORT_SKIP_REMOTE_PASSPORT_TEST=1 to suppress)"
     exit 0
 fi

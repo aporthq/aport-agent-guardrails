@@ -25,9 +25,9 @@ jobs:
         run: |
           pip install -e python/aport_guardrails -e "python/langchain_adapter[dev]"
 
-      - name: aport-langchain setup --ci
+      - name: aport-langchain --ci (setup)
         run: |
-          aport-langchain setup --ci
+          aport-langchain --ci
           test -f ~/.aport/langchain/config.yaml && echo "✅ config written"
 
       - name: Run example (ALLOW then DENY)

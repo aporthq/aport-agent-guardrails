@@ -6,6 +6,7 @@ Used by all Python framework adapters (LangChain, CrewAI, AutoGen).
 import asyncio
 import json
 import os
+import ssl
 import subprocess
 from pathlib import Path
 from typing import Any, TypedDict
@@ -15,24 +16,42 @@ from urllib.error import URLError
 from aport_guardrails.core.config import find_config_path, load_config
 from aport_guardrails.core.default_passport_paths import get_default_passport_paths
 from aport_guardrails.core.tool_pack_mapping import tool_to_pack_id as _tool_to_pack_id
+from aport_guardrails.core.validation import (
+    validate_tool_name,
+    validate_context_structure,
+    validate_passport_path,
+)
 
 
 def _resolve_passport_path(config: dict[str, Any]) -> str | None:
     """Resolve passport path: config, env, framework default, or first existing default path."""
     path = config.get("passport_path") or os.environ.get("OPENCLAW_PASSPORT_FILE")
-    if path and Path(path).expanduser().exists():
-        return str(Path(path).expanduser())
     if path:
-        return str(Path(path).expanduser())
+        path_obj = Path(path).expanduser()
+        # SECURITY: Validate passport path to prevent path traversal
+        path_validation = validate_passport_path(path_obj)
+        if not path_validation.valid:
+            # Log warning but don't fail - continue to try default paths
+            import sys
+            print(f"WARNING: Invalid passport path: {path_validation.error_message}", file=sys.stderr)
+        elif path_obj.exists():
+            return str(path_obj)
+        # Path specified but doesn't exist - still validate and return
+        elif path_validation.valid:
+            return str(path_obj)
+
     default_paths = get_default_passport_paths()
     framework = config.get("framework")
     if framework and framework in default_paths:
         candidate = Path(default_paths[framework]).expanduser()
-        if candidate.exists():
+        # Validate default paths too
+        path_validation = validate_passport_path(candidate)
+        if path_validation.valid and candidate.exists():
             return str(candidate)
     for candidate_path in default_paths.values():
         p = Path(candidate_path).expanduser()
-        if p.exists():
+        path_validation = validate_passport_path(p)
+        if path_validation.valid and p.exists():
             return str(p)
     return None
 
@@ -81,9 +100,43 @@ def _run_guardrail_sync(
     context: dict[str, Any],
 ) -> Decision:
     """Run guardrail script; read decision from same dir as passport. Sync for asyncio.to_thread."""
+    # SECURITY: Validate tool_name to prevent injection attacks
+    tool_validation = validate_tool_name(tool_name)
+    if not tool_validation.valid:
+        return {
+            "allow": False,
+            "reasons": [{
+                "code": tool_validation.error_code or "oap.invalid_tool_name",
+                "message": tool_validation.error_message or "Invalid tool name",
+            }],
+        }
+
+    # SECURITY: Validate context structure and size
+    context_validation = validate_context_structure(context)
+    if not context_validation.valid:
+        return {
+            "allow": False,
+            "reasons": [{
+                "code": context_validation.error_code or "oap.invalid_context",
+                "message": context_validation.error_message or "Invalid context",
+            }],
+        }
+
+    # SECURITY: Validate passport path to prevent path traversal
+    passport_path_obj = Path(passport_path)
+    path_validation = validate_passport_path(passport_path_obj)
+    if not path_validation.valid:
+        return {
+            "allow": False,
+            "reasons": [{
+                "code": path_validation.error_code or "oap.invalid_passport_path",
+                "message": path_validation.error_message or "Invalid passport path",
+            }],
+        }
+
     env = os.environ.copy()
-    env["OPENCLAW_PASSPORT_FILE"] = str(Path(passport_path).resolve())
-    data_dir = Path(passport_path).resolve().parent
+    env["OPENCLAW_PASSPORT_FILE"] = str(passport_path_obj.resolve())
+    data_dir = passport_path_obj.resolve().parent
     decision_file = data_dir / "decision.json"
     context_json = json.dumps(context)
     try:
@@ -119,6 +172,29 @@ def _run_guardrail_sync(
 IN_BODY_PACK_ID = "IN_BODY"
 
 
+def _get_ssl_context(verify_ssl: bool = True) -> ssl.SSLContext | None:
+    """
+    Create SSL context for API calls.
+
+    Args:
+        verify_ssl: Whether to verify SSL certificates (default: True)
+
+    Returns:
+        SSLContext with appropriate verification settings, or None for unverified
+    """
+    if not verify_ssl:
+        # SECURITY WARNING: Only disable SSL verification in development/testing
+        import sys
+        print("WARNING: SSL certificate verification disabled. This is insecure!", file=sys.stderr)
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
+
+    # Default: verify SSL certificates
+    return ssl.create_default_context()
+
+
 def _is_full_policy_pack(p: Any) -> bool:
     """True if p looks like an OAP policy pack (id + requires_capabilities) for IN_BODY."""
     if not p or not isinstance(p, dict):
@@ -135,6 +211,7 @@ def _call_api_sync(
     passport: dict[str, Any] | None = None,
     policy_pack: dict[str, Any] | None = None,
     api_key: str | None = None,
+    verify_ssl: bool = True,
 ) -> Decision:
     """
     Call APort API: POST /api/verify/policy/{pack_id}.
@@ -164,7 +241,9 @@ def _call_api_sync(
         req.add_header("Content-Type", "application/json")
         if api_key:
             req.add_header("Authorization", f"Bearer {api_key}")
-        with urlopen(req, timeout=15) as resp:
+        # SECURITY: Use explicit SSL context for certificate verification
+        ssl_context = _get_ssl_context(verify_ssl)
+        with urlopen(req, timeout=15, context=ssl_context) as resp:
             data = json.loads(resp.read().decode())
             decision = data.get("decision") if isinstance(data.get("decision"), dict) else data
             if not decision:
@@ -232,6 +311,10 @@ class Evaluator:
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
             api_key = config.get("api_key") or os.environ.get("APORT_API_KEY")
             agent_id = config.get("agent_id") or passport.get("agent_id")
+            # SECURITY: Check if SSL verification should be disabled (dev/test only)
+            verify_ssl = config.get("verify_ssl", True)
+            if os.environ.get("APORT_VERIFY_SSL") == "0":
+                verify_ssl = False
             passport_path = _resolve_passport_path(config)
             passport_body: dict[str, Any] | None = None
             if passport_path:
@@ -251,6 +334,7 @@ class Evaluator:
                     agent_id=agent_id,
                     policy_pack=policy_pack,
                     api_key=api_key,
+                    verify_ssl=verify_ssl,
                 )
             if passport_body:
                 return await asyncio.to_thread(
@@ -261,6 +345,7 @@ class Evaluator:
                     passport=passport_body,
                     policy_pack=policy_pack,
                     api_key=api_key,
+                    verify_ssl=verify_ssl,
                 )
         # Local mode or fallback
         passport_path = _resolve_passport_path(config)
@@ -308,6 +393,10 @@ class Evaluator:
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
             api_key = config.get("api_key") or os.environ.get("APORT_API_KEY")
             agent_id = config.get("agent_id") or passport.get("agent_id")
+            # SECURITY: Check if SSL verification should be disabled (dev/test only)
+            verify_ssl = config.get("verify_ssl", True)
+            if os.environ.get("APORT_VERIFY_SSL") == "0":
+                verify_ssl = False
             passport_path = _resolve_passport_path(config)
             passport_body: dict[str, Any] | None = None
             if passport_path:
@@ -320,11 +409,11 @@ class Evaluator:
                     passport_body = None
             if agent_id:
                 return _call_api_sync(
-                    api_url, pack_id, ctx, agent_id=agent_id, policy_pack=policy_pack, api_key=api_key
+                    api_url, pack_id, ctx, agent_id=agent_id, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl
                 )
             if passport_body:
                 return _call_api_sync(
-                    api_url, pack_id, ctx, passport=passport_body, policy_pack=policy_pack, api_key=api_key
+                    api_url, pack_id, ctx, passport=passport_body, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl
                 )
         passport_path = _resolve_passport_path(config)
         guardrail_script = _get_guardrail_script_path(config)

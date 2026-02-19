@@ -1,0 +1,114 @@
+Contact: mailto:security@aport.io
+Contact: https://github.com/aporthq/aport-agent-guardrails/security/advisories/new
+Expires: 2027-12-31T23:59:59.000Z
+Preferred-Languages: en
+Canonical: https://aport.io/.well-known/security.txt
+
+# APort Agent Guardrails Security Contact
+
+Thank you for helping improve the security of APort Agent Guardrails!
+
+## Reporting Security Issues
+
+If you discover a security vulnerability, please report it to us at:
+
+**Email**: security@aport.io
+**GitHub**: https://github.com/aporthq/aport-agent-guardrails/security/advisories/new
+
+## Response Timeline
+
+- **Initial Response**: Within 48 hours
+- **Triage**: Within 7 days
+- **Resolution**: Depends on severity
+  - **Critical**: Within 7-14 days
+  - **High**: Within 14-30 days
+  - **Medium**: Within 30-60 days
+  - **Low**: Within 60-90 days
+
+## What to Include
+
+When reporting a vulnerability, please include:
+
+1. **Description** of the vulnerability
+2. **Steps to reproduce** the issue
+3. **Impact assessment** (what an attacker could do)
+4. **Affected versions** (if known)
+5. **Proof of concept** code (if applicable)
+6. **Suggested fix** (if you have one)
+
+## Security Policy
+
+Our complete security policy is available at:
+https://github.com/aporthq/aport-agent-guardrails/blob/main/SECURITY.md
+
+## Disclosure Policy
+
+We follow coordinated disclosure:
+
+1. We will acknowledge receipt of your report within 48 hours
+2. We will provide regular updates on our progress
+3. We will credit you in our security advisories (unless you prefer anonymity)
+4. We will not take legal action against security researchers who:
+   - Act in good faith
+   - Do not access/modify/delete user data
+   - Do not disrupt our services
+   - Follow responsible disclosure
+
+## Scope
+
+**In Scope**:
+- Command injection vulnerabilities
+- Path traversal attacks
+- Authentication/authorization bypasses
+- Policy evaluation bypasses
+- Denial of service attacks
+- Information disclosure
+- API security issues
+- Cryptographic vulnerabilities
+
+**Out of Scope**:
+- Social engineering attacks
+- Physical security issues
+- Issues in third-party dependencies (report to upstream)
+- Issues requiring physical access to user's machine
+- Issues in example code or documentation (low priority)
+
+## Bug Bounty
+
+We currently do not offer a formal bug bounty program, but we deeply appreciate security researchers' contributions:
+
+- **Hall of Fame**: We maintain a security researchers hall of fame
+- **Public Credit**: We credit researchers in our security advisories
+- **Swag**: We may send APort swag for significant findings
+
+## PGP Key
+
+For encrypted communication, use our PGP key:
+
+```
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+[PGP key will be added here]
+-----END PGP PUBLIC KEY BLOCK-----
+```
+
+## Security Updates
+
+Subscribe to security updates:
+- **GitHub**: Watch releases (https://github.com/aporthq/aport-agent-guardrails/releases)
+- **Email**: security-announce@aport.io
+- **RSS**: https://github.com/aporthq/aport-agent-guardrails/releases.atom
+
+## Past Security Advisories
+
+View all published security advisories:
+https://github.com/aporthq/aport-agent-guardrails/security/advisories
+
+## Acknowledgments
+
+We thank all security researchers who have responsibly disclosed vulnerabilities. See our security researchers hall of fame at:
+https://github.com/aporthq/aport-agent-guardrails/blob/main/SECURITY.md#hall-of-fame
+
+---
+
+Last Updated: 2026-02-19
+Version: 1.0

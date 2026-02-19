@@ -26,9 +26,9 @@ jobs:
           pip install -e python/aport_guardrails -e "python/crewai_adapter[dev]"
           pip install "crewai>=0.80"
 
-      - name: aport-crewai setup --ci
+      - name: aport-crewai --ci (setup)
         run: |
-          aport-crewai setup --ci
+          aport-crewai --ci
           test -f ~/.aport/crewai/config.yaml && echo "✅ config written"
 
       - name: Run example (ALLOW then DENY)
