@@ -4,7 +4,11 @@
 
 **Deterministic pre-action authorization for OpenClaw agents.**
 
+> **Part of [aport-agent-guardrails](https://github.com/aporthq/aport-agent-guardrails)**: This is the OpenClaw plugin within a multi-framework repository that provides guardrails for LangChain, CrewAI, n8n, Cursor, and OpenClaw.
+
 This plugin registers `before_tool_call` hooks to enforce APort policies **before every tool execution**. No more relying on prompts or hoping the AI follows instructions - the platform enforces policy.
+
+> **📢 OpenClaw 2026.2 Update:** This plugin has been updated to use the new OpenClaw 2026.2 plugin architecture (object-based with TypeScript). If you're upgrading from an older version, see [MIGRATION.md](./MIGRATION.md) for complete upgrade steps including removal of old installations.
 
 ---
 
