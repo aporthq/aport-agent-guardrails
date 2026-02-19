@@ -9,7 +9,7 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2>/dev/null || echo "$REPO_ROOT/tests/output")}"
+TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2> /dev/null || echo "$REPO_ROOT/tests/output")}"
 mkdir -p "$TEST_DIR"
 CONFIG_DIR="$TEST_DIR/.openclaw-hosted-test"
 rm -rf "$CONFIG_DIR"
@@ -26,7 +26,7 @@ echo ""
 
 # 1. Invalid agent_id must exit with error
 echo "  Invalid agent_id: must exit non-zero..."
-if ( "$REPO_ROOT/bin/openclaw" invalid_id 2>/dev/null ); then
+if ("$REPO_ROOT/bin/openclaw" invalid_id 2> /dev/null); then
     echo "FAIL: openclaw invalid_id should exit 1" >&2
     exit 1
 fi
@@ -56,7 +56,7 @@ if ! grep -q "agentId:" "$CONFIG_DIR/config.yaml"; then
 fi
 echo "  ✅ config has agentId"
 
-if grep -q "passportFile:.*passport.json" "$CONFIG_DIR/config.yaml" 2>/dev/null; then
+if grep -q "passportFile:.*passport.json" "$CONFIG_DIR/config.yaml" 2> /dev/null; then
     # Hosted config should not set passportFile (API fetches by agent_id)
     echo "FAIL: hosted config should not set passportFile" >&2
     exit 1

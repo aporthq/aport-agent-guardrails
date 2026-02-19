@@ -23,7 +23,7 @@ assert_json_eq "$OPENCLAW_DECISION_FILE" "policy_id" "code.repository.merge.v1" 
 echo "  Guardrail: deny path (repo not in allowlist)..."
 # Fixture has allowed_repos ["*"] so use a different passport with restricted repos
 echo '{"passport_id":"x","kind":"template","spec_version":"oap/1.0","owner_id":"u","owner_type":"user","assurance_level":"L2","status":"active","capabilities":[{"id":"repo.pr.create"},{"id":"repo.merge"}],"limits":{"code.repository.merge":{"max_pr_size_kb":500,"allowed_repos":["aporthq/only"],"allowed_base_branches":["*"]}},"regions":["US"],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","version":"1.0.0"}' > "$OPENCLAW_PASSPORT_FILE"
-if "$GUARDRAIL" git.create_pr '{"repo":"other/repo","files_changed":5}' 2>/dev/null; then
+if "$GUARDRAIL" git.create_pr '{"repo":"other/repo","files_changed":5}' 2> /dev/null; then
     echo "FAIL: guardrail should DENY repo not in allowlist" >&2
     exit 1
 fi
@@ -34,7 +34,7 @@ assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.repo_not_allowed
 cp "$FIXTURE_PASSPORT" "$OPENCLAW_PASSPORT_FILE"
 
 echo "  Guardrail: deny path (PR size exceeds limit)..."
-if "$GUARDRAIL" git.create_pr '{"repo":"aporthq/test","files_changed":600}' 2>/dev/null; then
+if "$GUARDRAIL" git.create_pr '{"repo":"aporthq/test","files_changed":600}' 2> /dev/null; then
     echo "FAIL: guardrail should DENY when files_changed > max_pr_size_kb" >&2
     exit 1
 fi
@@ -61,7 +61,7 @@ assert_json_eq "$OPENCLAW_DECISION_FILE" "policy_id" "system.command.execute.v1"
 
 echo "  Guardrail: system.command.execute (deny blocked pattern)..."
 # Use a command that matches allowlist (npm) but contains blocked pattern so we get oap.blocked_pattern
-if "$GUARDRAIL" exec.run '{"command":"npm run build && rm -rf /tmp/x"}' 2>/dev/null; then
+if "$GUARDRAIL" exec.run '{"command":"npm run build && rm -rf /tmp/x"}' 2> /dev/null; then
     echo "FAIL: guardrail should DENY blocked pattern" >&2
     exit 1
 fi
@@ -69,7 +69,7 @@ assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
 assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.blocked_pattern" "reasons[0].code"
 
 echo "  Guardrail: unknown tool denied..."
-if "$GUARDRAIL" unknown.tool '{}' 2>/dev/null; then
+if "$GUARDRAIL" unknown.tool '{}' 2> /dev/null; then
     echo "FAIL: unknown tool should be denied" >&2
     exit 1
 fi

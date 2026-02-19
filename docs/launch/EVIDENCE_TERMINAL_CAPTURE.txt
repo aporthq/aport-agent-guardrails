@@ -1,0 +1,10 @@
+# Actual capture — guardrail ALLOW/DENY (run with fixture passport)
+# Generated: 2026-02-16T19:15:11Z
+
+$ OPENCLAW_PASSPORT_FILE=tests/fixtures/passport.oap-v1.json ./bin/aport-guardrail-bash.sh system.command.execute '{"command":"mkdir test"}'
+Exit: 0
+✅ ALLOW
+
+$ OPENCLAW_PASSPORT_FILE=tests/fixtures/passport.oap-v1.json ./bin/aport-guardrail-bash.sh system.command.execute '{"command":"rm -rf /"}'
+Exit: 1
+❌ DENY - Blocked pattern: rm -rf /

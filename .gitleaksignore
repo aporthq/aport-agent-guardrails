@@ -1,0 +1,19 @@
+# Gitleaks ignore file
+# False positives and test fixtures
+
+# Test fixtures with dummy keys (not real secrets)
+tests/fixtures/dummy-passport.json:*
+tests/fixtures/test-api-key.txt:*
+tests/**/*test*.json:*
+
+# Example documentation with placeholder keys
+docs/examples/example-config.yaml:APORT_API_KEY
+docs/**/*.md:aprt_example
+docs/**/*.md:sk_test
+
+# Development environment examples
+.env.example:*
+.env.sample:*
+
+# Specific line ignores (format: file:line:rule)
+# Add entries here for known false positives

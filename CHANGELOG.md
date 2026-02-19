@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-02-18
+
+### Added
+- **Package renames (SEO):** All published packages now include `agent-guardrails` in the name. **npm:** `@aporthq/aport-agent-guardrails` (root CLI), `@aporthq/aport-agent-guardrails-core`, `-langchain`, `-crewai`, `-cursor` (n8n in repo only, not published). **PyPI:** `aport-agent-guardrails`, `aport-agent-guardrails-langchain`, `aport-agent-guardrails-crewai`. Install: `npx @aporthq/aport-agent-guardrails`, `pip install aport-agent-guardrails`, etc.
+- **PyPI release automation:** Release workflow now builds and publishes all three Python packages (core + langchain + crewai) to PyPI on tag push; GitHub Release notes include all pip install commands.
+- **Security hardening (staff review 100/100):** Per-invocation decision files (no race); `verifySync()` uses `fs.mkdtempSync` + `crypto.randomUUID()` for temp paths and `mode: 0o600`; denial logging in LangChain/CrewAI Node adapters and Cursor hook reason surfacing. See `docs/reviews/2026-02-18-staff-review.md`.
+
+### Changed
+- **Docs and code alignment:** DEPLOYMENT_READINESS, RELEASE.md, and launch docs (FRAMEWORK_SUPPORT_PLAN, USER_STORIES) updated for current implementation: Node packages and Python adapters production-ready; n8n config-only (coming soon); CI runs Jest for core + langchain; fail-closed by default, tool mapping, CrewAI evaluator cache, Python CLI cursor choice, n8n warning in installer.
+- **Cursor hook:** Improved fallback message when decision file missing (“check passport and guardrail script”); reads deny reasons from `OPENCLAW_DECISION_FILE` and common paths.
+- **Test isolation:** Core/config and evaluator Jest tests set `HOME` to a temp dir so they do not depend on local `~/.aport` or `~/.openclaw`.
+
+### Fixed
+- **Sync API temp files (S4):** Replaced predictable `/tmp/aport-req-${pid}-${ts}.json` with mkdtemp + random UUID; tmp dir cleaned up in `finally`.
+
 ## [1.0.7] - 2026-02-17
 
 ### Added
@@ -25,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.5] - 2026-02-17
 
 ### Added
-- **APort data directory:** Passport, decision, audit, and kill-switch files now live under `config_dir/aport/` (e.g. `~/.openclaw/aport/passport.json`) for a cleaner layout. New installs use this path; existing installs continue to work (backward compatible).
+- **APort data directory:** Passport, decision, and audit files live under `config_dir/aport/` (e.g. `~/.openclaw/aport/passport.json`). Suspend (kill switch) uses passport `status` only—no separate file. New installs use this path; existing installs continue to work (backward compatible).
 - **Path resolver:** `bin/aport-resolve-paths.sh` — single source of truth for resolving APort paths; `aport-guardrail-bash.sh`, `aport-guardrail-api.sh`, and `aport-status.sh` source it (DRY, consistent behavior).
 - **SKILL from repo:** Installer copies `skills/aport-guardrail/SKILL.md` into the config dir instead of a hardcoded heredoc, so the installed skill always matches the repo.
 
@@ -51,12 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.3] - 2026-02-16
 
 ### Fixed
-- **npx @aporthq/agent-guardrails:** Add `agent-guardrails` bin entry so `npx @aporthq/agent-guardrails` resolves to the OpenClaw setup wizard (npm only runs a bin that matches the package name; 1.0.2 had only `aport` and `aport-guardrail`).
+- **npx @aporthq/aport-agent-guardrails:** Add `agent-guardrails` bin entry so `npx @aporthq/aport-agent-guardrails` resolves to the OpenClaw setup wizard (npm only runs a bin that matches the package name; 1.0.2 had only `aport` and `aport-guardrail`).
 
 ## [1.0.2] - 2026-02-16
 
 ### Added
-- `test-npm-package.sh`: installs `@aporthq/agent-guardrails` from registry, asserts package layout and guardrail ALLOW/DENY.
+- `test-npm-package.sh`: installs `@aporthq/aport-agent-guardrails` from registry, asserts package layout and guardrail ALLOW/DENY.
 - `test-remote-passport-api.sh`: remote passport (agent_id only) API tests.
 
 ### Changed
@@ -70,8 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Release process:** Tag-driven; push tag `v*` triggers npm publish and GitHub Release (see RELEASE.md). Merges to main do not release.
-- **Scope:** npm package `@aporthq/agent-guardrails` and plugin `@aporthq/openclaw-aport` (GitHub org aporthq).
-- **npx:** Default bin is `openclaw` (setup wizard). Package includes `extensions/` and `external/` for self-contained `npx @aporthq/agent-guardrails`.
+- **Scope:** npm package `@aporthq/aport-agent-guardrails` and plugin `@aporthq/openclaw-aport` (GitHub org aporthq).
+- **npx:** Default bin is `openclaw` (setup wizard). Package includes `extensions/` and `external/` for self-contained `npx @aporthq/aport-agent-guardrails`.
 - PUBLISHING.md and RELEASE.md for repeatable releases.
 
 ## [1.0.0] - 2025-02-15 (first release)
@@ -146,7 +161,10 @@ None (first release).
 
 ---
 
-[Unreleased]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.8...HEAD
+[1.0.8]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.7...v1.0.8
+[1.0.7]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.6...v1.0.7
+[1.0.6]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.2...v1.0.3

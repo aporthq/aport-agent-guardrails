@@ -1,0 +1,55 @@
+# E2E: Run agent-guardrails --framework=openclaw (non-interactive), then smoke.
+# Optional: when OpenClaw is available in CI, run openclaw gateway start and guardrail smoke test.
+name: E2E OpenClaw
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  e2e-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq uuid-runtime
+
+      - name: Make scripts executable
+        run: |
+          chmod +x bin/*.sh bin/lib/*.sh tests/unit/*.sh tests/frameworks/openclaw/setup.sh 2>/dev/null || true
+
+      - name: E2E — agent-guardrails --framework=openclaw (non-interactive)
+        run: |
+          export OPENCLAW_HOME="$RUNNER_TEMP/.openclaw-e2e"
+          mkdir -p "$OPENCLAW_HOME"
+          # Valid agent_id format; setup may fail later if API unreachable, but CLI must run
+          AGENT_ID="ap_8955f5450cd542fe8f67bbbf07c3e103"
+          printf '\n\n\n\n' | ./bin/agent-guardrails --framework=openclaw "$AGENT_ID" 2>&1 | tee "$RUNNER_TEMP/agent-guardrails.log" || true
+          if [[ -f "$OPENCLAW_HOME/config.yaml" ]]; then
+            grep -q "agentId:" "$OPENCLAW_HOME/config.yaml" && echo "✅ config.yaml has agentId"
+          else
+            echo "⚠️ config.yaml not created (openclaw installer may need openclaw binary); CLI ran"
+          fi
+
+      - name: E2E — OpenClaw gateway + smoke (if openclaw available)
+        continue-on-error: true
+        run: |
+          if command -v openclaw &>/dev/null; then
+            export OPENCLAW_CONFIG_DIR="${OPENCLAW_HOME:-$RUNNER_TEMP/.openclaw-e2e}"
+            openclaw gateway start &
+            sleep 5
+            # Smoke: guardrail script if present
+            if [[ -f "$OPENCLAW_CONFIG_DIR/.skills/aport-guardrail-api.sh" ]]; then
+              APORT_AGENT_ID="${AGENT_ID:-ap_8955f5450cd542fe8f67bbbf07c3e103}" "$OPENCLAW_CONFIG_DIR/.skills/aport-guardrail-api.sh" system.command.execute '{"command":"node --version"}' || true
+            fi
+          else
+            echo "OpenClaw not installed; skip gateway smoke. Install openclaw in CI for full E2E."
+          fi

@@ -42,12 +42,6 @@ if [ ! -f "$NODE_EVALUATOR" ]; then
     exit 1
 fi
 
-# Check kill switch first (highest priority)
-if [ -f "$KILL_SWITCH" ]; then
-    echo "Error: Global kill switch is active. Remove $KILL_SWITCH to resume." >&2
-    exit 1
-fi
-
 # Passport required only for local mode (passport in request). Cloud mode uses APORT_AGENT_ID.
 if [ -z "$APORT_AGENT_ID" ] && [ ! -f "$PASSPORT_FILE" ]; then
     echo "Error: Passport file not found at $PASSPORT_FILE. Create one with aport-create-passport.sh, or set APORT_AGENT_ID for cloud mode." >&2
@@ -57,31 +51,31 @@ fi
 # Map tool to policy pack ID
 POLICY_ID=""
 case "$TOOL_NAME" in
-    git.create_pr|git.merge|git.push|git.*)
+    git.create_pr | git.merge | git.push | git.*)
         POLICY_ID="code.repository.merge.v1"
         ;;
-    exec.run|exec.*|system.command.*|system.*)
+    exec.run | exec.* | system.command.* | system.*)
         POLICY_ID="system.command.execute.v1"
         ;;
-    message.send|message.*|messaging.*)
+    message.send | message.* | messaging.*)
         POLICY_ID="messaging.message.send.v1"
         ;;
-    mcp.tool.*|mcp.*)
+    mcp.tool.* | mcp.*)
         POLICY_ID="mcp.tool.execute.v1"
         ;;
-    agent.session.*|session.create|session.*)
+    agent.session.* | session.create | session.*)
         POLICY_ID="agent.session.create.v1"
         ;;
-    agent.tool.*|tool.register|tool.*)
+    agent.tool.* | tool.register | tool.*)
         POLICY_ID="agent.tool.register.v1"
         ;;
-    payment.refund|payment.*|finance.payment.refund)
+    payment.refund | payment.* | finance.payment.refund)
         POLICY_ID="finance.payment.refund.v1"
         ;;
-    payment.charge|finance.payment.charge)
+    payment.charge | finance.payment.charge)
         POLICY_ID="finance.payment.charge.v1"
         ;;
-    database.write|database.*|data.export)
+    database.write | database.* | data.export)
         POLICY_ID="data.export.create.v1"
         ;;
     *)

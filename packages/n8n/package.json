@@ -1,0 +1,30 @@
+{
+  "name": "@aporthq/aport-agent-guardrails-n8n",
+  "version": "1.0.8",
+  "description": "APort guardrails for n8n — custom node",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "aport",
+    "n8n",
+    "guardrails",
+    "workflow",
+    "low-code"
+  ],
+  "author": "APort Technologies Inc.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aporthq/aport-agent-guardrails-core": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

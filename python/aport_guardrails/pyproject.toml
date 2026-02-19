@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aport-agent-guardrails"
+version = "1.0.8"
+description = "APort Agent Guardrail — shared core for AI agent and LLM frameworks (pre-action authorization)"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "APort Technologies Inc." }]
+keywords = ["aport", "agent guardrail", "LLM guardrail", "AI agent", "guardrails", "authorization", "policy", "agent security"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/aporthq/aport-agent-guardrails"
+Repository = "https://github.com/aporthq/aport-agent-guardrails"
+Documentation = "https://github.com/aporthq/aport-agent-guardrails/tree/main/docs"
+Issues = "https://github.com/aporthq/aport-agent-guardrails/issues"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[project.scripts]
+aport = "aport_guardrails.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools]
+packages = ["aport_guardrails", "aport_guardrails.core", "aport_guardrails.frameworks"]
+package-dir = { aport_guardrails = ".", "aport_guardrails.core" = "core", "aport_guardrails.frameworks" = "frameworks" }

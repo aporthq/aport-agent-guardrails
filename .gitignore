@@ -1,4 +1,52 @@
-docs/launch/**
-*.bk
+# Dependencies
+node_modules/
 
+# Build outputs
+dist/
+*.tsbuildinfo
+build/
+out/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+
+# IDE and OS
 **/.DS_Store
+*.bk
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and temp
+*.log
+npm-debug.log*
+.turbo
+
+# Changesets (keep config and README; ignore generated changelog temp if any)
+.changeset/pre.json
+
+# Test and coverage
+coverage/
+.nyc_output/
+
+# Optional local overrides (keep structure, ignore local edits if desired)
+# local-overrides/

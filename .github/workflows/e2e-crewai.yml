@@ -1,0 +1,53 @@
+# E2E: Install aport-agent-guardrails + aport-agent-guardrails-crewai, run aport-crewai setup --ci, run crew example (deterministic).
+name: E2E CrewAI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+  workflow_dispatch:
+
+jobs:
+  e2e-crewai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install core and crewai adapter (editable)
+        run: |
+          pip install -e python/aport_guardrails -e "python/crewai_adapter[dev]"
+          pip install "crewai>=0.80"
+
+      - name: aport-crewai --ci (setup)
+        run: |
+          aport-crewai --ci
+          test -f ~/.aport/crewai/config.yaml && echo "✅ config written"
+
+      - name: Run example (ALLOW then DENY)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          out=$(PYTHONPATH=python:python/crewai_adapter python3 examples/crewai/run_with_guardrail.py 2>&1)
+          echo "$out"
+          echo "$out" | grep -q "Example: ALLOW and DENY paths OK" || { echo "FAIL: expected ALLOW/DENY success message"; exit 1; }
+          echo "✅ E2E: run_with_guardrail ALLOW/DENY OK"
+
+      - name: Run sample crew integration (ALLOW and DENY)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          PYTHONPATH=python:python/crewai_adapter python3 -m pytest examples/crewai/sample_crew.py -v --tb=short
+          echo "✅ E2E: sample_crew ALLOW/DENY OK"
+
+      - name: Run pytest (crewai adapter)
+        run: |
+          cd python/crewai_adapter
+          pytest tests/ -v --tb=short
+        env:
+          PYTHONPATH: "$GITHUB_WORKSPACE/python"

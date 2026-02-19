@@ -6,12 +6,12 @@
 ## Recommended: one command (npm, no clone)
 
 ```bash
-npx @aporthq/agent-guardrails
+npx @aporthq/aport-agent-guardrails
 ```
 
-If you have an agent_id from aport.io, run `npx @aporthq/agent-guardrails <agent_id>` to use a hosted passport (no local file). See [HOSTED_PASSPORT_SETUP.md](HOSTED_PASSPORT_SETUP.md).
+If you have an agent_id from aport.io, run `npx @aporthq/aport-agent-guardrails <agent_id>` to use a hosted passport (no local file). See [HOSTED_PASSPORT_SETUP.md](HOSTED_PASSPORT_SETUP.md).
 
-This uses the [npm package](https://www.npmjs.com/package/@aporthq/agent-guardrails): downloads the package, runs the setup wizard, installs the plugin and wrappers, and runs a smoke test.
+This uses the [npm package](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails): downloads the package, runs the setup wizard, installs the plugin and wrappers, and runs a smoke test.
 
 **Alternative: from the repo** (if you cloned the repo):
 
@@ -149,7 +149,7 @@ You should see:
   • View full audit log: tail -f /Users/uchi/.openclaw/audit.log
   • Edit passport: vim /Users/uchi/.openclaw/passport.json
   • Verify passport: aport-verify-passport.sh
-  • Activate kill switch: touch /Users/uchi/.openclaw/kill-switch
+  • Suspend agent (local): set passport status to "suspended" in passport.json (e.g. jq '.status = "suspended"')
 ```
 
 ---
@@ -208,11 +208,14 @@ cat ~/.openclaw/decision.json | jq '.allow, .reasons[0].message'
 
 ---
 
-## Step 5: Test Kill Switch (30 seconds)
+## Step 5: Test suspend (kill switch = passport status) (30 seconds)
 
-### Activate kill switch:
+The passport is the source of truth. To suspend the agent, set passport `status` to `suspended`.
+
+### Suspend the agent:
 ```bash
-touch ~/.openclaw/kill-switch
+# Set passport status to suspended (e.g. edit ~/.openclaw/aport/passport.json or:)
+jq '.status = "suspended"' ~/.openclaw/aport/passport.json > /tmp/passport.tmp && mv /tmp/passport.tmp ~/.openclaw/aport/passport.json
 ```
 
 ### Try any action (should be blocked):
@@ -220,19 +223,16 @@ touch ~/.openclaw/kill-switch
 ~/.openclaw/.skills/aport-guardrail.sh git.create_pr '{"repo": "test", "files_changed": 1}'
 cat ~/.openclaw/decision.json | jq '.allow, .reasons[0].code'
 ```
-You should see `allow: false` and a kill_switch reason.
+You should see `allow: false` and `oap.passport_suspended`.
 
-### Deactivate kill switch:
+### Resume the agent:
 ```bash
-rm ~/.openclaw/kill-switch
+jq '.status = "active"' ~/.openclaw/aport/passport.json > /tmp/passport.tmp && mv /tmp/passport.tmp ~/.openclaw/aport/passport.json
 ```
 
 ### Verify it works again:
 ```bash
-~/.openclaw/.skills/aport-guardrail.sh git.create_pr '{
-  "repo": "test",
-  "files_changed": 1
-}'
+~/.openclaw/.skills/aport-guardrail.sh git.create_pr '{"repo": "test", "files_changed": 1}'
 ```
 
 Should see `"allow": true` now.
@@ -408,13 +408,9 @@ Re-run the passport wizard to create a new passport, or edit `~/.openclaw/passpo
 
 ### Problem: "All actions denied"
 ```bash
-# Check passport status
-jq '.status' ~/.openclaw/passport.json
-# Should be "active"
-
-# Check kill switch
-ls ~/.openclaw/kill-switch
-# If exists, remove it: rm ~/.openclaw/kill-switch
+# Check passport status (source of truth for suspend)
+jq '.status' ~/.openclaw/aport/passport.json
+# Should be "active"; if "suspended" or "revoked", set back to "active" to resume
 
 # Check expiration
 jq '.expires_at' ~/.openclaw/passport.json

@@ -14,7 +14,7 @@ export OPENCLAW_PASSPORT_FILE="/tmp/test-passport-api.json"
 export OPENCLAW_DECISION_FILE="/tmp/test-decision-api.json"
 
 # Create a minimal test passport
-cat > "$OPENCLAW_PASSPORT_FILE" <<'EOF'
+cat > "$OPENCLAW_PASSPORT_FILE" << 'EOF'
 {
   "spec_version": "oap/1.0",
   "passport_id": "passport-test-api",

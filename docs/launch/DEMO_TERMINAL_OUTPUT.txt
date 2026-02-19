@@ -1,0 +1,48 @@
+# Demo terminal output (for screenshot / evidence)
+
+Use this as reference for what to show in the guardrail launch post. The guardrail script itself only exits 0 (ALLOW) or 1 (DENY) and writes JSON to the decision file; it does not print "ALLOW"/"DENY" to the terminal. To get the output below, run the commands and then echo the result (or use the one-liners at the end).
+
+---
+
+## Option A: With decision JSON (full)
+
+$ aport-guardrail.sh system.command.execute '{"command":"mkdir test"}'
+✅ ALLOW
+{"allow":true,"assurance_level":"L2","decision_id":"...","policy_id":"system.command.execute.v1","reasons":[{"code":"oap.allowed","message":"All policy checks passed"}],...}
+
+$ aport-guardrail.sh system.command.execute '{"command":"rm -rf /"}'
+❌ DENY
+{"allow":false,...,"reasons":[{"code":"oap.command_not_allowed","message":"Command 'rm -rf /' is not in allowed list"}],...}
+
+---
+
+## Option B: Short (ALLOW/DENY only — best for screenshot)
+
+$ aport-guardrail.sh system.command.execute '{"command":"mkdir test"}'
+✅ ALLOW
+
+$ aport-guardrail.sh system.command.execute '{"command":"rm -rf /"}'
+❌ DENY - Blocked pattern: rm -rf /
+
+---
+
+## Commands to run (from repo with fixture passport)
+
+# ALLOW
+OPENCLAW_PASSPORT_FILE=tests/fixtures/passport.oap-v1.json ./bin/aport-guardrail-bash.sh system.command.execute '{"command":"mkdir test"}'
+echo "✅ ALLOW (exit $?)"
+
+# DENY
+OPENCLAW_PASSPORT_FILE=tests/fixtures/passport.oap-v1.json ./bin/aport-guardrail-bash.sh system.command.execute '{"command":"rm -rf /"}' || true
+echo "❌ DENY (exit 1) - Blocked pattern: rm -rf /"
+
+---
+
+## If using installed ~/.openclaw/.skills/aport-guardrail.sh
+
+Ensure ~/.openclaw/.aport-repo points to your repo and ~/.openclaw/passport.json exists. Then:
+
+~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"mkdir test"}' && echo '✅ ALLOW' || echo '❌ DENY'
+~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"rm -rf /"}' && echo '✅ ALLOW' || echo '❌ DENY'
+
+Second line will print ❌ DENY (script exits 1).

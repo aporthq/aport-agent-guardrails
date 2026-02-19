@@ -1,12 +1,12 @@
 #!/bin/bash
 # Resolve APort data paths: prefer config_dir/aport/, fallback to config_dir (legacy).
-# MUST be sourced by any script that reads/writes passport, decision, audit, or kill-switch:
+# MUST be sourced by any script that reads/writes passport, decision, or audit:
 #   - aport-guardrail-bash.sh
 #   - aport-guardrail-api.sh
 #   - aport-status.sh
 # (aport-create-passport.sh uses --output; wrappers set env so children get resolved paths.)
-# Sets: OPENCLAW_PASSPORT_FILE, OPENCLAW_DECISION_FILE, OPENCLAW_AUDIT_LOG, OPENCLAW_KILL_SWITCH
-# and PASSPORT_FILE, DECISION_FILE, AUDIT_LOG, KILL_SWITCH for script use.
+# Sets: OPENCLAW_PASSPORT_FILE, OPENCLAW_DECISION_FILE, OPENCLAW_AUDIT_LOG
+# and PASSPORT_FILE, DECISION_FILE, AUDIT_LOG. Passport status (active|suspended|revoked) is source of truth for suspend; no separate file.
 # Caller must ensure APORT_DATA_DIR exists before writing (e.g. mkdir -p "$(dirname "$AUDIT_LOG")").
 
 resolve_aport_paths() {
@@ -20,7 +20,7 @@ resolve_aport_paths() {
         passport_path="$OPENCLAW_PASSPORT_FILE"
     # 2) Explicit path set but file missing → legacy: try parent dir (e.g. .../openclaw/passport.json)
     elif [ -n "${OPENCLAW_PASSPORT_FILE:-}" ]; then
-        config_dir="$(cd "$(dirname "$OPENCLAW_PASSPORT_FILE")/.." 2>/dev/null && pwd)"
+        config_dir="$(cd "$(dirname "$OPENCLAW_PASSPORT_FILE")/.." 2> /dev/null && pwd)"
         if [ -f "${config_dir}/passport.json" ]; then
             passport_path="${config_dir}/passport.json"
             data_dir="$config_dir"
@@ -28,9 +28,18 @@ resolve_aport_paths() {
             passport_path="$OPENCLAW_PASSPORT_FILE"
             data_dir="$(dirname "$OPENCLAW_PASSPORT_FILE")"
         fi
-    # 3) No env → try aport then legacy
+    # 3) No env → probe framework-specific default paths (where each framework stores data), then OpenClaw legacy
     else
-        config_dir="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
+        config_dir=""
+        for candidate in "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.n8n"; do
+            if [ -f "${candidate}/aport/passport.json" ]; then
+                config_dir="$candidate"
+                break
+            fi
+        done
+        if [ -z "$config_dir" ]; then
+            config_dir="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
+        fi
         config_dir="${config_dir/#\~/$HOME}"
         if [ -f "${config_dir}/aport/passport.json" ]; then
             passport_path="${config_dir}/aport/passport.json"
@@ -45,14 +54,17 @@ resolve_aport_paths() {
     fi
 
     export OPENCLAW_PASSPORT_FILE="$passport_path"
-    export OPENCLAW_DECISION_FILE="${data_dir}/decision.json"
+    # Preserve explicitly set decision path (e.g. tests set OPENCLAW_DECISION_FILE); otherwise use data_dir
+    if [ -n "${OPENCLAW_DECISION_FILE:-}" ]; then
+        export OPENCLAW_DECISION_FILE="$OPENCLAW_DECISION_FILE"
+    else
+        export OPENCLAW_DECISION_FILE="${data_dir}/decision.json"
+    fi
     export OPENCLAW_AUDIT_LOG="${data_dir}/audit.log"
-    export OPENCLAW_KILL_SWITCH="${data_dir}/kill-switch"
 
     PASSPORT_FILE="$OPENCLAW_PASSPORT_FILE"
     DECISION_FILE="$OPENCLAW_DECISION_FILE"
     AUDIT_LOG="$OPENCLAW_AUDIT_LOG"
-    KILL_SWITCH="$OPENCLAW_KILL_SWITCH"
 }
 
 # When sourced, resolve immediately so callers just use the vars

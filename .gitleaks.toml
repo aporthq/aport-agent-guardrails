@@ -1,0 +1,93 @@
+# Gitleaks configuration for APort Agent Guardrails
+# See: https://github.com/gitleaks/gitleaks
+
+title = "APort Agent Guardrails - Secrets Detection"
+
+[extend]
+# Use default rules plus custom rules below
+useDefault = true
+
+[[rules]]
+id = "aport-api-key"
+description = "APort API Key"
+regex = '''aprt_[a-zA-Z0-9]{32,}'''
+tags = ["key", "APort"]
+
+[[rules]]
+id = "openclaw-api-key"
+description = "OpenClaw API Key"
+regex = '''oclw_[a-zA-Z0-9]{32,}'''
+tags = ["key", "OpenClaw"]
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(api[_-]?key|apikey)["\s:=]+[a-zA-Z0-9]{20,}'''
+tags = ["key", "API"]
+
+[[rules]]
+id = "generic-secret"
+description = "Generic Secret"
+regex = '''(?i)(secret|password|passwd|pwd)["\s:=]+[a-zA-Z0-9!@#$%^&*()_+=-]{8,}'''
+tags = ["secret", "password"]
+
+[[rules]]
+id = "bearer-token"
+description = "Bearer Token"
+regex = '''Bearer\s+[a-zA-Z0-9\-._~+/]+=*'''
+tags = ["token", "bearer"]
+
+[[rules]]
+id = "jwt-token"
+description = "JWT Token"
+regex = '''eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*'''
+tags = ["token", "jwt"]
+
+[[rules]]
+id = "private-key"
+description = "Private Key"
+regex = '''-----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----'''
+tags = ["key", "private"]
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS Access Key"
+regex = '''AKIA[0-9A-Z]{16}'''
+tags = ["key", "AWS"]
+
+[[rules]]
+id = "github-token"
+description = "GitHub Token"
+regex = '''gh[pousr]_[0-9a-zA-Z]{36,}'''
+tags = ["token", "GitHub"]
+
+[[rules]]
+id = "slack-token"
+description = "Slack Token"
+regex = '''xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24,32}'''
+tags = ["token", "Slack"]
+
+[allowlist]
+description = "Allowlist for false positives"
+
+# Allowlist specific files
+paths = [
+    '''.gitleaksignore''',
+    '''.gitleaks.toml''',
+    '''go.sum''',
+    '''package-lock.json''',
+    '''poetry.lock''',
+]
+
+# Allowlist by regex pattern
+regexes = [
+    # Example keys in documentation
+    '''aprt_example[0-9a-zA-Z]{32}''',
+    '''sk_test_[0-9a-zA-Z]{24}''',
+    '''pk_test_[0-9a-zA-Z]{24}''',
+    # Test fixtures
+    '''dummy_key''',
+    '''fake_secret''',
+    '''test_token''',
+    '''example_password''',
+]

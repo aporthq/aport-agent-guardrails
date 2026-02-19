@@ -1,5 +1,8 @@
-# Release: publish to npm and create GitHub Release.
-# Trigger: push a tag v* (e.g. v1.0.1). Merges to main do NOT release.
+# Release: publish to npm (root + workspace packages) and PyPI, then create GitHub Release.
+# Trigger: push a tag v* (e.g. v1.0.8). Run `npm run version` and commit before tagging.
+# Root package @aporthq/aport-agent-guardrails exposes bin/agent-guardrails (CLI). Workspace packages
+# @aporthq/aport-agent-guardrails-{core,langchain,crewai,cursor} are published; n8n is not published yet (coming soon).
+# PyPI: add this repo and workflow name "Release" in PyPI trusted publishing, or set PYPI_TOKEN secret.
 name: Release
 
 on:
@@ -8,10 +11,8 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  publish-npm:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,18 +23,170 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           node-version: "22"
 
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          ROOT_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$ROOT_VERSION" ]; then
+            echo "Version mismatch: tag is v$TAG_VERSION but root package.json has $ROOT_VERSION. Run 'npm run version' and commit before tagging."
+            exit 1
+          fi
+          echo "Version OK: $TAG_VERSION"
+
       - name: Fix package.json for npm
         run: npm pkg fix
 
-      - name: Publish to npm (public)
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Publish root package to npm (public)
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish workspace packages to npm (public)
+        run: |
+          npm publish -w @aporthq/aport-agent-guardrails-core --access public
+          npm publish -w @aporthq/aport-agent-guardrails-langchain --access public
+          npm publish -w @aporthq/aport-agent-guardrails-crewai --access public
+          npm publish -w @aporthq/aport-agent-guardrails-cursor --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-python:
+    runs-on: ubuntu-latest
+    env:
+      TWINE_USERNAME: __token__
+      TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Check if version already exists on PyPI
+        id: pypi-check
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Checking if aport-agent-guardrails $VERSION already exists on PyPI..."
+          RESULT=$(python -c "
+          import urllib.request
+          import json
+          try:
+              req = urllib.request.Request('https://pypi.org/pypi/aport-agent-guardrails/json')
+              with urllib.request.urlopen(req) as r:
+                  data = json.loads(r.read().decode())
+              if '''$VERSION''' in data.get('releases', {}):
+                  print('exists')
+              else:
+                  print('new')
+          except Exception:
+              print('new')
+          ")
+          if [ "$RESULT" = "exists" ]; then
+            echo "Version $VERSION already on PyPI - skipping publish"
+            echo "SKIP_PUBLISH=true" >> $GITHUB_ENV
+          else
+            echo "SKIP_PUBLISH=false" >> $GITHUB_ENV
+          fi
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build Python packages (core + adapters)
+        if: env.SKIP_PUBLISH != 'true'
+        run: |
+          python -m build python/aport_guardrails
+          python -m build python/langchain_adapter
+          python -m build python/crewai_adapter
+
+      - name: Verify build artifacts
+        if: env.SKIP_PUBLISH != 'true'
+        run: |
+          for dir in python/aport_guardrails python/langchain_adapter python/crewai_adapter; do
+            if [ ! -d "$dir/dist" ]; then echo "Build failed: $dir/dist not found"; exit 1; fi
+            if ! ls $dir/dist/*.whl 1>/dev/null 2>&1; then echo "Build failed: no wheel in $dir/dist"; exit 1; fi
+            if ! ls $dir/dist/*.tar.gz 1>/dev/null 2>&1; then echo "Build failed: no sdist in $dir/dist"; exit 1; fi
+          done
+          echo "Build artifacts OK"
+
+      - name: Publish to PyPI (aport-agent-guardrails, aport-agent-guardrails-langchain, aport-agent-guardrails-crewai)
+        if: env.SKIP_PUBLISH != 'true'
+        run: |
+          python -m twine upload python/aport_guardrails/dist/*
+          python -m twine upload python/langchain_adapter/dist/*
+          python -m twine upload python/crewai_adapter/dist/*
+
+      - name: Verify PyPI publication
+        if: env.SKIP_PUBLISH != 'true'
+        run: |
+          export VERSION="${{ steps.version.outputs.VERSION }}"
+          for pkg in aport-agent-guardrails aport-agent-guardrails-langchain aport-agent-guardrails-crewai; do
+            echo "Verifying $pkg@$VERSION on PyPI..."
+            export PKG="$pkg"
+            python -c "
+          import urllib.request, json, sys, os
+          v = os.environ.get('VERSION', '')
+          p = os.environ.get('PKG', '')
+          req = urllib.request.Request(f'https://pypi.org/pypi/{p}/json')
+          with urllib.request.urlopen(req) as r:
+              data = json.loads(r.read().decode())
+          if v in data.get('releases', {}):
+              print(f'OK: {p}@{v} published')
+          else:
+              sys.exit(f'Version {v} not found for {p}')
+          "
+          done
+
+  create-release:
+    needs: [publish-npm, publish-python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          gh release create "$TAG" --generate-notes
+          VERSION="${TAG#v}"
+          gh release create "$TAG" --generate-notes --notes "## $TAG
+
+          ### Node (npm)
+          CLI and core:
+          \`\`\`bash
+          npm install @aporthq/aport-agent-guardrails@$VERSION
+          \`\`\`
+          Framework adapters (same version):
+          \`\`\`bash
+          npm install @aporthq/aport-agent-guardrails-core@$VERSION
+          npm install @aporthq/aport-agent-guardrails-langchain@$VERSION
+          npm install @aporthq/aport-agent-guardrails-crewai@$VERSION
+          npm install @aporthq/aport-agent-guardrails-cursor@$VERSION
+          \`\`\`
+          (n8n package not published yet — coming soon.)
+
+          ### Python (PyPI)
+          \`\`\`bash
+          pip install aport-agent-guardrails==$VERSION
+          pip install aport-agent-guardrails-langchain==$VERSION
+          pip install aport-agent-guardrails-crewai==$VERSION
+          \`\`\`
+
+          See [README](https://github.com/aporthq/aport-agent-guardrails#readme) and [docs](https://github.com/aporthq/aport-agent-guardrails/tree/main/docs) for usage."
         if: success()

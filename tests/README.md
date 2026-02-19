@@ -4,13 +4,25 @@ Tests for [OAP v1.0](https://github.com/aporthq/aport-spec) compliance and OpenC
 
 ---
 
+## Test organization
+
+| Layer | Location | What it covers |
+|-------|----------|----------------|
+| **Unit** | `tests/unit/*.sh` | `bin/lib` (common, config, allowlist), detection, dispatcher (args, non-interactive, conflict). |
+| **OAP / guardrail** | `tests/test-*.sh` | Passport, guardrail allow/deny, kill switch, verification methods, hosted flow, plugin CLI. |
+| **Integration** | `tests/frameworks/<name>/` | OpenClaw, LangChain, CrewAI, n8n: run CLI in temp dir (`setup.sh`); assert config dir and optional config.yaml. OpenClaw also has `setup.test.mjs`. |
+| **E2E** | `.github/workflows/e2e-openclaw.yml` | `agent-guardrails --framework=openclaw` (non-interactive); optional gateway + smoke. |
+| **Plugin** | `extensions/openclaw-aport/test.js` | mapToolToPolicy, canonicalize, verifyDecisionIntegrity, performance. |
+
+---
+
 ## Overview
 
 | Aspect | Approach |
 |--------|----------|
 | **Strategy** | Isolated temp directory + fixture passport; no mutation of `~/.openclaw` in CI. |
-| **Scope** | Unit (plugin helpers), integration (guardrail + passport + four verification modes), flow (wizard → allow → deny → status), and hosted flow (CLI with agent_id, remote API). |
-| **Determinism** | Tests use `APORT_TEST_DIR` or `mktemp` and fixture data so CI is reproducible. |
+| **Scope** | Unit (bin/lib, detection, dispatcher), OAP/guardrail, integration (framework setup), E2E. |
+| **Determinism** | Tests use `APORT_TEST_DIR` or `mktemp`; **non-interactive** via `APORT_NONINTERACTIVE`/`CI` and `APORT_FRAMEWORK` or `--framework=`. |
 
 ---
 
@@ -30,13 +42,29 @@ bash tests/run.sh
 cd extensions/openclaw-aport && node test.js
 ```
 
-**Requirements:** `bash`, `jq`. Optional: `APORT_API_URL` for API verification tests (skipped if unset or unreachable).
+**Unit only:** `bash tests/unit/test-lib-common.sh` (etc.). **OpenClaw integration (Node):** `node tests/frameworks/openclaw/setup.test.mjs`.
+
+**Performance (guardrail latency, real API):** `PYTHONPATH=python python3 tests/performance/run_guardrail_perf.py [--agent-id ap_xxx] [--iterations 50]`. Uses remote passport and live API by default. See [tests/performance/README.md](performance/README.md).
+
+**Python (LangChain) tests:** From repo root, `pip install -e python/aport_guardrails -e "python/langchain_adapter[dev]"` (or use a venv), then `cd python/langchain_adapter && pytest tests/ -v`. Or `PYTHONPATH=python:python/langchain_adapter python3 -m pytest python/langchain_adapter/tests/ -v`.
+
+**Python (CrewAI) tests:** `pip install -e python/aport_guardrails -e "python/crewai_adapter[dev]" crewai`, then `cd python/crewai_adapter && pytest tests/ -v` (decorator + hook). Integration: `pytest examples/crewai/run_with_guardrail.py examples/crewai/sample_crew.py -v` (sample crew triggers ALLOW and DENY). E2E: `.github/workflows/e2e-crewai.yml`.
+
+**Requirements:** `bash`, `jq`, `node` (for setup.test.mjs). Optional: `APORT_API_URL` for API verification tests (skipped if unset or unreachable).
+
+**Status and logs:** To inspect passport status and allow/deny decisions after running tests (or in general), use `bin/aport-status.sh` and the audit log (`config_dir/aport/audit.log`). See the main [README](../README.md) section **Check your passport status and logs**.
 
 **Environment:** Tests respect `APORT_TEST_DIR` and `OPENCLAW_DEPLOYMENT_DIR` / `APORT_TEST_OPENCLAW_DIR` for temp/bootstrap dirs; they do not touch your real OpenClaw config unless you point them at it.
 
 ---
 
 ## Test files (current coverage)
+
+**Unit (`tests/unit/`):** `test-lib-common.sh`, `test-lib-config.sh`, `test-lib-allowlist.sh`, `test-detect-framework.sh`, `test-agent-guardrails-dispatcher.sh` (bin/lib helpers, detection single/conflict, dispatcher args + non-interactive + APORT_FRAMEWORK).
+
+**Integration (`tests/frameworks/<name>/`):** For each framework (openclaw, langchain, crewai, n8n), `setup.sh` runs the CLI in a temp dir and asserts config dir (and config.yaml) exist. OpenClaw also has `setup.test.mjs` (Node).
+
+**OAP / guardrail (`tests/`):**
 
 | Script | What it covers |
 |--------|----------------|
@@ -45,12 +73,12 @@ cd extensions/openclaw-aport && node test.js
 | **`test-passport-creation.sh`** | Passport creation: `aport-create-passport.sh` with piped answers; assert output has OAP v1 fields, capabilities, and limits. |
 | **`test-oap-v1-guardrail.sh`** | Policy loading from submodules, allow/deny paths, OAP v1 decision shape (`reasons[]`, `passport_digest`, `policy_id`), `code.repository.merge` and `system.command.execute`, unknown tool denied. |
 | **`test-oap-v1-passport-and-status.sh`** | Passport fixture required fields (`spec_version`, metadata, `never_expires`), status script output and missing-passport exit. |
-| **`test-kill-switch.sh`** | Kill switch: absent → allow, present → deny (`oap.kill_switch_active`), removed → allow. |
+| **`test-kill-switch.sh`** | Kill switch = passport status: active → allow, suspended → deny (`oap.passport_suspended`), active again → allow. |
 | **`test-passport-missing-and-invalid.sh`** | Missing passport → `oap.passport_not_found`, invalid JSON → `oap.passport_invalid`, suspended → `oap.passport_suspended`. |
 | **`test-api-evaluator.sh`** | API-powered evaluator (default: local agent-passport); skip if API unreachable. |
 | **`test-remote-passport-api.sh`** | **Remote passport (API mode):** Uses `APORT_AGENT_ID` only (no passport file). API fetches passport from registry. Set `APORT_TEST_REMOTE_AGENT_ID` to test a specific hosted passport; skip with `APORT_SKIP_REMOTE_PASSPORT_TEST=1`. |
 | **`test-plugin-guardrail-cli.sh`** | **Plugin-style CLI:** Same tool names and context as the OpenClaw plugin — `system.command.execute` (mkdir, ls) ALLOW; `messaging.message.send` ALLOW with `messaging.send` passport, DENY without. |
-| **`test-npm-package.sh`** | **Published npm package:** In a temp dir, `npm install @aporthq/agent-guardrails` (with `--ignore-scripts` for current publish), asserts package layout (`bin/`, `external/`), runs guardrail for ALLOW and DENY. Requires network. |
+| **`test-npm-package.sh`** | **Published npm package:** In a temp dir, `npm install @aporthq/aport-agent-guardrails` (with `--ignore-scripts` for current publish), asserts package layout (`bin/`, `external/`), runs guardrail for ALLOW and DENY. Requires network. |
 | **`test-openclaw-hosted-flow.sh`** | **Hosted passport CLI:** Run `bin/openclaw <agent_id>`; assert invalid agent_id rejected, config has `agentId` and no local `passport.json`, no `passportFile` in plugin config. |
 
 **Plugin tests** (`extensions/openclaw-aport/test.js`):
@@ -83,7 +111,7 @@ Suggested improvements and their status. Use this table to contribute: pick an i
 | **1** | **End-to-end test against real OpenClaw** | **Not implemented** | Spin up a disposable OpenClaw workspace (e.g. temp dir with `openclaw init`), run `bin/openclaw` to install the plugin, then trigger a fake tool call (system command + messaging) through OpenClaw. Validates runtime wiring: config, `before_tool_call` hook, passport. Can be gated (e.g. `OPENCLAW_E2E=1`) or run in nightly CI if a headless OpenClaw instance is available. |
 | **2** | **“Real” WhatsApp / messaging flow test** | **Not implemented** | Mock the message send (no real gateway). Drive the guardrail via the exact OpenClaw call; assert ALLOW when passport has `messaging.send`, DENY otherwise. Catches capability drift. |
 | **3** | **Chaos / negative scenarios** | **Partial** | **Done:** missing/invalid passport, kill switch. **Not implemented:** corrupt passport JSON (e.g. truncated file), missing decision file, kill switch toggled mid-run; guardrail script missing or not executable; installer recovery (re-run `bin/openclaw` after partial install). |
-| **4** | **Performance / regression (guardrail latency)** | **Partial** | **Done:** plugin unit performance (mapToolToPolicy, verifyDecisionIntegrity, canonicalize). **Not implemented:** test that runs 50+ guardrail calls (script or API) and asserts latency under a threshold (e.g. &lt; 300 ms per call) to guard against expensive policy changes. |
+| **4** | **Performance / regression (guardrail latency)** | **Partial** | **Done:** plugin unit performance (mapToolToPolicy, verifyDecisionIntegrity, canonicalize). **Not implemented:** test that runs 50+ guardrail calls (script or API) and asserts latency under a threshold (e.g. &lt; 100 ms API or &lt; 300 ms local per call) to guard against expensive policy changes. |
 | **5** | **Snapshot tests for decisions** | **Not implemented** | Capture sample ALLOW and DENY decision JSON; diff against expected structure so future changes don’t break OAP/spec compliance. Requires committed snapshot files and a small diff step in a test. |
 | **6** | **Documented fixtures for OpenClaw config** | **Not implemented** | Add a sample `openclaw.json` (or `config.yaml`) with the plugin entry under `tests/fixtures/` and a test that validates the installer writes equivalent structure (e.g. correct `guardrailScript`, `passportFile`, `mode`). |
 
@@ -101,7 +129,7 @@ Suggested improvements and their status. Use this table to contribute: pick an i
 | **E2E** | — | Real OpenClaw deploy + fake tool call (opt-in or nightly) |
 | **Messaging** | — | Mock message send; ALLOW with `messaging.send`, DENY without |
 | **Chaos** | Missing/invalid passport, kill switch | Corrupt JSON, missing decision file, kill switch mid-run, script missing/not executable, installer re-run after partial install |
-| **Performance** | Plugin unit (5k/1k/2k calls) | 50+ guardrail calls, latency &lt; 300 ms |
+| **Performance** | Plugin unit (5k/1k/2k calls) | 50+ guardrail calls, latency &lt; 100 ms API or &lt; 300 ms local |
 | **Snapshots** | — | ALLOW/DENY decision JSON snapshot diff |
 | **Config fixtures** | — | Sample `openclaw.json` + installer output validation |
 

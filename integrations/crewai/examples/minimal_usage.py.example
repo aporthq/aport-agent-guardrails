@@ -1,0 +1,9 @@
+# Minimal CrewAI + APort guardrails (after pip install aport-guardrails-crewai)
+# Run: aport-crewai setup  # then use in your crew:
+
+# from crewai import Task, Crew
+# from aport_guardrails_crewai import with_aport_guardrail
+#
+# @with_aport_guardrail
+# class MyTask(Task):
+#     pass

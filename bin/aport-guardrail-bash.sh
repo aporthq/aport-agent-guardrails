@@ -10,6 +10,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=bin/aport-resolve-paths.sh
 . "${SCRIPT_DIR}/bin/aport-resolve-paths.sh"
 
+# Source validation library for input sanitization
+# shellcheck source=bin/lib/validation.sh
+. "${SCRIPT_DIR}/bin/lib/validation.sh"
+
 # Get script directory to find submodules (external/ per GIT_SUBMODULES_EXPLAINED.md)
 POLICIES_DIR="$SCRIPT_DIR/external/aport-policies"
 LOCAL_POLICIES_DIR="$SCRIPT_DIR/local-overrides/policies"
@@ -19,10 +23,24 @@ TOOL_NAME="$1"
 DEFAULT_CONTEXT='{}'
 CONTEXT_JSON="${2:-$DEFAULT_CONTEXT}"
 
-# DEBUG: Print received arguments
+# SECURITY: Validate tool name to prevent injection attacks
+if ! validate_tool_name "$TOOL_NAME"; then
+    echo '{"allow":false,"reasons":[{"code":"oap.invalid_tool_name","message":"Tool name contains invalid characters or format"}]}' > "$DECISION_FILE" 2> /dev/null || true
+    exit 1
+fi
+
+# SECURITY: Validate JSON context size to prevent DoS
+if ! validate_json_size "$CONTEXT_JSON"; then
+    echo '{"allow":false,"reasons":[{"code":"oap.context_too_large","message":"Context JSON exceeds maximum size"}]}' > "$DECISION_FILE" 2> /dev/null || true
+    exit 1
+fi
+
+# DEBUG: Print received arguments (sanitized to prevent leaking sensitive data)
 if [ -n "$DEBUG_APORT" ]; then
     echo "DEBUG: TOOL_NAME=$TOOL_NAME" >&2
-    echo "DEBUG: CONTEXT_JSON=$CONTEXT_JSON" >&2
+    # SECURITY: Sanitize context JSON to prevent logging sensitive data
+    SANITIZED_CONTEXT=$(sanitize_log_value "$CONTEXT_JSON" "context")
+    echo "DEBUG: CONTEXT_JSON=$SANITIZED_CONTEXT" >&2
     echo "DEBUG: CONTEXT length=${#CONTEXT_JSON}" >&2
 fi
 
@@ -74,13 +92,13 @@ write_decision() {
     local deny_code="${3:-oap.policy_error}"
     local deny_message="${4:-Policy evaluation failed}"
 
-    local decision_id=$(uuidgen 2>/dev/null || echo "local-$(date +%s)")
+    local decision_id=$(uuidgen 2> /dev/null || echo "local-$(date +%s)")
     local passport_id=$(jq -r '.passport_id // "unknown"' "$PASSPORT_FILE")
     local owner_id=$(jq -r '.owner_id // "unknown"' "$PASSPORT_FILE")
     local assurance_level=$(jq -r '.assurance_level // "L0"' "$PASSPORT_FILE")
     local passport_digest=$(compute_passport_digest "$PASSPORT_FILE")
     local issued_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    local expires_at=$(date -u -v+1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
+    local expires_at=$(date -u -v+1H +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
 
     # Build reasons array per OAP v1.0 spec
     local reasons
@@ -97,8 +115,8 @@ write_decision() {
     local prev_decision_id=""
     local prev_content_hash=""
     if [ -f "$chain_state" ]; then
-        prev_decision_id=$(jq -r '.last_decision_id // ""' "$chain_state" 2>/dev/null || true)
-        prev_content_hash=$(jq -r '.last_content_hash // ""' "$chain_state" 2>/dev/null || true)
+        prev_decision_id=$(jq -r '.last_decision_id // ""' "$chain_state" 2> /dev/null || true)
+        prev_content_hash=$(jq -r '.last_content_hash // ""' "$chain_state" 2> /dev/null || true)
     fi
 
     # Build base decision JSON (no content_hash yet)
@@ -143,10 +161,15 @@ write_decision() {
     echo "$final_json" > "$DECISION_FILE"
 
     # Update chain state for next decision (best-effort; do not block or fail the script)
-    echo "{\"last_decision_id\":\"$decision_id\",\"last_content_hash\":\"$content_hash\"}" > "$chain_state" 2>/dev/null || true
+    echo "{\"last_decision_id\":\"$decision_id\",\"last_content_hash\":\"$content_hash\"}" > "$chain_state" 2> /dev/null || true
 
-    # Audit trail is non-core: append in background so it never blocks the tool call
-    ( echo "[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$decision_id allow=$allow policy=$policy_id code=$deny_code" >> "$AUDIT_LOG" ) 2>/dev/null &
+    # Audit trail is non-core: append in background so it never blocks the tool call.
+    # Include capability context (command, recipient, repo/branch) when set.
+    audit_context=""
+    if [ -n "${CONTEXT_SUMMARY:-}" ]; then
+        audit_context=" context=\"${CONTEXT_SUMMARY}\""
+    fi
+    (echo "[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$decision_id allow=$allow policy=$policy_id code=$deny_code${audit_context}" >> "$AUDIT_LOG") 2> /dev/null &
 
     if [ "$allow" = "true" ]; then
         exit 0
@@ -161,12 +184,7 @@ if ! command -v jq &> /dev/null; then
     write_decision false "unknown" "oap.missing_dependency" "jq not found"
 fi
 
-# Check kill switch first (highest priority)
-if [ -f "$KILL_SWITCH" ]; then
-    write_decision false "unknown" "oap.kill_switch_active" "Global kill switch is active. Remove $KILL_SWITCH to resume."
-fi
-
-# Load passport
+# Load passport (source of truth; status checked first below)
 if [ ! -f "$PASSPORT_FILE" ]; then
     write_decision false "unknown" "oap.passport_not_found" "Passport file not found at $PASSPORT_FILE. Create one with aport-create-passport.sh"
 fi
@@ -178,10 +196,10 @@ if ! echo "$PASSPORT" | jq . > /dev/null 2>&1; then
     write_decision false "unknown" "oap.passport_invalid" "Passport file contains invalid JSON"
 fi
 
-# Check passport status
+# Check passport status first (kill switch = suspended/revoked; passport is source of truth per OAP spec)
 STATUS=$(echo "$PASSPORT" | jq -r '.status // "unknown"')
 if [ "$STATUS" != "active" ]; then
-    write_decision false "unknown" "oap.passport_suspended" "Passport status is '$STATUS', not 'active'"
+    write_decision false "unknown" "oap.passport_suspended" "Passport status is '$STATUS', not 'active'. Agent suspended."
 fi
 
 # Check spec version
@@ -193,19 +211,19 @@ fi
 # Map tool to policy pack ID
 POLICY_ID=""
 case "$TOOL_NAME" in
-    git.create_pr|git.merge|git.push)
+    git.create_pr | git.merge | git.push)
         POLICY_ID="code.repository.merge.v1"
         ;;
-    exec.run|exec.*|system.*)
+    exec.run | exec.* | system.*)
         POLICY_ID="system.command.execute.v1"
         ;;
-    message.send|message.*|messaging.*)
+    message.send | message.* | messaging.*)
         POLICY_ID="messaging.message.send.v1"
         ;;
-    payment.*|finance.*)
+    payment.* | finance.*)
         POLICY_ID="finance.payment.refund.v1"
         ;;
-    database.write|database.insert|database.update|database.delete|data.export)
+    database.write | database.insert | database.update | database.delete | data.export)
         POLICY_ID="data.export.v1"
         ;;
     *)
@@ -213,6 +231,25 @@ case "$TOOL_NAME" in
         write_decision false "unknown" "oap.unknown_capability" "Tool '$TOOL_NAME' is not mapped to a policy pack"
         ;;
 esac
+
+# Capability-specific context summary for audit log (command, recipient, repo/branch, etc.)
+CONTEXT_SUMMARY=""
+if [ -n "$CONTEXT_JSON" ] && [ "$CONTEXT_JSON" != "{}" ]; then
+    if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
+        CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.command // .cmd // .args[0] // ""' 2> /dev/null || true)
+    elif [[ "$POLICY_ID" == "messaging.message.send"* ]]; then
+        CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.recipient // .to // ""' 2> /dev/null || true)
+    elif [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
+        REPO=$(echo "$CONTEXT_JSON" | jq -r '.repo // .repository // ""' 2> /dev/null || true)
+        BRANCH=$(echo "$CONTEXT_JSON" | jq -r '.branch // ""' 2> /dev/null || true)
+        [ -n "$REPO" ] && CONTEXT_SUMMARY="$REPO"
+        [ -n "$BRANCH" ] && CONTEXT_SUMMARY="${CONTEXT_SUMMARY:+$CONTEXT_SUMMARY }$BRANCH"
+    fi
+    # Sanitize for one-line audit: no newlines, truncate, escape double quotes
+    if [ -n "$CONTEXT_SUMMARY" ]; then
+        CONTEXT_SUMMARY=$(printf '%s' "$CONTEXT_SUMMARY" | tr '\n' ' ' | head -c 120 | sed 's/"/\\"/g')
+    fi
+fi
 
 # Load policy definition
 POLICY_DEF=$(load_policy "$(echo "$POLICY_ID" | sed 's/\.v[0-9]*$//')")
@@ -272,7 +309,7 @@ if [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
             fi
         done < <(echo "$LIMITS" | jq -r '.allowed_repos[]? // empty')
         HAS_ALLOWED_REPOS=$(echo "$LIMITS" | jq -r '.allowed_repos | length')
-        if [ "$REPO_ALLOWED" = false ] && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2>/dev/null; then
+        if [ "$REPO_ALLOWED" = false ] && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.repo_not_allowed" "Repository '$REPO' is not in allowed list"
         fi
     fi
@@ -289,7 +326,7 @@ if [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
             fi
         done < <(echo "$LIMITS" | jq -r '.allowed_base_branches[]? // empty')
         HAS_ALLOWED_BRANCHES=$(echo "$LIMITS" | jq -r '.allowed_base_branches | length')
-        if [ "$BRANCH_ALLOWED" = false ] && [ "$HAS_ALLOWED_BRANCHES" -gt 0 ] 2>/dev/null; then
+        if [ "$BRANCH_ALLOWED" = false ] && [ "$HAS_ALLOWED_BRANCHES" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.branch_not_allowed" "Branch '$BRANCH' is not in allowed list"
         fi
     fi
@@ -303,24 +340,31 @@ if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
     fi
 
     if [ -n "$COMMAND" ]; then
-        # Check allowed commands (use while-read so "*" is not glob-expanded)
+        # SECURITY: Validate command doesn't contain injection characters
+        if ! validate_command_string "$COMMAND"; then
+            write_decision false "$POLICY_ID" "oap.command_injection_detected" "Command contains potentially dangerous characters"
+        fi
+
+        # Check allowed commands using safe prefix matching
         COMMAND_ALLOWED=false
         while IFS= read -r allowed_cmd; do
             [ -z "$allowed_cmd" ] && continue
-            if [[ "$COMMAND" == "$allowed_cmd"* ]] || [[ "$allowed_cmd" == "*" ]]; then
+            # Use safe_prefix_match instead of bash glob patterns
+            if safe_prefix_match "$COMMAND" "$allowed_cmd"; then
                 COMMAND_ALLOWED=true
                 break
             fi
         done < <(echo "$LIMITS" | jq -r '.allowed_commands[]? // empty')
         HAS_ALLOWED=$(echo "$LIMITS" | jq -r '.allowed_commands | length')
-        if [ "$COMMAND_ALLOWED" = false ] && [ "${HAS_ALLOWED:-0}" -gt 0 ] 2>/dev/null; then
+        if [ "$COMMAND_ALLOWED" = false ] && [ "${HAS_ALLOWED:-0}" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.command_not_allowed" "Command '$COMMAND' is not in allowed list"
         fi
 
-        # Check blocked patterns (use while-read so patterns are not glob-expanded)
+        # Check blocked patterns using safe pattern matching
         while IFS= read -r pattern; do
             [ -z "$pattern" ] && continue
-            if [[ "$COMMAND" == *"$pattern"* ]]; then
+            # Use safe_pattern_match instead of bash glob patterns
+            if safe_pattern_match "$COMMAND" "$pattern"; then
                 write_decision false "$POLICY_ID" "oap.blocked_pattern" "Command contains blocked pattern: $pattern"
                 break
             fi
@@ -340,7 +384,7 @@ if [[ "$POLICY_ID" == "messaging.message.send"* ]]; then
             fi
         done < <(echo "$LIMITS" | jq -r '.allowed_recipients[]? // empty')
         HAS_ALLOWED=$(echo "$LIMITS" | jq -r '.allowed_recipients | length')
-        if [ "$RECIPIENT_ALLOWED" = false ] && [ "${HAS_ALLOWED:-0}" -gt 0 ] 2>/dev/null; then
+        if [ "$RECIPIENT_ALLOWED" = false ] && [ "${HAS_ALLOWED:-0}" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.recipient_not_allowed" "Recipient '$RECIPIENT' is not in allowed list"
         fi
     fi

@@ -21,7 +21,7 @@ echo "  system.command.execute: mkdir (ALLOW)..."
 rm -f "$OPENCLAW_DECISION_FILE"
 cp "$FIXTURE_PASSPORT" "$OPENCLAW_PASSPORT_FILE"
 exit_mkdir=0
-"$GUARDRAIL_BASH" system.command.execute '{"command":"mkdir -p /tmp/aport-test-dir"}' 2>/dev/null || exit_mkdir=$?
+"$GUARDRAIL_BASH" system.command.execute '{"command":"mkdir -p /tmp/aport-test-dir"}' 2> /dev/null || exit_mkdir=$?
 if [ "$exit_mkdir" -ne 0 ]; then
     echo "FAIL: mkdir should ALLOW (exit 0), got exit $exit_mkdir" >&2
     [ -f "$OPENCLAW_DECISION_FILE" ] && jq -r '.reasons[0].message // .allow' "$OPENCLAW_DECISION_FILE" >&2
@@ -35,7 +35,7 @@ echo "    ALLOW OK"
 echo "  system.command.execute: ls (ALLOW)..."
 rm -f "$OPENCLAW_DECISION_FILE"
 exit_ls=0
-"$GUARDRAIL_BASH" system.command.execute '{"command":"ls /tmp/aport-test-dir"}' 2>/dev/null || exit_ls=$?
+"$GUARDRAIL_BASH" system.command.execute '{"command":"ls /tmp/aport-test-dir"}' 2> /dev/null || exit_ls=$?
 if [ "$exit_ls" -ne 0 ]; then
     echo "FAIL: ls should ALLOW (exit 0), got exit $exit_ls" >&2
     [ -f "$OPENCLAW_DECISION_FILE" ] && jq -r '.reasons[0].message // .allow' "$OPENCLAW_DECISION_FILE" >&2
@@ -51,7 +51,7 @@ cp "$FIXTURE_MESSAGING" "$OPENCLAW_PASSPORT_FILE"
 # Same context shape the plugin would pass (channel_id, message, message_type per policy)
 MSG_CONTEXT='{"channel_id":"whatsapp:+15551234567","message":"test","message_type":"text"}'
 exit_msg=0
-"$GUARDRAIL_BASH" messaging.message.send "$MSG_CONTEXT" 2>/dev/null || exit_msg=$?
+"$GUARDRAIL_BASH" messaging.message.send "$MSG_CONTEXT" 2> /dev/null || exit_msg=$?
 if [ "$exit_msg" -ne 0 ]; then
     echo "FAIL: messaging.message.send should ALLOW when passport has messaging.send, got exit $exit_msg" >&2
     [ -f "$OPENCLAW_DECISION_FILE" ] && jq -r '.reasons[0].code // .reasons[0].message // .allow' "$OPENCLAW_DECISION_FILE" >&2
@@ -66,7 +66,7 @@ echo "  messaging.message.send (DENY without capability)..."
 rm -f "$OPENCLAW_DECISION_FILE"
 cp "$FIXTURE_PASSPORT" "$OPENCLAW_PASSPORT_FILE"
 exit_deny=0
-"$GUARDRAIL_BASH" messaging.message.send "$MSG_CONTEXT" 2>/dev/null || exit_deny=$?
+"$GUARDRAIL_BASH" messaging.message.send "$MSG_CONTEXT" 2> /dev/null || exit_deny=$?
 if [ "$exit_deny" -eq 0 ]; then
     echo "FAIL: messaging.message.send should DENY when passport has no messaging.send (exit non-zero)" >&2
     exit 1

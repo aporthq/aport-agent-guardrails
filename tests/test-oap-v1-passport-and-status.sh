@@ -17,16 +17,31 @@ assert_json_eq "$OPENCLAW_PASSPORT_FILE" "status" "active" "status"
 
 echo "  Status script: runs and shows OAP v1 fields..."
 out=$("$STATUS_SCRIPT" --passport "$OPENCLAW_PASSPORT_FILE" 2>&1) || true
-echo "$out" | grep -q "Passport Information" || { echo "FAIL: status should show Passport Information"; exit 1; }
-echo "$out" | grep -q "Spec Version" || { echo "FAIL: status should show Spec Version"; exit 1; }
-echo "$out" | grep -q "Assurance Level" || { echo "FAIL: status should show Assurance Level"; exit 1; }
-echo "$out" | grep -q "Test Agent" || { echo "FAIL: status should show agent name from metadata"; exit 1; }
-echo "$out" | grep -q "active" || { echo "FAIL: status should show active"; exit 1; }
+echo "$out" | grep -q "Passport Information" || {
+    echo "FAIL: status should show Passport Information"
+    exit 1
+}
+echo "$out" | grep -q "Spec Version" || {
+    echo "FAIL: status should show Spec Version"
+    exit 1
+}
+echo "$out" | grep -q "Assurance Level" || {
+    echo "FAIL: status should show Assurance Level"
+    exit 1
+}
+echo "$out" | grep -q "Test Agent" || {
+    echo "FAIL: status should show agent name from metadata"
+    exit 1
+}
+echo "$out" | grep -q "active" || {
+    echo "FAIL: status should show active"
+    exit 1
+}
 
 echo "  Status script: missing passport exits non-zero..."
 rm -f "$OPENCLAW_PASSPORT_FILE"
 # Capture stdout too so expected "Passport: NOT FOUND" message doesn't clutter test log
-if "$STATUS_SCRIPT" --passport "$OPENCLAW_PASSPORT_FILE" >/dev/null 2>&1; then
+if "$STATUS_SCRIPT" --passport "$OPENCLAW_PASSPORT_FILE" > /dev/null 2>&1; then
     echo "FAIL: status should exit 1 when passport missing" >&2
     exit 1
 fi

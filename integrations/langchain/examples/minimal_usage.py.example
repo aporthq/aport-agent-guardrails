@@ -1,0 +1,11 @@
+# Minimal LangChain + APort guardrails (after pip install aport-guardrails-langchain)
+# Run: aport-langchain setup  # then use in your agent:
+
+# from langchain.agents import initialize_agent
+# from aport_guardrails_langchain import APortCallback
+#
+# agent = initialize_agent(
+#     tools=tools,
+#     llm=llm,
+#     callbacks=[APortCallback()]
+# )

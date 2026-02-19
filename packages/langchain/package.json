@@ -1,0 +1,35 @@
+{
+  "name": "@aporthq/aport-agent-guardrails-langchain",
+  "version": "1.0.8",
+  "description": "APort guardrails for LangChain/LangGraph — callback handler",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "jest"
+  },
+  "keywords": [
+    "aport",
+    "langchain",
+    "langgraph",
+    "guardrails",
+    "agent"
+  ],
+  "author": "APort Technologies Inc.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aporthq/aport-agent-guardrails-core": ">=1.0.0",
+    "@langchain/core": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

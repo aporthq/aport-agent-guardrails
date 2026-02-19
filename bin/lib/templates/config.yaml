@@ -1,0 +1,6 @@
+# APort agent guardrails config (shared template for langchain, crewai, n8n)
+# mode: api | local
+# For API: set agent_id (hosted passport). For local: set passport_path.
+mode: local
+# agent_id: ap_xxx
+# passport_path: ~/.aport/passport.json

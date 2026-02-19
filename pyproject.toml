@@ -1,0 +1,10 @@
+# Python monorepo root — optional workspace for local development
+# Install packages with: pip install -e python/aport_guardrails
+# Then: pip install -e python/langchain_adapter python/crewai_adapter
+
+[tool.setuptools.packages.find]
+where = []
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
