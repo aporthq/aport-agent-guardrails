@@ -164,6 +164,7 @@ async function callApi(
     passport?: Passport;
     policyPack?: PolicyPack;
     apiKey?: string;
+    verifySsl?: boolean;
   }
 ): Promise<Decision> {
   const base = apiUrl.replace(/\/$/, '');
@@ -181,8 +182,18 @@ async function callApi(
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`;
+  // SECURITY: Configure SSL/TLS verification (allow disabling for dev/test only)
+  const fetchOptions: RequestInit = { method: 'POST', headers, body: JSON.stringify(body) };
+  if (options.verifySsl === false) {
+    // Node.js 18+ fetch uses undici; for disabling SSL we need an Agent
+    // NOTE: In Node.js fetch, SSL is verified by default. To disable, we'd need https.Agent with rejectUnauthorized: false
+    // However, fetch API doesn't directly support custom agents in Node.js 18-20.
+    // For development, users can set NODE_TLS_REJECT_UNAUTHORIZED=0 environment variable (not recommended for production)
+    console.warn('WARNING: SSL certificate verification is set to false. This is insecure and should only be used in development/testing!');
+    console.warn('Set NODE_TLS_REJECT_UNAUTHORIZED=0 in environment if needed (not recommended).');
+  }
   try {
-    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    const res = await fetch(url, fetchOptions);
     const raw = await res.text();
     if (!res.ok) {
       return {
@@ -257,6 +268,9 @@ export class Evaluator {
       const apiUrl = (config.api_url ?? process.env.APORT_API_URL ?? 'https://api.aport.io') as string;
       const apiKey = (config.api_key ?? process.env.APORT_API_KEY) as string | undefined;
       const agentId = (config.agent_id ?? passport.agent_id) as string | undefined;
+      // SECURITY: Check if SSL verification should be disabled (dev/test only)
+      const verifySsl = (config.verify_ssl ?? true) as boolean;
+      const verifySslOverride = process.env.APORT_VERIFY_SSL === '0' ? false : verifySsl;
       const passportPath = resolvePassportPath(config);
       let passportBody: Passport | undefined;
       if (passportPath && fs.existsSync(passportPath)) {
@@ -270,13 +284,14 @@ export class Evaluator {
         }
       }
       if (agentId) {
-        return callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey });
+        return callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey, verifySsl: verifySslOverride });
       }
       if (passportBody) {
         return callApi(apiUrl, packId, ctx, {
           passport: passportBody,
           policyPack: isFullPolicyPack(policy) ? policy : undefined,
           apiKey,
+          verifySsl: verifySslOverride,
         });
       }
     }
@@ -306,6 +321,12 @@ export class Evaluator {
       const apiUrl = (config.api_url ?? process.env.APORT_API_URL ?? 'https://api.aport.io') as string;
       const apiKey = (config.api_key ?? process.env.APORT_API_KEY) as string | undefined;
       const agentId = (config.agent_id ?? passport.agent_id) as string | undefined;
+      // SECURITY: Check if SSL verification should be disabled (dev/test only)
+      const verifySsl = (config.verify_ssl ?? true) as boolean;
+      if (verifySsl === false || process.env.APORT_VERIFY_SSL === '0') {
+        console.warn('WARNING: SSL certificate verification disabled in verifySync. This is insecure!');
+        console.warn('For sync API calls, set NODE_TLS_REJECT_UNAUTHORIZED=0 in environment if needed.');
+      }
       const passportPath = resolvePassportPath(config);
       let passportBody: Passport | undefined;
       if (passportPath && fs.existsSync(passportPath)) {

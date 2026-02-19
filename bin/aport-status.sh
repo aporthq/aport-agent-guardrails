@@ -73,14 +73,14 @@ elif [ "$expires_at" != "null" ] && [ "$expires_at" != "unknown" ]; then
     # Calculate days until expiration
     if date -v+1d &> /dev/null 2>&1; then
         # BSD date (macOS)
-        expires_ts=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$expires_at" +%s 2>/dev/null || echo 0)
+        expires_ts=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$expires_at" +%s 2> /dev/null || echo 0)
     else
         # GNU date (Linux)
-        expires_ts=$(date -d "$expires_at" +%s 2>/dev/null || echo 0)
+        expires_ts=$(date -d "$expires_at" +%s 2> /dev/null || echo 0)
     fi
 
     now_ts=$(date +%s)
-    days_left=$(( ($expires_ts - $now_ts) / 86400 ))
+    days_left=$((($expires_ts - $now_ts) / 86400))
 
     if [ $days_left -le 0 ]; then
         echo "   ⚠️  EXPIRED $((days_left * -1)) days ago"
@@ -156,7 +156,7 @@ if [ -f "$DECISION_FILE" ]; then
     echo "   Policy ID: $policy_id"
 
     # Display OAP v1.0 reasons array
-    reasons_count=$(jq '.reasons | length' $DECISION_FILE 2>/dev/null || echo 0)
+    reasons_count=$(jq '.reasons | length' $DECISION_FILE 2> /dev/null || echo 0)
     if [ "$reasons_count" -gt 0 ]; then
         echo "   Reasons:"
         jq -r '.reasons[] | "     - [\(.code)] \(.message)"' $DECISION_FILE
@@ -227,10 +227,10 @@ if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
     echo "📈 Statistics (all time)"
     total_actions=$(wc -l < "$AUDIT_LOG" | tr -d '[:space:]')
     total_actions=${total_actions:-0}
-    allowed=$(grep -c "allow=true" "$AUDIT_LOG" 2>/dev/null || true)
+    allowed=$(grep -c "allow=true" "$AUDIT_LOG" 2> /dev/null || true)
     allowed=$(echo "$allowed" | tr -d '[:space:]')
     allowed=${allowed:-0}
-    denied=$(grep -c "allow=false" "$AUDIT_LOG" 2>/dev/null || true)
+    denied=$(grep -c "allow=false" "$AUDIT_LOG" 2> /dev/null || true)
     denied=$(echo "$denied" | tr -d '[:space:]')
     denied=${denied:-0}
 
@@ -238,8 +238,8 @@ if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
     echo "   Allowed: $allowed"
     echo "   Denied: $denied"
 
-    if [ -n "$total_actions" ] && [ "$total_actions" -gt 0 ] 2>/dev/null; then
-        allow_pct=$(( 100 * allowed / total_actions ))
+    if [ -n "$total_actions" ] && [ "$total_actions" -gt 0 ] 2> /dev/null; then
+        allow_pct=$((100 * allowed / total_actions))
         echo "   Allow rate: ${allow_pct}%"
     fi
     echo
@@ -256,7 +256,7 @@ echo
 
 # Upgrade hint (show once per day)
 HINT_FILE="$HOME/.openclaw/.last-status-upgrade-hint"
-if [ ! -f "$HINT_FILE" ] || [ $(( $(date +%s) - $(stat -f %m "$HINT_FILE" 2>/dev/null || stat -c %Y "$HINT_FILE" 2>/dev/null || echo 0) )) -gt 86400 ]; then
+if [ ! -f "$HINT_FILE" ] || [ $(($(date +%s) - $(stat -f %m "$HINT_FILE" 2> /dev/null || stat -c %Y "$HINT_FILE" 2> /dev/null || echo 0))) -gt 86400 ]; then
     echo "💰 Upgrade to APort Cloud?"
     echo "   You're using APort Local (free tier) - perfect for individual developers!"
     echo
@@ -267,7 +267,7 @@ if [ ! -f "$HINT_FILE" ] || [ $(( $(date +%s) - $(stat -f %m "$HINT_FILE" 2>/dev
     echo "   • Team collaboration (shared passports, role-based policies)"
     echo "   • Analytics dashboard (usage metrics, risk scoring, anomaly detection)"
     echo
-    echo "   Pricing: $99/user/month (Pro) | $149/user/month (Enterprise)"
+    echo "   Pricing: \$99/user/month (Pro) | \$149/user/month (Enterprise)"
     echo "   Free trial: https://aport.io/trial"
     echo "   Learn more: https://aport.io/upgrade"
     echo

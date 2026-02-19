@@ -30,9 +30,18 @@ assert_json_eq "$CREATED_PASSPORT" "status" "active" "status"
 
 # Should have repo and exec capabilities from our y/y/n/n choices
 cap_ids=$(jq -r '.capabilities[].id' "$CREATED_PASSPORT")
-echo "$cap_ids" | grep -q "repo.pr.create" || { echo "FAIL: expected repo.pr.create"; exit 1; }
-echo "$cap_ids" | grep -q "repo.merge" || { echo "FAIL: expected repo.merge"; exit 1; }
-echo "$cap_ids" | grep -q "system.command.execute" || { echo "FAIL: expected system.command.execute"; exit 1; }
+echo "$cap_ids" | grep -q "repo.pr.create" || {
+    echo "FAIL: expected repo.pr.create"
+    exit 1
+}
+echo "$cap_ids" | grep -q "repo.merge" || {
+    echo "FAIL: expected repo.merge"
+    exit 1
+}
+echo "$cap_ids" | grep -q "system.command.execute" || {
+    echo "FAIL: expected system.command.execute"
+    exit 1
+}
 
 # Limits should reflect our inputs (500, 10, *)
 max_size=$(jq -r '.limits["code.repository.merge"].max_pr_size_kb' "$CREATED_PASSPORT")

@@ -5,7 +5,7 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2>/dev/null || echo "$REPO_ROOT/tests/output")}"
+TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2> /dev/null || echo "$REPO_ROOT/tests/output")}"
 mkdir -p "$TEST_DIR"
 
 export OPENCLAW_PASSPORT_FILE="$TEST_DIR/passport.json"
@@ -17,7 +17,7 @@ STATUS_SCRIPT="$REPO_ROOT/bin/aport-status.sh"
 FIXTURE_PASSPORT="$REPO_ROOT/tests/fixtures/passport.oap-v1.json"
 
 # Ensure scripts are executable
-chmod +x "$REPO_ROOT/bin/"*.sh 2>/dev/null || true
+chmod +x "$REPO_ROOT/bin/"*.sh 2> /dev/null || true
 
 # Copy fixture passport into test dir so guardrail finds it (passport status = source of truth for suspend)
 cp "$FIXTURE_PASSPORT" "$OPENCLAW_PASSPORT_FILE"
@@ -37,7 +37,7 @@ assert_json_has() {
     local file="$1"
     local key="$2"
     local msg="${3:-$file should have key $key}"
-    if ! jq -e ".$key" "$file" >/dev/null 2>&1; then
+    if ! jq -e ".$key" "$file" > /dev/null 2>&1; then
         echo "FAIL: $msg" >&2
         exit 1
     fi

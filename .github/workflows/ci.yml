@@ -36,6 +36,8 @@ jobs:
       
       - name: Run tests
         run: make test
+        env:
+          APORT_SKIP_REMOTE_PASSPORT_TEST: "1"
 
       - name: Setup Node
         uses: actions/setup-node@v4

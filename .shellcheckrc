@@ -1,0 +1,37 @@
+# ShellCheck configuration for APort Agent Guardrails
+# See: https://www.shellcheck.net/wiki/
+
+# Enable all optional checks
+enable=all
+
+# Disable specific checks (with justification)
+
+# SC1090: Can't follow non-constant source
+# Justification: We use dynamic sourcing based on framework detection
+disable=SC1090
+
+# SC1091: Not following sourced file
+# Justification: Some sourced files may not exist in all environments
+disable=SC1091
+
+# SC2034: Variable appears unused
+# Justification: Some variables are exported for child processes or sourced scripts
+# disable=SC2034  # Keep this enabled to catch actual unused variables
+
+# SC2064: Use single quotes to prevent glob expansion
+# Justification: We sometimes intentionally want expansion in traps
+# disable=SC2064  # Keep this enabled for safety
+
+# Severity levels to report (error, warning, info, style)
+# We want to catch all issues
+# severity=warning
+
+# Shell dialect
+# Default: auto-detect, but we primarily use bash
+shell=bash
+
+# Source path for resolving sourced files
+# source-path=SCRIPTDIR
+
+# External sources (if any)
+# external-sources=true

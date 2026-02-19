@@ -7,24 +7,27 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIB_DIR="$REPO_ROOT/bin/lib"
-TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2>/dev/null || echo "$REPO_ROOT/tests/output")}"
+TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2> /dev/null || echo "$REPO_ROOT/tests/output")}"
 mkdir -p "$TEST_DIR"
 
 # shellcheck source=../../bin/lib/detect.sh
 source "$LIB_DIR/detect.sh"
 
 assert_eq() {
-  local actual="$1" expected="$2" msg="${3:-expected '$expected', got '$actual'}"
-  if [[ "$actual" != "$expected" ]]; then
-    echo "FAIL: $msg" >&2
-    exit 1
-  fi
+    local actual="$1" expected="$2" msg="${3:-expected '$expected', got '$actual'}"
+    if [[ "$actual" != "$expected" ]]; then
+        echo "FAIL: $msg" >&2
+        exit 1
+    fi
 }
 
 # Assert list contains exactly these words (order-independent for "contains")
 assert_list_contains() {
-  local list="$1" word="$2"
-  [[ " $list " == *" $word "* ]] || { echo "FAIL: list '$list' should contain '$word'" >&2; exit 1; }
+    local list="$1" word="$2"
+    [[ " $list " == *" $word "* ]] || {
+        echo "FAIL: list '$list' should contain '$word'" >&2
+        exit 1
+    }
 }
 
 echo ""
@@ -65,7 +68,10 @@ list="$(detect_frameworks_list "$dir_both")"
 assert_eq "$first" "langchain" "first detected in conflict (pyproject before package.json)"
 assert_list_contains "$list" "langchain"
 assert_list_contains "$list" "openclaw"
-[[ $(echo "$list" | wc -w) -eq 2 ]] || { echo "FAIL: list should have 2 words" >&2; exit 1; }
+[[ $(echo "$list" | wc -w) -eq 2 ]] || {
+    echo "FAIL: list should have 2 words" >&2
+    exit 1
+}
 echo "  ✅ conflict (langchain + openclaw) -> list has both, first=langchain"
 
 # 5. Conflict: langchain + crewai in same pyproject

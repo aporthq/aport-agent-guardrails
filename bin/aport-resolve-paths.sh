@@ -20,7 +20,7 @@ resolve_aport_paths() {
         passport_path="$OPENCLAW_PASSPORT_FILE"
     # 2) Explicit path set but file missing → legacy: try parent dir (e.g. .../openclaw/passport.json)
     elif [ -n "${OPENCLAW_PASSPORT_FILE:-}" ]; then
-        config_dir="$(cd "$(dirname "$OPENCLAW_PASSPORT_FILE")/.." 2>/dev/null && pwd)"
+        config_dir="$(cd "$(dirname "$OPENCLAW_PASSPORT_FILE")/.." 2> /dev/null && pwd)"
         if [ -f "${config_dir}/passport.json" ]; then
             passport_path="${config_dir}/passport.json"
             data_dir="$config_dir"

@@ -12,8 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 OPENCLAW_BIN="$SCRIPT_DIR/../openclaw"
 
 if [[ ! -x "$OPENCLAW_BIN" ]]; then
-  log_error "OpenClaw installer not found: $OPENCLAW_BIN"
-  exit 1
+    log_error "OpenClaw installer not found: $OPENCLAW_BIN"
+    exit 1
 fi
 
 exec "$OPENCLAW_BIN" "$@"

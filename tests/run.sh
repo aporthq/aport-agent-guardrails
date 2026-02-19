@@ -10,28 +10,28 @@ FAILED=0
 RUN=0
 
 run_one() {
-  local path="$1"
-  [[ -f "$path" ]] || return 0
-  RUN=$((RUN + 1))
-  local name=$(basename "$path")
-  if bash "$path"; then
-    echo "  OK $name"
-  else
-    echo "  FAIL $name"
-    FAILED=$((FAILED + 1))
-  fi
+    local path="$1"
+    [[ -f "$path" ]] || return 0
+    RUN=$((RUN + 1))
+    local name=$(basename "$path")
+    if bash "$path"; then
+        echo "  OK $name"
+    else
+        echo "  FAIL $name"
+        FAILED=$((FAILED + 1))
+    fi
 }
 
 echo ""
 echo "  — Unit (bin/lib, detect, dispatcher) —"
 for t in "$TESTS_DIR/unit"/test-*.sh; do
-  run_one "$t"
+    run_one "$t"
 done
 
 echo ""
 echo "  — OAP / guardrail / passport —"
 for t in "$TESTS_DIR"/test-*.sh; do
-  run_one "$t"
+    run_one "$t"
 done
 
 echo ""
@@ -44,24 +44,24 @@ run_one "$TESTS_DIR/frameworks/cursor/setup.sh"
 
 # Node integration test (setup.test.mjs)
 if [[ -f "$TESTS_DIR/frameworks/openclaw/setup.test.mjs" ]]; then
-  RUN=$((RUN + 1))
-  if node "$TESTS_DIR/frameworks/openclaw/setup.test.mjs" 2>/dev/null; then
-    echo "  OK setup.test.mjs"
-  else
-    echo "  FAIL setup.test.mjs"
-    FAILED=$((FAILED + 1))
-  fi
+    RUN=$((RUN + 1))
+    if node "$TESTS_DIR/frameworks/openclaw/setup.test.mjs" 2> /dev/null; then
+        echo "  OK setup.test.mjs"
+    else
+        echo "  FAIL setup.test.mjs"
+        FAILED=$((FAILED + 1))
+    fi
 fi
 
 echo ""
 if [[ "$RUN" -eq 0 ]]; then
-  echo "No test scripts found."
-  exit 1
+    echo "No test scripts found."
+    exit 1
 fi
 if [[ "$FAILED" -eq 0 ]]; then
-  echo "All $RUN tests passed."
-  exit 0
+    echo "All $RUN tests passed."
+    exit 0
 else
-  echo "$FAILED of $RUN tests failed."
-  exit 1
+    echo "$FAILED of $RUN tests failed."
+    exit 1
 fi
