@@ -44,6 +44,10 @@ def _make_crew_and_run(allow_then_deny: bool = True) -> list[str]:
         config_path = Path(tmp) / "config.yaml"
         write_config(config_path, {"mode": "local"})
 
+        # Clear any cached evaluator from previous test runs
+        import crewai_adapter.hook
+        crewai_adapter.hook._crewai_evaluator = None
+
         with patch("crewai_adapter.hook.find_config_path", return_value=config_path):
             with patch("crewai_adapter.hook.Evaluator") as MockEval:
                 MockEval.return_value.verify_sync.side_effect = mock_verify_sync
