@@ -1,0 +1,74 @@
+name: Shell Linting
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    branches: ["main", "dev"]
+    paths:
+      - "**.sh"
+      - ".shellcheckrc"
+      - ".github/workflows/shellcheck.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './bin'
+          severity: error
+          additional_files: 'tests'
+        env:
+          SHELLCHECK_OPTS: --color=always --shell=bash
+
+      - name: Upload ShellCheck report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shellcheck-report
+          path: shellcheck.log
+          retention-days: 30
+
+  shfmt:
+    name: Shell Formatting Check
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Don't block builds on formatting issues
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install shfmt
+        run: |
+          curl -sSL "https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_amd64" -o /tmp/shfmt
+          chmod +x /tmp/shfmt
+          sudo mv /tmp/shfmt /usr/local/bin/shfmt
+          shfmt --version
+
+      - name: Check shell script formatting
+        run: |
+          # Check formatting (don't modify files, just report issues)
+          find bin tests -name "*.sh" -type f -print0 | xargs -0 shfmt -d -i 4 -bn -ci -sr
+
+      - name: Comment on PR (if formatting issues found)
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ **Shell formatting issues detected!**\n\nRun `shfmt -w -i 4 -bn -ci -sr bin/**/*.sh tests/**/*.sh` to auto-format.\n\nSee the workflow run for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            })

@@ -23,8 +23,6 @@ fi
 export OPENCLAW_PASSPORT_FILE="$FLOW_PASSPORT"
 export OPENCLAW_DECISION_FILE="$TEST_DIR/decision.json"
 export OPENCLAW_AUDIT_LOG="$TEST_DIR/audit.log"
-export OPENCLAW_KILL_SWITCH="$TEST_DIR/kill-switch"
-rm -f "$OPENCLAW_KILL_SWITCH"
 
 cd "$REPO_ROOT"
 
@@ -37,7 +35,7 @@ assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "true" "decision.allow"
 assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.allowed" "reasons[0].code"
 
 echo "  Full flow: guardrail DENY (policy limit)..."
-if "$GUARDRAIL" git.create_pr '{"repo":"aporthq/repo","files_changed":600}' 2>/dev/null; then
+if "$GUARDRAIL" git.create_pr '{"repo":"aporthq/repo","files_changed":600}' 2> /dev/null; then
     echo "FAIL: guardrail should DENY when exceeding limit" >&2
     exit 1
 fi
@@ -46,8 +44,17 @@ assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.limit_exceeded" 
 
 echo "  Full flow: status shows passport..."
 out=$("$STATUS_SCRIPT" --passport "$FLOW_PASSPORT" 2>&1) || true
-echo "$out" | grep -q "Passport Information" || { echo "FAIL: status should show Passport Information"; exit 1; }
-echo "$out" | grep -q "active" || { echo "FAIL: status should show active"; exit 1; }
-echo "$out" | grep -q "oap/1.0" || { echo "FAIL: status should show spec version"; exit 1; }
+echo "$out" | grep -q "Passport Information" || {
+    echo "FAIL: status should show Passport Information"
+    exit 1
+}
+echo "$out" | grep -q "active" || {
+    echo "FAIL: status should show active"
+    exit 1
+}
+echo "$out" | grep -q "oap/1.0" || {
+    echo "FAIL: status should show spec version"
+    exit 1
+}
 
 exit 0

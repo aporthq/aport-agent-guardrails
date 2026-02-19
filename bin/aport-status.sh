@@ -18,18 +18,7 @@ echo "🛂 APort Status Dashboard"
 echo "========================="
 echo
 
-# Kill switch status
-if [ -f "$KILL_SWITCH" ]; then
-    echo "🔴 KILL SWITCH ACTIVE"
-    echo "   All actions are blocked until kill switch is removed."
-    echo "   Remove: rm $KILL_SWITCH"
-    echo
-else
-    echo "🟢 Kill Switch: inactive"
-    echo
-fi
-
-# Passport info
+# Passport info (passport status is source of truth for suspend; no separate kill-switch file)
 if [ ! -f "$PASSPORT_FILE" ]; then
     echo "❌ Passport: NOT FOUND"
     echo "   Location: $PASSPORT_FILE"
@@ -84,14 +73,14 @@ elif [ "$expires_at" != "null" ] && [ "$expires_at" != "unknown" ]; then
     # Calculate days until expiration
     if date -v+1d &> /dev/null 2>&1; then
         # BSD date (macOS)
-        expires_ts=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$expires_at" +%s 2>/dev/null || echo 0)
+        expires_ts=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$expires_at" +%s 2> /dev/null || echo 0)
     else
         # GNU date (Linux)
-        expires_ts=$(date -d "$expires_at" +%s 2>/dev/null || echo 0)
+        expires_ts=$(date -d "$expires_at" +%s 2> /dev/null || echo 0)
     fi
 
     now_ts=$(date +%s)
-    days_left=$(( ($expires_ts - $now_ts) / 86400 ))
+    days_left=$((($expires_ts - $now_ts) / 86400))
 
     if [ $days_left -le 0 ]; then
         echo "   ⚠️  EXPIRED $((days_left * -1)) days ago"
@@ -167,7 +156,7 @@ if [ -f "$DECISION_FILE" ]; then
     echo "   Policy ID: $policy_id"
 
     # Display OAP v1.0 reasons array
-    reasons_count=$(jq '.reasons | length' $DECISION_FILE 2>/dev/null || echo 0)
+    reasons_count=$(jq '.reasons | length' $DECISION_FILE 2> /dev/null || echo 0)
     if [ "$reasons_count" -gt 0 ]; then
         echo "   Reasons:"
         jq -r '.reasons[] | "     - [\(.code)] \(.message)"' $DECISION_FILE
@@ -188,6 +177,13 @@ if [ -f "$DECISION_FILE" ]; then
     if [ "$kid" != "unknown" ]; then
         echo "   Key ID: $kid"
     fi
+    # Show capability context from last audit line (command, recipient, repo/branch)
+    if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
+        last_context=$(tail -1 "$AUDIT_LOG" | sed -n 's/.*context="\([^"]*\)".*/\1/p')
+        if [ -n "$last_context" ]; then
+            echo "   Context: $last_context"
+        fi
+    fi
     echo
 fi
 
@@ -195,20 +191,29 @@ fi
 echo "📊 Recent Activity (last 10)"
 if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
     tail -10 "$AUDIT_LOG" | while IFS= read -r line; do
-        # Parse log line format: [timestamp] tool=X decision_id=Y allow=Z (portable: no grep -P)
+        # Parse log line: [timestamp] tool=X decision_id=Y allow=Z ... context="..." (optional)
         timestamp=$(echo "$line" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
         tool=$(echo "$line" | sed -n 's/.*tool=\([^ ]*\).*/\1/p')
         allow=$(echo "$line" | sed -n 's/.*allow=\([^ ]*\).*/\1/p')
+        context=$(echo "$line" | sed -n 's/.*context="\([^"]*\)".*/\1/p')
         timestamp=${timestamp:-unknown}
         tool=${tool:-unknown}
         allow=${allow:-unknown}
 
         short_time=$(echo "$timestamp" | cut -d' ' -f1-2 | cut -d'.' -f1)
+        # Show capability + context when present (e.g. "exec.run | cat test.md"); truncate long context
+        if [ -n "$context" ]; then
+            context_show=$(printf '%.80s' "$context")
+            [ "${#context}" -gt 80 ] && context_show="${context_show}..."
+            detail="$tool | $context_show"
+        else
+            detail="$tool"
+        fi
 
         if [ "$allow" = "true" ]; then
-            printf "   ✅ %s | %s\n" "$short_time" "$tool"
+            printf "   ✅ %s | %s\n" "$short_time" "$detail"
         else
-            printf "   ❌ %s | %s\n" "$short_time" "$tool"
+            printf "   ❌ %s | %s\n" "$short_time" "$detail"
         fi
     done
 else
@@ -222,10 +227,10 @@ if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
     echo "📈 Statistics (all time)"
     total_actions=$(wc -l < "$AUDIT_LOG" | tr -d '[:space:]')
     total_actions=${total_actions:-0}
-    allowed=$(grep -c "allow=true" "$AUDIT_LOG" 2>/dev/null || true)
+    allowed=$(grep -c "allow=true" "$AUDIT_LOG" 2> /dev/null || true)
     allowed=$(echo "$allowed" | tr -d '[:space:]')
     allowed=${allowed:-0}
-    denied=$(grep -c "allow=false" "$AUDIT_LOG" 2>/dev/null || true)
+    denied=$(grep -c "allow=false" "$AUDIT_LOG" 2> /dev/null || true)
     denied=$(echo "$denied" | tr -d '[:space:]')
     denied=${denied:-0}
 
@@ -233,8 +238,8 @@ if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
     echo "   Allowed: $allowed"
     echo "   Denied: $denied"
 
-    if [ -n "$total_actions" ] && [ "$total_actions" -gt 0 ] 2>/dev/null; then
-        allow_pct=$(( 100 * allowed / total_actions ))
+    if [ -n "$total_actions" ] && [ "$total_actions" -gt 0 ] 2> /dev/null; then
+        allow_pct=$((100 * allowed / total_actions))
         echo "   Allow rate: ${allow_pct}%"
     fi
     echo
@@ -245,24 +250,24 @@ echo "💡 Useful Commands"
 echo "   • View full audit log: tail -f $AUDIT_LOG"
 echo "   • Edit passport: vim $PASSPORT_FILE"
 echo "   • Test policy: aport-guardrail.sh <tool_name> '<context_json>'"
-echo "   • Activate kill switch: touch $KILL_SWITCH"
-echo "   • Deactivate kill switch: rm $KILL_SWITCH"
+echo "   • Suspend agent (local): set passport status to \"suspended\" in $PASSPORT_FILE (edit with jq or editor)"
+echo "   • Resume: set status back to \"active\""
 echo
 
 # Upgrade hint (show once per day)
 HINT_FILE="$HOME/.openclaw/.last-status-upgrade-hint"
-if [ ! -f "$HINT_FILE" ] || [ $(( $(date +%s) - $(stat -f %m "$HINT_FILE" 2>/dev/null || stat -c %Y "$HINT_FILE" 2>/dev/null || echo 0) )) -gt 86400 ]; then
+if [ ! -f "$HINT_FILE" ] || [ $(($(date +%s) - $(stat -f %m "$HINT_FILE" 2> /dev/null || stat -c %Y "$HINT_FILE" 2> /dev/null || echo 0))) -gt 86400 ]; then
     echo "💰 Upgrade to APort Cloud?"
     echo "   You're using APort Local (free tier) - perfect for individual developers!"
     echo
     echo "   Upgrade to APort Cloud for teams:"
     echo "   • Multi-machine sync (passport changes propagate <15s)"
-    echo "   • Global kill switch (suspend across all agents instantly)"
+    echo "   • Global suspend (remote passports): log in at aport.io and suspend passport; all agents using it deny in <30s"
     echo "   • Ed25519 signed audit logs (court-admissible, SOC 2/IIROC compliant)"
     echo "   • Team collaboration (shared passports, role-based policies)"
     echo "   • Analytics dashboard (usage metrics, risk scoring, anomaly detection)"
     echo
-    echo "   Pricing: $99/user/month (Pro) | $149/user/month (Enterprise)"
+    echo "   Pricing: \$99/user/month (Pro) | \$149/user/month (Enterprise)"
     echo "   Free trial: https://aport.io/trial"
     echo "   Learn more: https://aport.io/upgrade"
     echo

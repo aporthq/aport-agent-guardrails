@@ -1,0 +1,14 @@
+{
+  "default": "system.command.execute.v1",
+  "rules": [
+    { "prefixes": ["git."], "pack": "code.repository.merge.v1" },
+    { "prefixes": ["exec.", "system."], "pack": "system.command.execute.v1" },
+    { "prefixes": ["message.", "messaging."], "pack": "messaging.message.send.v1" },
+    { "prefixes": ["mcp."], "pack": "mcp.tool.execute.v1" },
+    { "prefixes": ["agent.session.", "session."], "pack": "agent.session.create.v1" },
+    { "prefixes": ["agent.tool."], "substrings": ["tool.register"], "pack": "agent.tool.register.v1" },
+    { "substrings": ["payment.refund", "finance.payment.refund"], "pack": "finance.payment.refund.v1" },
+    { "substrings": ["payment.charge", "finance.payment.charge"], "pack": "finance.payment.charge.v1" },
+    { "prefixes": ["database.", "data.export"], "pack": "data.export.create.v1" }
+  ]
+}

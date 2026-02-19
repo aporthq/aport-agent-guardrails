@@ -5,12 +5,12 @@
 **One command to get started** (recommended — no clone):
 
 ```bash
-npx @aporthq/agent-guardrails
+npx @aporthq/aport-agent-guardrails
 ```
 
-If you already have an agent_id from aport.io (e.g. after creating a passport there), run `npx @aporthq/agent-guardrails <agent_id>` to use a hosted passport and skip the passport prompt. See [Hosted passport setup](HOSTED_PASSPORT_SETUP.md).
+If you already have an agent_id from aport.io (e.g. after creating a passport there), run `npx @aporthq/aport-agent-guardrails <agent_id>` to use a hosted passport and skip the passport prompt. See [Hosted passport setup](HOSTED_PASSPORT_SETUP.md).
 
-This uses the [npm package](https://www.npmjs.com/package/@aporthq/agent-guardrails): it downloads the package (policies + plugin), runs the setup wizard, installs the APort OpenClaw plugin, and runs a smoke test.
+This uses the [npm package](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails): it downloads the package (policies + plugin), runs the setup wizard, installs the APort OpenClaw plugin, and runs a smoke test.
 
 Then start OpenClaw with the generated config (e.g. `openclaw gateway start --config ~/.openclaw/config.yaml`). The plugin will enforce policies on every tool call.
 
@@ -40,7 +40,7 @@ git clone https://github.com/aporthq/aport-agent-guardrails.git && \
 
 ## Installation (Automatic)
 
-**Recommended:** Use `npx @aporthq/agent-guardrails` (see top of this doc). If you cloned the repo instead, from the repo root run:
+**Recommended:** Use `npx @aporthq/aport-agent-guardrails` (see top of this doc). If you cloned the repo instead, from the repo root run:
 
 ```bash
 ./bin/openclaw
@@ -295,7 +295,7 @@ If the guardrail denies every call and `~/.openclaw/aport/decision.json` (or `~/
 **Fix:** Re-run the installer so it can normalize the passport:
 
 ```bash
-npx @aporthq/agent-guardrails
+npx @aporthq/aport-agent-guardrails
 ```
 
 Choose to overwrite the existing passport when prompted, or run the wizard with `--output` to a new file. The installer now ensures `spec_version: "oap/1.0"` and nested limits. If you prefer to fix the file manually, add `"spec_version": "oap/1.0"` at the top level and move any top-level `allowed_commands` / `blocked_patterns` under `limits["system.command.execute"]`. See [agent-passport/spec/oap](https://github.com/aporthq/agent-passport/tree/main/spec/oap) for the canonical schema.

@@ -19,7 +19,7 @@ source "$TESTS_DIR/setup.sh"
 # Deployment dir: use provided path or bootstrap temp
 OPENCLAW_DEPLOYMENT_DIR="${OPENCLAW_DEPLOYMENT_DIR:-$APORT_TEST_OPENCLAW_DIR}"
 if [ -z "$OPENCLAW_DEPLOYMENT_DIR" ]; then
-    OPENCLAW_DEPLOYMENT_DIR="$(mktemp -d 2>/dev/null || echo "$TEST_DIR/openclaw-bootstrap")"
+    OPENCLAW_DEPLOYMENT_DIR="$(mktemp -d 2> /dev/null || echo "$TEST_DIR/openclaw-bootstrap")"
     mkdir -p "$OPENCLAW_DEPLOYMENT_DIR"
     BOOTSTRAPPED=1
 else
@@ -44,11 +44,9 @@ APORT_REPO_ROOT="\$(cat "\$CONFIG_DIR/.aport-repo" 2>/dev/null)"
 export OPENCLAW_PASSPORT_FILE="\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}"
 export OPENCLAW_DECISION_FILE="\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/aport/decision.json}"
 export OPENCLAW_AUDIT_LOG="\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/aport/audit.log}"
-export OPENCLAW_KILL_SWITCH="\${OPENCLAW_KILL_SWITCH:-\$CONFIG_DIR/aport/kill-switch}"
 exec "\$APORT_REPO_ROOT/bin/aport-guardrail-bash.sh" "\$@"
 WRAP
     chmod +x "$DEPLOY/.skills/aport-guardrail-bash.sh"
-    rm -f "$DEPLOY/aport/kill-switch"
 }
 
 # Assert ALLOW (exit 0)
@@ -78,10 +76,12 @@ echo ""
 echo "  Method 1: Bash guardrail standalone..."
 export OPENCLAW_PASSPORT_FILE="$DEPLOY/aport/passport.json"
 export OPENCLAW_DECISION_FILE="$TEST_DIR/decision-m1.json"
-exit1=0; "$REPO_ROOT/bin/aport-guardrail-bash.sh" system.command.execute "$ALLOW_CMD" 2>/dev/null || exit1=$?
+exit1=0
+"$REPO_ROOT/bin/aport-guardrail-bash.sh" system.command.execute "$ALLOW_CMD" 2> /dev/null || exit1=$?
 assert_allow $exit1 || exit 1
 echo "    ALLOW (mkdir) OK"
-exit2=0; "$REPO_ROOT/bin/aport-guardrail-bash.sh" system.command.execute "$DENY_CMD" 2>/dev/null || exit2=$?
+exit2=0
+"$REPO_ROOT/bin/aport-guardrail-bash.sh" system.command.execute "$DENY_CMD" 2> /dev/null || exit2=$?
 assert_deny $exit2 || exit 1
 echo "    DENY (rm -rf /) OK"
 echo "  ✅ Method 1 passed"
@@ -94,7 +94,8 @@ if [ -z "${APORT_API_URL:-}" ]; then
 else
     export OPENCLAW_PASSPORT_FILE="$DEPLOY/aport/passport.json"
     export OPENCLAW_DECISION_FILE="$TEST_DIR/decision-m2.json"
-    exit2a=0; "$REPO_ROOT/bin/aport-guardrail-api.sh" system.command.execute "$ALLOW_CMD" 2>/dev/null || exit2a=$?
+    exit2a=0
+    "$REPO_ROOT/bin/aport-guardrail-api.sh" system.command.execute "$ALLOW_CMD" 2> /dev/null || exit2a=$?
     if [ $exit2a -eq 0 ]; then
         echo "    ALLOW OK"
         echo "  ✅ Method 2 passed"
@@ -107,10 +108,12 @@ echo ""
 # Method 3: Plugin-local — guardrail script from deployment dir (as plugin would call it)
 echo "  Method 3: Plugin-local (guardrail script from deployment dir)..."
 export OPENCLAW_DECISION_FILE="$TEST_DIR/decision-m3.json"
-exit3=0; "$DEPLOY/.skills/aport-guardrail-bash.sh" system.command.execute "$ALLOW_CMD" 2>/dev/null || exit3=$?
+exit3=0
+"$DEPLOY/.skills/aport-guardrail-bash.sh" system.command.execute "$ALLOW_CMD" 2> /dev/null || exit3=$?
 assert_allow $exit3 || exit 1
 echo "    ALLOW OK"
-exit3d=0; "$DEPLOY/.skills/aport-guardrail-bash.sh" system.command.execute "$DENY_CMD" 2>/dev/null || exit3d=$?
+exit3d=0
+"$DEPLOY/.skills/aport-guardrail-bash.sh" system.command.execute "$DENY_CMD" 2> /dev/null || exit3d=$?
 assert_deny $exit3d || exit 1
 echo "    DENY OK"
 echo "  ✅ Method 3 passed"
@@ -123,7 +126,8 @@ if [ -z "${APORT_API_URL:-}" ]; then
 else
     export OPENCLAW_PASSPORT_FILE="$DEPLOY/aport/passport.json"
     export OPENCLAW_DECISION_FILE="$TEST_DIR/decision-m4.json"
-    exit4=0; "$REPO_ROOT/bin/aport-guardrail-api.sh" system.command.execute "$ALLOW_CMD" 2>/dev/null || exit4=$?
+    exit4=0
+    "$REPO_ROOT/bin/aport-guardrail-api.sh" system.command.execute "$ALLOW_CMD" 2> /dev/null || exit4=$?
     if [ $exit4 -eq 0 ]; then
         echo "    ALLOW OK"
         echo "  ✅ Method 4 passed"

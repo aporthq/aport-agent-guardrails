@@ -49,7 +49,7 @@ Reference: [agent-passport generic-evaluator](https://github.com/aporthq/agent-p
 
 ### What the local (bash) evaluator does
 
-1. **Kill switch** — if `OPENCLAW_KILL_SWITCH` file exists → deny  
+1. **Passport status** — local verify checks passport status first; if `status` is not `active` (e.g. `suspended` or `revoked`) → deny with `oap.passport_suspended`. Passport is the source of truth (no separate kill-switch file).  
 2. **Passport load** — read passport JSON; invalid or missing → deny  
 3. **Passport status** — `status !== "active"` → deny  
 4. **Spec version** — must be `oap/1.0`  

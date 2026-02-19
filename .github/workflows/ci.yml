@@ -21,7 +21,7 @@ jobs:
       
       - name: Make scripts executable
         run: |
-          chmod +x bin/*.sh
+          chmod +x bin/*.sh bin/lib/*.sh tests/*.sh tests/unit/*.sh tests/frameworks/openclaw/setup.sh 2>/dev/null || true
       
       - name: Validate passport schema
         run: |
@@ -36,6 +36,25 @@ jobs:
       
       - name: Run tests
         run: make test
+        env:
+          APORT_SKIP_REMOTE_PASSPORT_TEST: "1"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build and test Node packages
+        run: |
+          npm run build --workspaces --if-present
+          npm run test -w @aporthq/aport-agent-guardrails-core -w @aporthq/aport-agent-guardrails-langchain
+
+      - name: Run OpenClaw integration (Node)
+        run: node tests/frameworks/openclaw/setup.test.mjs
 
       - name: Run plugin tests
         run: |

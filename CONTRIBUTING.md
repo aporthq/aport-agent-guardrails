@@ -40,6 +40,10 @@ Use the [Feature Request template](.github/ISSUE_TEMPLATE/feature_request.md) an
 - Proposed solution
 - Alternatives considered
 
+## Versioning and releases
+
+We keep **one version number** across all packages (Node core, Python core, and framework adapters). Releases are driven by [Changesets](.changeset/README.md). For the full flow (bump, changelog, publish, tag), see **[docs/RELEASE.md](docs/RELEASE.md)**.
+
 ## Development Setup
 
 ```bash

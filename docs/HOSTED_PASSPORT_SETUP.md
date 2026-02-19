@@ -34,15 +34,15 @@ You have two options when using APort guardrails with OpenClaw:
 **Option A — One command (if you have your agent_id):**
 
 ```bash
-npx @aporthq/agent-guardrails <agent_id>
+npx @aporthq/aport-agent-guardrails <agent_id>
 ```
 
-Example: `npx @aporthq/agent-guardrails ap_fa2f6d53bb5b4c98b9af0124285b6e0f`. The CLI skips the passport wizard and configures the plugin to use your hosted passport.
+Example: `npx @aporthq/aport-agent-guardrails ap_fa2f6d53bb5b4c98b9af0124285b6e0f`. The CLI skips the passport wizard and configures the plugin to use your hosted passport.
 
 **Option B — Interactive:**
 
 ```bash
-npx @aporthq/agent-guardrails
+npx @aporthq/aport-agent-guardrails
 ```
 
 When prompted for passport, choose "Use hosted passport (agent_id only)" and paste your `agent_id`. Config directory default: `~/.openclaw`. Plugin mode will be API (required for hosted).
@@ -85,7 +85,7 @@ User → OpenClaw: "Create a file"
 
 ### Option A: During Setup (Automatic)
 
-Run `npx @aporthq/agent-guardrails` and follow prompts. The setup script will create `~/.openclaw/config.yaml`:
+Run `npx @aporthq/aport-agent-guardrails` and follow prompts. The setup script will create `~/.openclaw/config.yaml`:
 
 ```yaml
 plugins:
@@ -275,7 +275,7 @@ Ask your OpenClaw agent:
 4. Reinstall plugin:
    ```bash
    openclaw plugins uninstall openclaw-aport
-   npx @aporthq/agent-guardrails
+   npx @aporthq/aport-agent-guardrails
    ```
 
 ### Passport Suspended But Agent Still Running
@@ -284,7 +284,7 @@ Ask your OpenClaw agent:
 
 **Fix:**
 1. Wait 15 seconds (API checks every 10s)
-2. Verify mode is `api` in config (local mode has no kill switch)
+2. Verify mode is `api` in config (local suspend = set passport `status` to `suspended`; no separate file; same standard as other frameworks)
 3. Force restart: `openclaw gateway restart`
 
 ---
@@ -295,13 +295,13 @@ Ask your OpenClaw agent:
 |---------|-------------------|------------|
 | **Passport storage** | APort registry | Local file |
 | **agent_id only** | ✅ Yes | ❌ No - needs file |
-| **Global kill switch** | ✅ < 15s | ❌ Local file only |
+| **Global suspend** | ✅ &lt;30s (login, suspend in registry) | Passport `status` only (edit passport; no separate file) |
 | **Network required** | ✅ Yes | ❌ No |
 | **Policy updates** | ✅ Instant | Manual file edit |
 | **Team sync** | ✅ Yes | Manual file sharing |
 | **Audit log** | ✅ Cloud dashboard | Local file only |
 
-**Recommendation:** Use **API mode** with hosted passports for global kill switch and team sync.
+**Recommendation:** Use **API mode** with hosted passports for global suspend (login once, suspend in registry; all agents using that passport deny within &lt;30s) and team sync.
 
 ---
 
