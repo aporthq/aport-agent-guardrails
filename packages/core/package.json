@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-core",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Core evaluator, passport, and config for APort agent guardrails (shared across frameworks)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

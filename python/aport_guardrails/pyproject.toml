@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aport-agent-guardrails"
-version = "1.0.8"
+version = "1.0.9"
 description = "APort Agent Guardrail — shared core for AI agent and LLM frameworks (pre-action authorization)"
 readme = "README.md"
 license = { text = "Apache-2.0" }

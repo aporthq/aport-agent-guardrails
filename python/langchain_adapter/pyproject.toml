@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aport-agent-guardrails-langchain"
-version = "1.0.8"
+version = "1.0.9"
 description = "APort Agent Guardrail for LangChain/LangGraph — AsyncCallbackHandler for AI agent tool calls"
 readme = "README.md"
 license = { text = "Apache-2.0" }
