@@ -3,9 +3,9 @@ name: E2E LangChain
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
   workflow_dispatch:
 
 jobs:
@@ -33,9 +33,19 @@ jobs:
       - name: Run example (ALLOW then DENY)
         run: |
           cd "$GITHUB_WORKSPACE"
-          out=$(PYTHONPATH=python:python/langchain_adapter python3 examples/langchain/run_with_guardrail.py 2>&1)
+          out=$(PYTHONPATH=python:python/langchain_adapter python3 examples/langchain/run_with_guardrail.py 2>&1) || {
+            echo "Script failed with exit code $?"
+            echo "Output:"
+            echo "$out"
+            exit 1
+          }
           echo "$out"
-          echo "$out" | grep -q "Example: ALLOW and DENY paths OK" || { echo "FAIL: expected ALLOW/DENY success message"; exit 1; }
+          echo "$out" | grep -q "Example: ALLOW and DENY paths OK" || {
+            echo "FAIL: expected ALLOW/DENY success message"
+            echo "Got:"
+            echo "$out"
+            exit 1
+          }
           echo "✅ E2E: example script ALLOW/DENY OK"
 
       - name: Run pytest (langchain adapter)

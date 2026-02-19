@@ -17,10 +17,10 @@ from aport_guardrails.core.config import write_config
 async def _run_example(*, expect_deny_raise: bool = True) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         config_path = Path(tmp) / "config.yaml"
-        write_config(config_path, {"mode": "local"})
+        write_config(config_path, {"mode": "local", "fail_open_when_missing_config": True})
         callback = APortCallback(config_path=str(config_path))
 
-        # No passport_path in config -> evaluator returns allow (no-op)
+        # No passport_path in config but fail_open_when_missing_config=True -> evaluator returns allow (no-op)
         await callback.on_tool_start("run_command", '{"command": "ls"}')
 
         # Simulate deny
