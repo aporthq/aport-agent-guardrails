@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aport-agent-guardrails-crewai"
-version = "1.0.8"
+version = "1.0.9"
 description = "APort Agent Guardrail for CrewAI — before_tool_call hook for AI agent and multi-agent crews"
 readme = "README.md"
 license = { text = "Apache-2.0" }

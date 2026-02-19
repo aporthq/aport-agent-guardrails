@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-crewai",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "APort guardrails for CrewAI — task decorator / middleware",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
