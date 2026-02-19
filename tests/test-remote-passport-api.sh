@@ -4,7 +4,7 @@
 #
 # Usage: ./test-remote-passport-api.sh
 #   Optional: APORT_TEST_REMOTE_AGENT_ID=ap_xxx  (default: ap_8955f5450cd542fe8f67bbbf07c3e103)
-#   Optional: APORT_API_URL=http://localhost:8787 (default; or https://api.aport.io for cloud)
+#   Optional: APORT_API_URL (default: https://api.aport.io; use http://localhost:8787 for local)
 #   Optional: APORT_API_KEY=... (if API requires auth)
 #
 # Skip: set APORT_SKIP_REMOTE_PASSPORT_TEST=1 to skip (e.g. in CI without a real passport).
@@ -31,7 +31,7 @@ fi
 
 # Use API mode with agent_id only (no local passport file)
 export APORT_AGENT_ID="$REMOTE_AGENT_ID"
-export APORT_API_URL="${APORT_API_URL:-http://localhost:8787}"
+export APORT_API_URL="${APORT_API_URL:-https://api.aport.io}"
 # Point passport file to non-existent so we truly use agent_id path; script allows this when APORT_AGENT_ID is set
 export OPENCLAW_PASSPORT_FILE="$TEST_DIR/nonexistent-passport-remote.json"
 export OPENCLAW_DECISION_FILE="$TEST_DIR/decision-remote.json"
