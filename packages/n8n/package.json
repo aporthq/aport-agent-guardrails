@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-n8n",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "APort guardrails for n8n — custom node",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -28,7 +28,7 @@ async def run(args: argparse.Namespace) -> None:
     if args.command == "setup":
         _print_setup_next_steps(args.framework)
     elif args.command == "status":
-        print("Status: run `npx @aporthq/agent-guardrails` or see docs for guardrail status commands.")
+        print("Status: run `npx @aporthq/aport-agent-guardrails` or see docs for guardrail status commands.")
     else:
         print(f"Unknown command: {args.command}")
 
@@ -39,17 +39,17 @@ def _print_setup_next_steps(framework: str) -> None:
     print()
     if framework == "openclaw":
         print("Run the full wizard and plugin install:")
-        print("  npx @aporthq/agent-guardrails openclaw")
-        print("  (Optional: pass an agent_id for hosted passport: npx @aporthq/agent-guardrails openclaw <agent_id>)")
+        print("  npx @aporthq/aport-agent-guardrails openclaw")
+        print("  (Optional: pass an agent_id for hosted passport: npx @aporthq/aport-agent-guardrails openclaw <agent_id>)")
     elif framework == "cursor":
         print("Run the installer (writes ~/.cursor/hooks.json), then restart Cursor:")
-        print("  npx @aporthq/agent-guardrails cursor")
+        print("  npx @aporthq/aport-agent-guardrails cursor")
     elif framework == "langchain":
-        print("1. Run wizard and config:  npx @aporthq/agent-guardrails langchain")
+        print("1. Run wizard and config:  npx @aporthq/aport-agent-guardrails langchain")
         print("2. Install Python adapter: pip install aport-agent-guardrails-langchain")
         print("3. Framework setup:        aport-langchain setup")
     elif framework == "crewai":
-        print("1. Run wizard and config:  npx @aporthq/agent-guardrails crewai")
+        print("1. Run wizard and config:  npx @aporthq/aport-agent-guardrails crewai")
         print("2. Install Python adapter: pip install aport-agent-guardrails-crewai")
         print("3. Framework setup:        aport-crewai setup")
     print()

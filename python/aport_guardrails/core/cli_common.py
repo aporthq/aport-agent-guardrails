@@ -20,7 +20,7 @@ def run_wizard(framework: str) -> bool:
     """Run passport wizard via npx agent-guardrails. Returns True if run successfully."""
     try:
         r = subprocess.run(
-            ["npx", "--yes", "@aporthq/agent-guardrails", f"--framework={framework}"],
+            ["npx", "--yes", "@aporthq/aport-agent-guardrails", f"--framework={framework}"],
             check=False,
             timeout=120,
             capture_output=True,
@@ -52,11 +52,11 @@ def run_setup(
         print(f"[aport] Config exists: {config_path}")
 
     if not ci and not no_wizard:
-        print(f"[aport] Run the passport wizard with: npx @aporthq/agent-guardrails --framework={framework}")
+        print(f"[aport] Run the passport wizard with: npx @aporthq/aport-agent-guardrails --framework={framework}")
         if run_wizard(framework):
             print("[aport] Wizard completed.")
         else:
-            print(f"[aport] Install passport: npx @aporthq/agent-guardrails --framework={framework}")
+            print(f"[aport] Install passport: npx @aporthq/aport-agent-guardrails --framework={framework}")
 
     print("")
     for line in next_steps_lines:
