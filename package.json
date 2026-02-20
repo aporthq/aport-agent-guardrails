@@ -6,6 +6,7 @@
     "packages/*"
   ],
   "bin": {
+    "aport-agent-guardrails": "./bin/agent-guardrails",
     "agent-guardrails": "./bin/agent-guardrails",
     "aport": "./bin/openclaw",
     "aport-guardrail": "./bin/aport-guardrail.sh"

@@ -268,7 +268,7 @@ RESOLUTIONS = {
         "This is a security feature to prevent path traversal attacks."
     ),
     ErrorCode.PASSPORT_NOT_FOUND: (
-        "Create a passport by running: npx @aporthq/agent-guardrails openclaw\n"
+        "Create a passport by running: npx @aporthq/aport-agent-guardrails openclaw\n"
         "See: https://github.com/aporthq/agent-guardrails#passport-setup"
     ),
     ErrorCode.PASSPORT_MISSING_CAPABILITY: (
@@ -290,7 +290,7 @@ RESOLUTIONS = {
         "or use local evaluation mode instead of API mode."
     ),
     ErrorCode.MISCONFIGURED: (
-        "Run setup: npx @aporthq/agent-guardrails <framework>. "
+        "Run setup: npx @aporthq/aport-agent-guardrails <framework>. "
         "Check passport exists at ~/.openclaw/passport.json and guardrail script at ~/.openclaw/.skills/aport-guardrail.sh"
     ),
 }
