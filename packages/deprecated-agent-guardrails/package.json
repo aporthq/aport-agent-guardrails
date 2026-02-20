@@ -1,0 +1,35 @@
+{
+  "name": "@aporthq/agent-guardrails",
+  "version": "1.0.10",
+  "description": "[DEPRECATED] Use @aporthq/aport-agent-guardrails instead. This package has been renamed for better SEO.",
+  "deprecated": "This package has been renamed to @aporthq/aport-agent-guardrails. Please update your dependencies: npm install @aporthq/aport-agent-guardrails",
+  "main": "index.js",
+  "bin": {
+    "agent-guardrails": "bin.js",
+    "aport": "bin.js",
+    "aport-guardrail": "bin.js"
+  },
+  "keywords": [
+    "deprecated",
+    "aport",
+    "agent",
+    "guardrails",
+    "security"
+  ],
+  "author": "APort Technologies Inc.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aporthq/aport-agent-guardrails.git",
+    "directory": "packages/deprecated-agent-guardrails"
+  },
+  "dependencies": {
+    "@aporthq/aport-agent-guardrails": "^1.0.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
