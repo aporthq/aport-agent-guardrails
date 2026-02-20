@@ -174,7 +174,7 @@ Request ID: req_1234567890
 **Resolution**:
 ```bash
 # Create a passport
-npx @aporthq/agent-guardrails openclaw
+npx @aporthq/aport-agent-guardrails openclaw
 # Or
 aport-create-passport.sh
 ```
@@ -373,7 +373,7 @@ aport-create-passport.sh
 **Cause**: No config file at expected locations
 
 **Resolution**:
-- Run setup: `npx @aporthq/agent-guardrails <framework>`
+- Run setup: `npx @aporthq/aport-agent-guardrails <framework>`
 - Create config manually in `~/.aport/<framework>/config.yaml`
 
 **Expected Locations**:
@@ -522,7 +522,7 @@ ls -la ~/.openclaw/passport.json
 ls -la ~/.openclaw/.skills/aport-guardrail.sh
 
 # Run setup if missing
-npx @aporthq/agent-guardrails openclaw
+npx @aporthq/aport-agent-guardrails openclaw
 ```
 
 **Legacy Mode**: Set `APORT_FAIL_OPEN_WHEN_MISSING_CONFIG=1` to allow by default (not recommended)
