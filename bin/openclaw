@@ -29,9 +29,26 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APORT_PLUGIN_PATH="$REPO_ROOT/extensions/openclaw-aport"
 DEFAULT_CONFIG="${OPENCLAW_HOME:-$HOME/.openclaw}"
 
-# Parse agent_id from command line
+# Parse command line arguments
 HOSTED_AGENT_ID=""
 if [ -n "$1" ]; then
+    # Handle help flags
+    if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+        echo "Usage: $0 [agent_id]"
+        echo ""
+        echo "Interactive setup for APort + OpenClaw integration."
+        echo ""
+        echo "Arguments:"
+        echo "  agent_id    Optional hosted passport ID from aport.io (e.g., ap_abc123...)"
+        echo "              If provided, uses hosted passport; otherwise runs passport wizard."
+        echo ""
+        echo "Examples:"
+        echo "  $0                                    # Local passport (wizard)"
+        echo "  $0 ap_fa2f6d53bb5b4c98b9af0124285b6e0f   # Hosted passport"
+        echo ""
+        echo "See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs"
+        exit 0
+    fi
     # Validate agent_id format (ap_ followed by 32 hex chars)
     if [[ "$1" =~ ^ap_[a-f0-9]{32}$ ]]; then
         HOSTED_AGENT_ID="$1"
@@ -39,6 +56,8 @@ if [ -n "$1" ]; then
         echo "❌ Invalid agent_id format: $1"
         echo "   Expected: ap_[32 hex characters]"
         echo "   Example: ap_fa2f6d53bb5b4c98b9af0124285b6e0f"
+        echo ""
+        echo "Run '$0 --help' for usage information."
         exit 1
     fi
 fi

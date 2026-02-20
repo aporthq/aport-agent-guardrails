@@ -56,6 +56,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Publish deprecated wrapper package (agent-guardrails → aport-agent-guardrails)
+        run: npm publish -w @aporthq/agent-guardrails --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   publish-python:
     runs-on: ubuntu-latest
     env:

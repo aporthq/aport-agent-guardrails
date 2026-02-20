@@ -188,7 +188,7 @@ get_resolution() {
             echo "Use absolute paths without parent directory references (../ or /..). This is a security feature to prevent path traversal attacks."
             ;;
         "$ERROR_PASSPORT_NOT_FOUND")
-            echo "Create a passport by running: npx @aporthq/agent-guardrails openclaw. See: https://github.com/aporthq/agent-guardrails#passport-setup"
+            echo "Create a passport by running: npx @aporthq/aport-agent-guardrails openclaw. See: https://github.com/aporthq/agent-guardrails#passport-setup"
             ;;
         "$ERROR_PASSPORT_MISSING_CAP")
             echo "Request capability be added to passport or generate new passport with required capabilities."
@@ -206,7 +206,7 @@ get_resolution() {
             echo "Wait for rate limit to reset, reduce request frequency, or use local evaluation mode instead of API mode."
             ;;
         "$ERROR_MISCONFIGURED")
-            echo "Run setup: npx @aporthq/agent-guardrails <framework>. Check passport exists at ~/.openclaw/passport.json"
+            echo "Run setup: npx @aporthq/aport-agent-guardrails <framework>. Check passport exists at ~/.openclaw/passport.json"
             ;;
         *)
             echo ""
