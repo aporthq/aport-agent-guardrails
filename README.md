@@ -60,7 +60,7 @@ Your agent should **only do what you explicitly allow**. APort runs in the hook�
 
 | Policy | What it guards |
 |--------|----------------|
-| **system.command.execute.v1** | Shell commands — allowlist, 40+ blocked patterns (`rm -rf`, `sudo`, injection) |
+| **system.command.execute.v1** | Shell commands — allowlist, 50+ blocked patterns (`rm -rf`, `sudo`, `nc`, `find -exec rm`, injection); passport `allowed_paths` override for path rules |
 | **mcp.tool.execute.v1** | MCP tool calls — server allowlist, rate limits |
 | **messaging.message.send.v1** | Message sends — rate caps, capability checks |
 | **agent.session.create.v1** / **agent.tool.register.v1** | Sessions and tool registration |
@@ -335,7 +335,7 @@ graph TB
 **✅ Pre-action authorization (agent misbehavior):**
 - **Prompt injection** - Hook-based enforcement; agent cannot bypass via prompts
 - **Malicious skills** - Third-party OpenClaw skills validated before execution
-- **Unauthorized commands** - Allowlist + 40+ blocked patterns (rm -rf, sudo, etc.)
+- **Unauthorized commands** - Allowlist + 50+ blocked patterns (rm -rf, sudo, nc, find -exec rm, etc.)
 - **Data exfiltration** - File access, messaging, web requests controlled by policy
 - **Resource limits** - Rate limits, size caps, transaction amounts enforced
 

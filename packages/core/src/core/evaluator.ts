@@ -10,6 +10,8 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import type { Config } from './config.js';
 import { loadConfig, findConfigPath } from './config.js';
+import { logDecision, resolveAuditLogPath, extractContextSummary } from './auditLogger.js';
+import type { AuditEntry } from './auditLogger.js';
 import { loadPassport, type Passport } from './passport.js';
 import { expandUser } from './pathUtils.js';
 import { toolToPackId } from './toolPackMapping.js';
@@ -165,6 +167,7 @@ async function callApi(
     policyPack?: PolicyPack;
     apiKey?: string;
     verifySsl?: boolean;
+    failOpenOnApiError?: boolean;
   }
 ): Promise<Decision> {
   const base = apiUrl.replace(/\/$/, '');
@@ -185,35 +188,32 @@ async function callApi(
   // SECURITY: Configure SSL/TLS verification (allow disabling for dev/test only)
   const fetchOptions: RequestInit = { method: 'POST', headers, body: JSON.stringify(body) };
   if (options.verifySsl === false) {
-    // Node.js 18+ fetch uses undici; for disabling SSL we need an Agent
-    // NOTE: In Node.js fetch, SSL is verified by default. To disable, we'd need https.Agent with rejectUnauthorized: false
-    // However, fetch API doesn't directly support custom agents in Node.js 18-20.
-    // For development, users can set NODE_TLS_REJECT_UNAUTHORIZED=0 environment variable (not recommended for production)
     console.warn('WARNING: SSL certificate verification is set to false. This is insecure and should only be used in development/testing!');
-    console.warn('Set NODE_TLS_REJECT_UNAUTHORIZED=0 in environment if needed (not recommended).');
   }
+
+  // Helper: return allow when fail_open_on_api_error is set and this is an infra error (not a policy deny)
+  const failOpenAllow = (code: string, message: string): Decision => {
+    if (options.failOpenOnApiError) {
+      console.warn(`[APort] API error (fail-open): ${message}`);
+      return { allow: true, reasons: [{ code, message: `[fail-open] ${message}` }] };
+    }
+    return { allow: false, reasons: [{ code, message }] };
+  };
+
   try {
     const res = await fetch(url, fetchOptions);
     const raw = await res.text();
     if (!res.ok) {
-      return {
-        allow: false,
-        reasons: [
-          {
-            code: 'oap.api_error',
-            message: `API ${res.status} ${res.statusText}${raw ? `: ${raw.slice(0, 200)}` : ''}`,
-          },
-        ],
-      };
+      const msg = `API ${res.status} ${res.statusText}${raw ? `: ${raw.slice(0, 200)}` : ''}`;
+      // Distinguish: 4xx/5xx from the API is an infrastructure/config error, NOT a policy deny.
+      // A genuine policy deny comes back as 200 with { allow: false }.
+      return failOpenAllow('oap.api_error', msg);
     }
     let data: Record<string, unknown>;
     try {
       data = JSON.parse(raw) as Record<string, unknown>;
     } catch {
-      return {
-        allow: false,
-        reasons: [{ code: 'oap.api_error', message: 'Invalid JSON response from API' }],
-      };
+      return failOpenAllow('oap.api_error', 'Invalid JSON response from API');
     }
     const decision = (data.decision as Record<string, unknown>) ?? data;
     return {
@@ -221,10 +221,8 @@ async function callApi(
       reasons: (decision.reasons as Decision['reasons']) ?? [{ message: 'API response' }],
     };
   } catch (e) {
-    return {
-      allow: false,
-      reasons: [{ code: 'oap.api_error', message: String(e) }],
-    };
+    // Network errors, timeouts, DNS failures — infrastructure, not policy
+    return failOpenAllow('oap.api_error', String(e));
   }
 }
 
@@ -236,6 +234,35 @@ export class Evaluator {
   constructor(configPath?: string | null, framework: string = 'langchain') {
     this.configPath = configPath ?? null;
     this.framework = framework;
+  }
+
+  /** Resolve the effective config path used for this evaluator (for audit log path resolution). */
+  private resolvedConfigPath(): string | null {
+    if (this.configPath && fs.existsSync(this.configPath)) return this.configPath;
+    return findConfigPath(this.framework);
+  }
+
+  /** Best-effort audit log write. Never throws, never blocks for allow decisions. */
+  private auditLog(config: Config, toolName: string, packId: string, decision: Decision, context: ToolContext): void {
+    try {
+      const auditLogPath = resolveAuditLogPath(
+        config.audit_log,
+        this.resolvedConfigPath(),
+        this.framework,
+      );
+      if (!auditLogPath) return;
+      const entry: AuditEntry = {
+        tool: toolName,
+        allow: decision.allow,
+        policy_id: packId,
+        code: decision.reasons?.[0]?.code,
+        agent_id: (config.agent_id as string) ?? undefined,
+        context_summary: extractContextSummary(context as Record<string, unknown>),
+      };
+      logDecision(auditLogPath, entry);
+    } catch {
+      /* best-effort */
+    }
   }
 
   private loadConfig(): Config {
@@ -283,26 +310,35 @@ export class Evaluator {
           passportBody = undefined;
         }
       }
+      const failOpenOnApiError = Boolean(config.fail_open_on_api_error ?? process.env.APORT_FAIL_OPEN_ON_API_ERROR === '1');
       if (agentId) {
-        return callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey, verifySsl: verifySslOverride });
+        const decision = await callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey, verifySsl: verifySslOverride, failOpenOnApiError });
+        this.auditLog(config, toolName, packId, decision, ctx);
+        return decision;
       }
       if (passportBody) {
-        return callApi(apiUrl, packId, ctx, {
+        const decision = await callApi(apiUrl, packId, ctx, {
           passport: passportBody,
           policyPack: isFullPolicyPack(policy) ? policy : undefined,
           apiKey,
           verifySsl: verifySslOverride,
+          failOpenOnApiError,
         });
+        this.auditLog(config, toolName, packId, decision, ctx);
+        return decision;
       }
     }
 
     const passportPath = resolvePassportPath(config);
     const guardrailScript = getGuardrailScriptPath(config);
     if (!passportPath || !guardrailScript) {
-      if (getFailOpenWhenMissingConfig(config)) return { allow: true };
-      return MISCONFIGURED_DENY;
+      const decision = getFailOpenWhenMissingConfig(config) ? { allow: true } : MISCONFIGURED_DENY;
+      this.auditLog(config, toolName, packId, decision, ctx);
+      return decision;
     }
-    return runGuardrailSync(guardrailScript, passportPath, toolName, ctx);
+    const decision = runGuardrailSync(guardrailScript, passportPath, toolName, ctx);
+    this.auditLog(config, toolName, packId, decision, ctx);
+    return decision;
   }
 
   /**
@@ -357,6 +393,7 @@ export class Evaluator {
         const tmpIn = path.join(tmpDir, `req-${crypto.randomUUID()}.json`);
         const tmpOut = path.join(tmpDir, `res-${crypto.randomUUID()}.json`);
         const fileOpts = { encoding: 'utf8' as const, mode: 0o600 };
+        let syncDecision: Decision;
         try {
           fs.writeFileSync(tmpIn, JSON.stringify({ url, headers, body }), fileOpts);
           const script = `
@@ -376,20 +413,36 @@ export class Evaluator {
             timeout: 15_000,
             encoding: 'utf8',
           });
-          if (result.status !== 0 || !fs.existsSync(tmpOut)) {
-            return { allow: false, reasons: [{ code: 'oap.api_error', message: 'Sync API call failed' }] };
-          }
-          const data = JSON.parse(fs.readFileSync(tmpOut, 'utf8')) as Record<string, unknown>;
-          if (data.error) {
-            return { allow: false, reasons: [{ code: 'oap.api_error', message: String(data.error) }] };
-          }
-          const decision = (data.decision as Record<string, unknown>) ?? data;
-          return {
-            allow: Boolean((decision as Record<string, unknown>).allow),
-            reasons: (decision.reasons as Decision['reasons']) ?? [{ message: 'API response' }],
+          const failOpenOnApiError = Boolean(config.fail_open_on_api_error ?? process.env.APORT_FAIL_OPEN_ON_API_ERROR === '1');
+          const apiErrorDecision = (msg: string): Decision => {
+            if (failOpenOnApiError) {
+              console.warn(`[APort] API error (fail-open): ${msg}`);
+              return { allow: true, reasons: [{ code: 'oap.api_error', message: `[fail-open] ${msg}` }] };
+            }
+            return { allow: false, reasons: [{ code: 'oap.api_error', message: msg }] };
           };
+          if (result.status !== 0 || !fs.existsSync(tmpOut)) {
+            syncDecision = apiErrorDecision('Sync API call failed');
+          } else {
+            const data = JSON.parse(fs.readFileSync(tmpOut, 'utf8')) as Record<string, unknown>;
+            if (data.error) {
+              syncDecision = apiErrorDecision(String(data.error));
+            } else {
+              const decision = (data.decision as Record<string, unknown>) ?? data;
+              syncDecision = {
+                allow: Boolean((decision as Record<string, unknown>).allow),
+                reasons: (decision.reasons as Decision['reasons']) ?? [{ message: 'API response' }],
+              };
+            }
+          }
         } catch (e) {
-          return { allow: false, reasons: [{ code: 'oap.api_error', message: String(e) }] };
+          const failOpenOnApiError = Boolean(config.fail_open_on_api_error ?? process.env.APORT_FAIL_OPEN_ON_API_ERROR === '1');
+          if (failOpenOnApiError) {
+            console.warn(`[APort] API error (fail-open): ${String(e)}`);
+            syncDecision = { allow: true, reasons: [{ code: 'oap.api_error', message: `[fail-open] ${String(e)}` }] };
+          } else {
+            syncDecision = { allow: false, reasons: [{ code: 'oap.api_error', message: String(e) }] };
+          }
         } finally {
           try {
             if (fs.existsSync(tmpIn)) fs.unlinkSync(tmpIn);
@@ -407,15 +460,20 @@ export class Evaluator {
             /* best-effort */
           }
         }
+        this.auditLog(config, toolName, packId, syncDecision, ctx);
+        return syncDecision;
       }
     }
 
     const passportPath = resolvePassportPath(config);
     const guardrailScript = getGuardrailScriptPath(config);
     if (!passportPath || !guardrailScript) {
-      if (getFailOpenWhenMissingConfig(config)) return { allow: true };
-      return MISCONFIGURED_DENY;
+      const decision = getFailOpenWhenMissingConfig(config) ? { allow: true } : MISCONFIGURED_DENY;
+      this.auditLog(config, toolName, packId, decision, ctx);
+      return decision;
     }
-    return runGuardrailSync(guardrailScript, passportPath, toolName, ctx);
+    const decision = runGuardrailSync(guardrailScript, passportPath, toolName, ctx);
+    this.auditLog(config, toolName, packId, decision, ctx);
+    return decision;
   }
 }

@@ -30,8 +30,9 @@ APort operates as a **pre-action authorization layer** that enforces policies **
 
 **Unauthorized tool usage:**
 - Agent tries to execute commands not in allowlist
-- Commands match blocked patterns (`rm -rf`, `sudo`, `chmod 777`, etc.)
+- Commands match blocked patterns (`rm -rf`, `sudo`, `chmod 777`, `nc`/`netcat`, `find -exec rm`, etc.)
 - Shell escapes and interpreter bypasses (python -c, base64 encoding)
+- Stderr redirects (`2>/dev/null`) are allowed; dangerous redirects to files are blocked
 - Result: Only allowlisted, non-dangerous commands execute
 
 **Resource exhaustion and limit violations:**
@@ -135,7 +136,7 @@ APort's three-layer security model:
 - Use case: Testing custom policies before registering them
 
 **Example policies (out of the box):**
-- `system.command.execute.v1` - Shell commands (allowlist, 40+ blocked patterns)
+- `system.command.execute.v1` - Shell commands (allowlist, 50+ blocked patterns, passport `allowed_paths` override)
 - `data.file.read.v1` / `data.file.write.v1` - File access control
 - `web.fetch.v1` / `web.browser.v1` - Web requests and browser automation
 - `messaging.message.send.v1` - Message rate limits, recipient allowlist
@@ -292,6 +293,7 @@ APort's three-layer security model:
 APort uses secure defaults out of the box:
 
 ✅ `failClosed: true` - Block tools on errors (security over availability)
+✅ `fail_open_on_api_error: false` - API infrastructure errors (4xx/5xx, network) also fail closed by default
 ✅ `allowUnmappedTools: false` - Unmapped tools blocked (deny-by-default)
 ✅ API mode recommended for production
 ✅ Passport status checked first (suspended/revoked → deny all)
@@ -332,6 +334,25 @@ APort uses secure defaults out of the box:
 **Security impact:** HIGH - Setting to false means errors allow unauthorized actions.
 
 **When to use false:** Development/testing environments only.
+
+---
+
+#### `fail_open_on_api_error: false` vs `fail_open_on_api_error: true`
+
+**False (default, recommended):**
+- API infrastructure errors (4xx/5xx, network failures, timeouts) → deny tool execution
+- Same behavior as `failClosed: true` for API errors
+
+**True (use with caution):**
+- API infrastructure errors → allow tool execution with `[fail-open]` warning
+- Genuine policy denials (HTTP 200 with `allow: false`) are **never** overridden—always denied
+- Useful when API availability is unreliable but you still want policy enforcement when the API is reachable
+
+**Security impact:** MEDIUM - Only API errors become allow; actual policy denials still block.
+
+**When to use true:** Production environments where API downtime shouldn't halt agent operations, combined with monitoring for `[fail-open]` decisions.
+
+**Config:** Set in `config.yaml` as `fail_open_on_api_error: true` or env var `APORT_FAIL_OPEN_ON_API_ERROR=1`.
 
 ---
 
@@ -546,7 +567,10 @@ A: API for production (signed decisions, protected passport, global suspend). Lo
 A: In API mode, policies come from APort API over HTTPS. In local mode, policies are embedded in bash scripts (protected by filesystem permissions). Custom policies can be passed in request body for testing.
 
 **Q: What if the API is down?**
-A: Default behavior (failClosed: true) denies tool calls. For high-availability scenarios, consider running a self-hosted agent-passport instance or use local mode as fallback.
+A: Default behavior (failClosed: true) denies tool calls. You can set `fail_open_on_api_error: true` to allow on API infrastructure errors while still enforcing genuine policy denials. For high-availability scenarios, consider running a self-hosted agent-passport instance or use local mode as fallback.
+
+**Q: Can passport owners override blocked path rules (e.g. allow /root/)?**
+A: Yes. Set `limits.allowed_paths` (or `limits.allowed_directories`) in the passport to override path-sensitivity heuristics like "Access to sensitive system directories." Catastrophic protections (fork bombs, `rm -rf /`, reverse shells, `nc`/`netcat`) can **never** be overridden by passport config.
 
 **Q: Can decisions be tampered with?**
 A: Local mode: hash-protected (detects naive tampering). API mode: cryptographically signed (Ed25519, cannot forge).

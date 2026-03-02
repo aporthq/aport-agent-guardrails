@@ -1,4 +1,10 @@
-"""Config management: read/write framework config files."""
+"""Config management: read/write framework config files.
+
+Supported config keys:
+  passport_path, agent_id, mode, api_url, api_key, framework,
+  guardrail_script, fail_open_when_missing_config, fail_open_on_api_error,
+  verify_ssl, audit_log (str|bool: path to audit log, True for default path, False to disable).
+"""
 
 from pathlib import Path
 from typing import Any
