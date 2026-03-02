@@ -93,5 +93,6 @@ So: **local is robust enough for the core policies** (exec, messaging, repo merg
 
 - **Local (bash):** Useful for privacy, offline, and the core use cases (exec allowlist/blocklist, messaging recipient, repo/PR limits). For full OAP parity and future policy packs, use **API mode**.
 - **API (default):** Recommended for production and when you want the same behavior as [APort in Goose](https://raw.githubusercontent.com/aporthq/.github/refs/heads/main/profile/APORT_GOOSE_ARCHITECTURE.md) and the full generic evaluator (JSON Schema, assurance, regions, evaluation_rules, signed decisions).
+- **`fail_open_on_api_error`:** In API mode, set this config option to `true` if you want API infrastructure errors (4xx/5xx, network failures) to return allow instead of deny. Genuine policy denials (HTTP 200 with `allow: false`) are **never** overridden. Default: `false` (fail-closed on API errors). Set via config YAML or env var `APORT_FAIL_OPEN_ON_API_ERROR=1`.
 
 The installer (`./bin/openclaw`) defaults to **API mode**; choose local only when you need to run without the network.

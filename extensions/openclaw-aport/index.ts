@@ -8,7 +8,8 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { spawn } from "child_process";
 import { createHash, randomUUID } from "crypto";
-import { readFile, mkdir } from "fs/promises";
+import { readFile, mkdir, appendFile } from "fs/promises";
+import { appendFileSync, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 
@@ -174,6 +175,21 @@ const plugin = {
             apiKey,
             passportFile: agentId ? null : passportFile,
             agentId,
+          });
+          // Audit log for API mode (local mode is logged by the bash script via OPENCLAW_AUDIT_LOG)
+          const configDir = dirname(passportFile);
+          const auditLogPath = join(configDir, "audit.log");
+          const ctxSummary = typeof context.command === "string" ? context.command
+            : typeof context.file_path === "string" ? context.file_path
+            : typeof context.recipient === "string" ? context.recipient
+            : undefined;
+          logAuditEntry(auditLogPath, {
+            tool: effectiveToolName,
+            allow: Boolean(decision.allow),
+            policy: effectivePolicyName,
+            code: decision.reasons?.[0]?.code,
+            agentId: agentId || undefined,
+            context: ctxSummary,
           });
         } else {
           decision = await verifyViaScript(scriptToolName, context, {
@@ -500,4 +516,34 @@ function expandPath(path: string): string {
     return join(homedir(), path.slice(2));
   }
   return path;
+}
+
+/**
+ * Write one-line audit entry matching bash guardrail format.
+ * Deny: sync (blocking). Allow: async (non-blocking). Best-effort: never throws.
+ */
+function logAuditEntry(
+  auditLogPath: string,
+  entry: { tool: string; allow: boolean; policy: string; code?: string; agentId?: string; context?: string },
+): void {
+  try {
+    const ts = new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
+    const code = entry.code || (entry.allow ? "oap.allowed" : "oap.denied");
+    let line = `[${ts}] tool=${entry.tool} allow=${entry.allow} policy=${entry.policy} code=${code}`;
+    if (entry.agentId) line += ` agent_id=${entry.agentId}`;
+    if (entry.context) {
+      const sanitized = entry.context.replace(/[\r\n]+/g, " ").replace(/"/g, '\\"').slice(0, 120);
+      line += ` context="${sanitized}"`;
+    }
+    line += "\n";
+    const dir = dirname(auditLogPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    if (!entry.allow) {
+      appendFileSync(auditLogPath, line, "utf8");
+    } else {
+      appendFile(auditLogPath, line, "utf8").catch(() => {});
+    }
+  } catch {
+    /* best-effort */
+  }
 }

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.12] - 2026-03-02
+
+### Added
+- **Local Audit Logging for API Mode:** All frameworks (LangChain, CrewAI, OpenClaw, Python adapters) now write local audit log entries when using API mode. Previously only local/bash mode produced audit logs.
+  - New `auditLogger.ts` in core package with `logDecision()`, `resolveAuditLogPath()`, `extractContextSummary()`
+  - Deny entries written synchronously (blocking); allow entries written asynchronously (non-blocking) — matches bash guardrail behavior
+  - Format matches existing bash audit log: `[timestamp] tool=X allow=true|false policy=P code=C agent_id=A context="..."`
+- **`audit_log` Config Field:** New config option (`audit_log: true | string | false`) controls local audit logging. Env var `APORT_AUDIT_LOG=1` or `APORT_AUDIT_LOG=/path/to/file` overrides config.
+  - `true` → default path (`~/.aport/<framework>/audit.log` or next to config file)
+  - String path → explicit file location
+  - `false` (default) → no audit logging (backwards compatible)
+- **Python Audit Logging:** `_log_decision()` and `_resolve_audit_log_path()` added to Python evaluator with same format and sync/async behavior as Node
+- **OpenClaw API Mode Audit:** `logAuditEntry()` added to OpenClaw plugin for API mode decisions (local mode already logged by bash script)
+- **Core Exports:** `logDecision`, `resolveAuditLogPath`, `extractContextSummary`, `AuditEntry` exported from core package for reuse
+
+### Security
+- All 28 shell tests passing
+- Core Jest tests (3 suites, 16 tests) passing
+- Express middleware tests (8 tests) passing
+- No regressions introduced
+- Audit logger is best-effort (never throws/raises) — cannot impact decision flow
+
 ## [1.0.11] - 2026-03-01
 
 ### Added

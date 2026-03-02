@@ -63,11 +63,103 @@ APort does **not** replace secure development of OpenClaw itself, safe skill cur
 
 ## Security features of this project
 
-- **Fail-closed by default**: If the guardrail errors or the passport is invalid, the tool is blocked.
+- **Fail-closed by default**: If the guardrail errors or the passport is invalid, the tool is blocked. A separate `fail_open_on_api_error` option lets operators distinguish API infrastructure errors (4xx/5xx, network) from genuine policy denials—but defaults to fail-closed.
 - **Deterministic enforcement**: Policy runs in the platform hook; the AI cannot bypass it.
 - **Tamper-evident audit trail**: Decisions can be logged locally or via APort API (signed receipts in API mode).
 - **Local-first option**: You can run the guardrail entirely offline (bash evaluator) with no network dependency.
-- **Explicit allowlists and blocked patterns**: e.g. `system.command.execute` uses allowlists and 40+ blocked patterns (`rm -rf`, `sudo`, injection patterns) so only intended commands can run.
+- **Explicit allowlists and blocked patterns**: e.g. `system.command.execute` uses allowlists and 50+ blocked patterns (`rm -rf`, `sudo`, injection patterns, `nc`/`netcat`, `find -exec rm`, fork bombs) so only intended commands can run.
+- **Passport-configurable path overrides**: Passport owners can set `limits.allowed_paths` to override path-sensitivity heuristics (e.g. allow `/root/` operations) without weakening catastrophic protections (fork bombs, `rm -rf /`, reverse shells are never overridable).
+
+---
+
+## Security model and trust boundaries
+
+### What APort Protects
+
+APort provides **pre-action authorization** for agent tool calls—policies enforce before execution, not after damage.
+
+**✅ Primary protection (agent actions):**
+- **Prompt injection** - Hook-based enforcement; agent cannot bypass via prompts
+- **Rogue agent behavior** - Only explicitly allowed tools execute
+- **Malicious skills** - Third-party OpenClaw skills checked before execution (addresses Cisco findings)
+- **Unauthorized commands** - Allowlist + 50+ blocked patterns for shell commands
+- **Data exfiltration** - File access, messaging, web requests controlled by policy
+- **Resource exhaustion** - Rate limits, size limits, time limits enforced
+
+**❌ Out of scope (infrastructure):**
+- Operating system security (file permissions, process isolation)
+- Framework/runtime vulnerabilities (OpenClaw CVEs, Node.js/Python security)
+- Network security (TLS, DNS, MITM protection)
+- Supply chain security (npm/PyPI package integrity)
+
+**Why?** APort operates at the **application layer**, enforcing authorization for agent decisions. It assumes the underlying platform (OS, runtime, network) is secure—the standard model for application-layer authorization systems.
+
+**Key insight:** If an attacker has write access to config files, they also control OpenClaw binaries, system libraries, and the entire user environment. This is an **OS security boundary**, not an APort issue. APort's value is preventing **agent misbehavior** (prompt injection, unauthorized actions), not filesystem attacks.
+
+**For full threat model, attack scenarios, and best practices by environment, see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).**
+
+---
+
+## Configuration guide
+
+### ✅ Safe Defaults (Out of the Box)
+
+APort uses secure defaults:
+- `failClosed: true` - Block tools on errors (security over availability)
+- `allowUnmappedTools: false` - Deny-by-default for unmapped tools
+- API mode recommended for production
+- Passport status checked first (suspended/revoked → deny all)
+
+### Understanding Configuration Options
+
+#### `mode: "api"` (recommended) vs `mode: "local"`
+
+**API Mode (default for production):**
+- ✅ Full OAP policy evaluation (all policy packs, new rules without code changes)
+- ✅ Policies hosted by APort at api.aport.io
+- ✅ Cryptographically signed decisions (Ed25519)
+- ✅ Passport protected (fetched from API, cannot be tampered locally)
+- ✅ Global suspend (<200ms across all systems)
+- ⚠️ Requires network (~60-100ms API latency)
+
+**Local Mode (offline/privacy):**
+- ✅ Works offline (no network required)
+- ✅ Fast (<300ms latency)
+- ✅ Privacy (no data leaves machine)
+- ⚠️ Core policies only (hand-coded in bash)
+- ⚠️ Passport can be modified locally (filesystem trust)
+- ⚠️ Decisions unsigned
+
+**Recommendation:** API for production, local for development or air-gapped environments.
+
+---
+
+#### `failClosed: true` (recommended) vs `failClosed: false`
+
+**True (default):**
+- If guardrail errors → deny tool execution
+- Security over availability
+- ✅ Recommended for production
+
+**False:**
+- If guardrail errors → allow tool execution
+- Availability over security
+- ⚠️ Error conditions become exploit opportunities
+- Use only for development/testing
+
+---
+
+#### `allowUnmappedTools: false` (recommended) vs `allowUnmappedTools: true`
+
+**False (default):**
+- Tools without policy mapping → blocked
+- Deny-by-default security model
+- ✅ Recommended for production
+
+**True:**
+- Unmapped tools → allowed without checks
+- ⚠️ HIGH RISK - Unmapped tools bypass all authorization
+- Use only if you're using custom/community ClawHub skills and fully trust them
 
 ---
 
