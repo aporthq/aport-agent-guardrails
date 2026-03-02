@@ -3,17 +3,20 @@
  * Aligns with Python APortCallback (on_tool_start → evaluator.verify → GuardrailViolation).
  */
 
-import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
-import type { Serialized } from '@langchain/core/load/serializable';
-import { Evaluator, toolToPackId } from '@aporthq/aport-agent-guardrails-core';
+import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
+import type { Serialized } from "@langchain/core/load/serializable";
+import { Evaluator, toolToPackId } from "@aporthq/aport-agent-guardrails-core";
 
 /** Thrown when the guardrail denies a tool call (policy deny). */
 export class GuardrailViolationError extends Error {
   readonly reasons?: Array<{ code?: string; message?: string }>;
 
-  constructor(message: string, reasons?: Array<{ code?: string; message?: string }>) {
+  constructor(
+    message: string,
+    reasons?: Array<{ code?: string; message?: string }>
+  ) {
     super(message);
-    this.name = 'GuardrailViolationError';
+    this.name = "GuardrailViolationError";
     this.reasons = reasons;
   }
 }
@@ -30,14 +33,18 @@ export interface APortGuardrailCallbackOptions {
  * Register with LangChain/LangGraph so tool execution is blocked when policy denies.
  */
 export class APortGuardrailCallback extends BaseCallbackHandler {
-  name = 'aport_guardrail';
+  name = "aport_guardrail";
 
   private evaluator: Evaluator;
 
   constructor(options: APortGuardrailCallbackOptions | string | null = {}) {
     super();
-    const configPath = typeof options === 'string' ? options : options?.configPath ?? null;
-    const framework = typeof options === 'object' && options && 'framework' in options ? options.framework : 'langchain';
+    const configPath =
+      typeof options === "string" ? options : options?.configPath ?? null;
+    const framework =
+      typeof options === "object" && options && "framework" in options
+        ? options.framework
+        : "langchain";
     this.evaluator = new Evaluator(configPath, framework);
   }
 
@@ -51,16 +58,26 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
     _runName?: string
   ): Promise<void> {
     const t = tool as unknown as { name?: string; id?: string };
-    const toolName = t?.name ?? (typeof t?.id === 'string' ? t.id : undefined) ?? 'unknown';
+    const toolName =
+      t?.name ?? (typeof t?.id === "string" ? t.id : undefined) ?? "unknown";
     const packId = toolToPackId(toolName);
+    // Parse input to extract tool-specific parameters (e.g. file_path for read tools)
+    let params: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(input);
+      if (typeof parsed === "object" && parsed !== null) params = parsed;
+    } catch {
+      // input is a plain string, not JSON
+    }
     const decision = await this.evaluator.verify(
       {},
       { capability: packId },
-      { tool: toolName, input }
+      { tool: toolName, input, ...params }
     );
     if (!decision.allow) {
-      const msg = decision.reasons?.[0]?.message ?? 'APort policy denied tool execution';
-      console.warn('[APort] Denied:', toolName, decision.reasons ?? msg);
+      const msg =
+        decision.reasons?.[0]?.message ?? "APort policy denied tool execution";
+      console.warn("[APort] Denied:", toolName, decision.reasons ?? msg);
       throw new GuardrailViolationError(msg, decision.reasons);
     }
   }

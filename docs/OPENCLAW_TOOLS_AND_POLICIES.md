@@ -32,12 +32,30 @@ Per the **Open Agent Passport (OAP) spec**, the passport has a **limits** object
 - **read** and **write** are **now mapped** to APort policies:
   - **read** → `data.file.read.v1` (enforces path allowlists, blocked patterns for SSH keys/credentials/.env)
   - **write** → `data.file.write.v1` (enforces path allowlists, blocks system directories, optional extension restrictions)
+- **Middleware param spreading:** The LangChain and CrewAI Node middlewares automatically parse tool input JSON and spread parameters (e.g. `file_path`) into the top-level verification context. This is required because the API's policy schema validates `file_path` as a required field. Without this, `read`/`write` tool calls would fail with 400 Bad Request.
 - Configure passport limits for file operations:
   - `limits.data.file.read.allowed_paths` - Array of allowed path prefixes (e.g. `["/tmp/*", "/home/user/projects/*"]`)
   - `limits.data.file.read.blocked_patterns` - Array of patterns to block (e.g. `["**/.ssh/**", "**/.env"]`)
   - `limits.data.file.write.allowed_paths` - Array of allowed write paths
   - `limits.data.file.write.blocked_paths` - Array of system directories to block (e.g. `["/etc/**", "/bin/**"]`)
 - Other tools like **edit**, **apply_patch**, **browser**, **cron**, **gateway**, **sessions_***, **nodes**, **image**, **web_search**, **web_fetch** remain **unmapped** and **allowed** by default (when `allowUnmappedTools: true`).
+
+---
+
+## Passport-configurable path overrides
+
+The `system.command.execute.v1` policy includes hardcoded security patterns that block access to sensitive system directories (`/etc/`, `/sys/`, `/proc/`, etc.), sensitive hidden files, credential files, and more. Passport owners can override **path-sensitivity heuristics** by setting `limits.allowed_paths` or `limits.allowed_directories` in the passport:
+
+```json
+{
+  "limits": {
+    "allowed_paths": ["/root/", "/home/agent/work/"],
+    "allowed_commands": ["*"]
+  }
+}
+```
+
+When `allowed_paths` is set and the command references one of those paths, overridable rules (like "Access to sensitive system directories" or "Access to secrets and credentials files") are skipped. **Catastrophic protections are never overridable** — fork bombs, `rm -rf /`, reverse shells, `nc`/`netcat`, and `find -exec rm` are always blocked regardless of passport config.
 
 ---
 

@@ -63,11 +63,12 @@ APort does **not** replace secure development of OpenClaw itself, safe skill cur
 
 ## Security features of this project
 
-- **Fail-closed by default**: If the guardrail errors or the passport is invalid, the tool is blocked.
+- **Fail-closed by default**: If the guardrail errors or the passport is invalid, the tool is blocked. A separate `fail_open_on_api_error` option lets operators distinguish API infrastructure errors (4xx/5xx, network) from genuine policy denials—but defaults to fail-closed.
 - **Deterministic enforcement**: Policy runs in the platform hook; the AI cannot bypass it.
 - **Tamper-evident audit trail**: Decisions can be logged locally or via APort API (signed receipts in API mode).
 - **Local-first option**: You can run the guardrail entirely offline (bash evaluator) with no network dependency.
-- **Explicit allowlists and blocked patterns**: e.g. `system.command.execute` uses allowlists and 40+ blocked patterns (`rm -rf`, `sudo`, injection patterns) so only intended commands can run.
+- **Explicit allowlists and blocked patterns**: e.g. `system.command.execute` uses allowlists and 50+ blocked patterns (`rm -rf`, `sudo`, injection patterns, `nc`/`netcat`, `find -exec rm`, fork bombs) so only intended commands can run.
+- **Passport-configurable path overrides**: Passport owners can set `limits.allowed_paths` to override path-sensitivity heuristics (e.g. allow `/root/` operations) without weakening catastrophic protections (fork bombs, `rm -rf /`, reverse shells are never overridable).
 
 ---
 
@@ -81,7 +82,7 @@ APort provides **pre-action authorization** for agent tool calls—policies enfo
 - **Prompt injection** - Hook-based enforcement; agent cannot bypass via prompts
 - **Rogue agent behavior** - Only explicitly allowed tools execute
 - **Malicious skills** - Third-party OpenClaw skills checked before execution (addresses Cisco findings)
-- **Unauthorized commands** - Allowlist + 40+ blocked patterns for shell commands
+- **Unauthorized commands** - Allowlist + 50+ blocked patterns for shell commands
 - **Data exfiltration** - File access, messaging, web requests controlled by policy
 - **Resource exhaustion** - Rate limits, size limits, time limits enforced
 

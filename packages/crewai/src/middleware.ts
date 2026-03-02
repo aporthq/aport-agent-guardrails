@@ -4,7 +4,11 @@
  * Reuses a module-level Evaluator to avoid creating one per tool call.
  */
 
-import { Evaluator, findConfigPath, toolToPackId } from '@aporthq/aport-agent-guardrails-core';
+import {
+  Evaluator,
+  findConfigPath,
+  toolToPackId,
+} from "@aporthq/aport-agent-guardrails-core";
 
 export interface BeforeToolCallContext {
   tool_name: string;
@@ -15,7 +19,7 @@ let _crewaiEvaluator: Evaluator | null = null;
 
 function getCrewaiEvaluator(): Evaluator {
   if (!_crewaiEvaluator) {
-    _crewaiEvaluator = new Evaluator(findConfigPath('crewai'), 'crewai');
+    _crewaiEvaluator = new Evaluator(findConfigPath("crewai"), "crewai");
   }
   return _crewaiEvaluator;
 }
@@ -23,10 +27,19 @@ function getCrewaiEvaluator(): Evaluator {
 /**
  * Build tool context for the evaluator (same shape as Python build_tool_context).
  */
-function buildToolContext(toolName: string, toolInput: unknown): { tool: string; input: string; params: Record<string, unknown> } {
-  const params = typeof toolInput === 'object' && toolInput !== null ? (toolInput as Record<string, unknown>) : {};
-  const inputStr = typeof toolInput === 'object' ? JSON.stringify(toolInput) : String(toolInput);
-  return { tool: toolName, input: inputStr, params };
+function buildToolContext(
+  toolName: string,
+  toolInput: unknown
+): Record<string, unknown> {
+  const params =
+    typeof toolInput === "object" && toolInput !== null
+      ? (toolInput as Record<string, unknown>)
+      : {};
+  const inputStr =
+    typeof toolInput === "object"
+      ? JSON.stringify(toolInput)
+      : String(toolInput);
+  return { tool: toolName, input: inputStr, ...params };
 }
 
 /**
@@ -38,14 +51,10 @@ export function beforeToolCall(context: BeforeToolCallContext): false | null {
   const evaluator = getCrewaiEvaluator();
   const toolCtx = buildToolContext(context.tool_name, context.tool_input);
   const packId = toolToPackId(context.tool_name);
-  const decision = evaluator.verifySync(
-    {},
-    { capability: packId },
-    toolCtx
-  );
+  const decision = evaluator.verifySync({}, { capability: packId }, toolCtx);
   if (!decision.allow) {
-    const msg = decision.reasons?.[0]?.message ?? 'APort policy denied';
-    console.warn('[APort] Denied:', context.tool_name, decision.reasons ?? msg);
+    const msg = decision.reasons?.[0]?.message ?? "APort policy denied";
+    console.warn("[APort] Denied:", context.tool_name, decision.reasons ?? msg);
     return false;
   }
   return null;
