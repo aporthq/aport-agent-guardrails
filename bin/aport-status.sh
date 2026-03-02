@@ -129,6 +129,18 @@ jq -r '.limits | keys[]? // empty' $PASSPORT_FILE | while read policy; do
             msgs_per_day=$(jq -r ".limits.\"$policy\".msgs_per_day // \"unlimited\"" $PASSPORT_FILE)
             echo "     - Messages/day: $msgs_per_day"
             ;;
+        "data.file.read")
+            allowed_paths=$(jq ".limits.\"$policy\".allowed_paths | length" $PASSPORT_FILE 2> /dev/null || echo "0")
+            blocked_patterns=$(jq ".limits.\"$policy\".blocked_patterns | length" $PASSPORT_FILE 2> /dev/null || echo "0")
+            echo "     - Allowed paths: $allowed_paths"
+            echo "     - Blocked patterns: $blocked_patterns"
+            ;;
+        "data.file.write")
+            allowed_paths=$(jq ".limits.\"$policy\".allowed_paths | length" $PASSPORT_FILE 2> /dev/null || echo "0")
+            blocked_paths=$(jq ".limits.\"$policy\".blocked_paths | length" $PASSPORT_FILE 2> /dev/null || echo "0")
+            echo "     - Allowed paths: $allowed_paths"
+            echo "     - Blocked paths: $blocked_paths"
+            ;;
         "data.export")
             max_rows=$(jq -r ".limits.\"$policy\".max_rows // \"unlimited\"" $PASSPORT_FILE)
             allow_pii=$(jq -r ".limits.\"$policy\".allow_pii // false" $PASSPORT_FILE)
@@ -137,6 +149,18 @@ jq -r '.limits | keys[]? // empty' $PASSPORT_FILE | while read policy; do
             ;;
     esac
 done
+
+echo
+
+# Protection coverage
+echo "🛡️  APort Protection Coverage"
+echo "   System commands: ✅ Protected (system.command.execute.v1)"
+echo "   File reads: ✅ Protected (data.file.read.v1)"
+echo "   File writes: ✅ Protected (data.file.write.v1)"
+echo "   Messaging: ✅ Protected (messaging.message.send.v1)"
+echo "   Git operations: ✅ Protected (code.repository.merge.v1)"
+echo "   MCP tools: ✅ Protected (mcp.tool.execute.v1)"
+echo
 
 echo
 

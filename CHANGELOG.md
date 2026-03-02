@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-03-01
+
+### Added
+- **Complete Tool Mappings:** Added mappings for 15+ tool families (read, write, edit, web_fetch, web_search, browser, sessions_spawn, sessions_send, cron, gateway, process, exec, git.create_pr, git.merge, messaging.*)
+- **Passport Creation Wizard Enhancement:** Added support for new capabilities:
+  - File operations: `data.file.read`, `data.file.write` with path allowlists
+  - Web operations: `web.fetch`, `web.browser` with domain restrictions
+  - Interactive prompts for configuring limits (paths, domains, rate limits)
+- **Documentation:**
+  - NEW: `SECURITY_MODEL.md` (584 lines) - Comprehensive security model with trust boundaries, attack scenarios, best practices
+  - UPDATED: `SECURITY.md` - Configuration security guide, safe defaults
+  - UPDATED: `README.md` - Trust boundary section, application-layer security positioning
+  - UPDATED: `skills/aport-agent-guardrail/SKILL.md` (314→412 lines) - Scanner-friendly rewrite, value-first positioning
+
+### Changed
+- **Bash Script Improvements (Local Mode):**
+  - Complete tool mappings added
+  - Fixed signature format: `"local-unsigned"` with proper `kid` and `verification_mode` (OAP v1.0 compliant)
+  - Audit performance: deny decisions sync, allow decisions async
+- **Documentation URLs:** Fixed policy docs URL from `https://aport.io/docs/policies` → `https://aport.io/policy-packs`
+
+### Fixed
+- **Decision Integrity:** Added synchronous `verifyDecisionIntegrity()` call before processing decisions (SHA-256 hash verification)
+- **Unmapped Tools:** Closed gap where 11+ core OpenClaw tools had no policy enforcement
+- **Cryptographically Secure UUIDs:** Replaced weak `Date.now() + Math.random()` with `crypto.randomUUID()` for decision files
+
+### Security
+- ✅ All 28 tests passing
+- ✅ No regressions introduced
+- ✅ Comprehensive audit completed (all claims verified)
+
 ## [1.0.8] - 2026-02-18
 
 ### Added

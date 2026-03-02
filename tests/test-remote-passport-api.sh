@@ -52,6 +52,15 @@ if ! curl -sf --connect-timeout 5 "${APORT_API_URL%/}/api/status" > /dev/null 2>
     exit 0
 fi
 
+# Probe whether the test agent_id has a passport (API may return 404 if not)
+RESP=$(curl -s --connect-timeout 5 -w "\n%{http_code}" -X POST "${APORT_API_URL%/}/api/verify/policy/system.command.execute.v1" \
+    -H "Content-Type: application/json" \
+    -d "{\"context\":{\"agent_id\":\"$REMOTE_AGENT_ID\",\"command\":\"ls\"}}" 2> /dev/null) || true
+if echo "${RESP:-}" | grep -q "passport_not_found\|Passport with the specified agent ID was not found"; then
+    echo "  Skipping: No hosted passport for agent $REMOTE_AGENT_ID (create one at aport.io or set APORT_TEST_REMOTE_AGENT_ID)"
+    exit 0
+fi
+
 echo "  Test 1: ALLOW — safe command (e.g. ls)"
 if "$GUARDRAIL_API" system.command.execute '{"command":"ls"}'; then
     echo "  ✅ Test 1 passed: Command allowed"

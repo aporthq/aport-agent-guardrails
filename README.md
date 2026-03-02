@@ -326,9 +326,22 @@ graph TB
 
 </div>
 
-- **Local-first:** Passport and policy live on your machine (or in repo); no cloud required for basic enforcement.  
-- **Fail-closed:** Missing or invalid passport → deny.  
+- **Local-first:** Passport and policy live on your machine (or in repo); no cloud required for basic enforcement.
+- **Fail-closed:** Missing or invalid passport → deny.
 - **Opt-in cloud:** Use API mode for global kill switch, signed receipts, and team sync.
+
+### What APort Protects
+
+**✅ Pre-action authorization (agent misbehavior):**
+- **Prompt injection** - Hook-based enforcement; agent cannot bypass via prompts
+- **Malicious skills** - Third-party OpenClaw skills validated before execution
+- **Unauthorized commands** - Allowlist + 40+ blocked patterns (rm -rf, sudo, etc.)
+- **Data exfiltration** - File access, messaging, web requests controlled by policy
+- **Resource limits** - Rate limits, size caps, transaction amounts enforced
+
+**Application-layer security model:** APort enforces policies at the agent action layer (between agent decision and tool execution). It operates within the OS trust boundary—standard for authorization systems like OAuth, IAM, and policy engines.
+
+**For production:** Use API mode (`mode: api` with `agent_id`) for cryptographically signed decisions, protected passports, and global suspend. See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) for full threat model, attack scenarios, and best practices.
 
 ---
 

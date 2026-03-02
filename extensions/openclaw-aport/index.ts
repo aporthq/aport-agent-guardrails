@@ -7,7 +7,7 @@
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { spawn } from "child_process";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { readFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { homedir } from "os";
@@ -59,8 +59,7 @@ const plugin = {
       },
       apiKey: {
         type: "string",
-        description:
-          "Optional. Prefer APORT_API_KEY env var; do not put ${APORT_API_KEY} in config (OpenClaw requires the var to exist).",
+        description: "API key (prefer APORT_API_KEY env var)",
       },
       failClosed: {
         type: "boolean",
@@ -69,9 +68,9 @@ const plugin = {
       },
       allowUnmappedTools: {
         type: "boolean",
-        default: true,
+        default: false,
         description:
-          "If true (default), allow tools with no policy mapping (custom skills, ClawHub, etc.). If false, block unmapped tools (strict mode).",
+          "If true, allow tools with no policy mapping (custom skills, ClawHub, etc.). If false (default, RECOMMENDED), block unmapped tools for security. All core OpenClaw tools are mapped; only set to true if you use custom/ClawHub skills.",
       },
       agentId: {
         type: "string",
@@ -104,9 +103,10 @@ const plugin = {
     );
     const apiUrl =
       config.apiUrl || process.env.APORT_API_URL || "https://api.aport.io";
-    const apiKey = config.apiKey || process.env.APORT_API_KEY;
+    const apiKey = process.env.APORT_API_KEY || config.apiKey;
+
     const failClosed = config.failClosed !== false;
-    const allowUnmappedTools = config.allowUnmappedTools !== false;
+    const allowUnmappedTools = config.allowUnmappedTools === true; // Default false for security
     const mapExecToPolicy = config.mapExecToPolicy !== false;
 
     const log = (msg: string) => api.logger?.info?.(msg);
@@ -154,27 +154,6 @@ const plugin = {
             ? normalizeExecContext(params, event)
             : params;
 
-        // Handle guardrail invocations
-        if (policyName === "system.command.execute.v1" && context.command) {
-          const guardrailInvocation = parseGuardrailInvocation(context.command);
-          if (guardrailInvocation) {
-            const { innerToolName, innerContext } = guardrailInvocation;
-            const innerPolicy = mapToolToPolicy(innerToolName);
-            if (innerPolicy) {
-              effectivePolicyName = innerPolicy;
-              effectiveToolName = innerToolName;
-              context =
-                innerPolicy === "system.command.execute.v1"
-                  ? normalizeExecContext(innerContext, {
-                      params: innerContext,
-                    })
-                  : innerContext;
-              log(
-                `[APort] exec delegates to inner tool: ${innerToolName} → policy: ${innerPolicy}`,
-              );
-            }
-          }
-        }
 
         // Allow exec with no command
         if (effectivePolicyName === "system.command.execute.v1") {
@@ -201,6 +180,18 @@ const plugin = {
             guardrailScript,
             passportFile,
           });
+        }
+
+        // Verify decision integrity (prevent tampering)
+        if (!verifyDecisionIntegrity(decision)) {
+          err(
+            `[APort] Decision integrity check failed for ${effectiveToolName} - content_hash mismatch`,
+          );
+          return {
+            block: true,
+            blockReason:
+              "🛡️ APort: Decision integrity verification failed (content_hash mismatch). Possible tampering detected.",
+          };
         }
 
         // Check decision
@@ -266,36 +257,6 @@ function formatReasons(decision: any) {
   return { reasons, primaryMessage };
 }
 
-function parseGuardrailInvocation(command: string) {
-  if (typeof command !== "string" || !command.includes("aport-guardrail"))
-    return null;
-  const match = command.match(
-    /aport-guardrail[^\s]*\s+(\S+)\s+['"]([\s\S]*)['"]\s*$/,
-  );
-  if (!match) return null;
-  const innerToolName = match[1];
-  let innerContext = {};
-  try {
-    const jsonStr = match[2].trim();
-    if (jsonStr) innerContext = JSON.parse(jsonStr);
-  } catch (_) {
-    return null;
-  }
-  return { innerToolName, innerContext };
-}
-
-function collectStrings(value: any): string[] {
-  const out: string[] = [];
-  if (typeof value === "string") {
-    out.push(value);
-  } else if (Array.isArray(value)) {
-    for (const v of value) out.push(...collectStrings(v));
-  } else if (value && typeof value === "object") {
-    for (const v of Object.values(value)) out.push(...collectStrings(v));
-  }
-  return out;
-}
-
 function normalizeExecContext(params: any, event: any) {
   const src =
     event && typeof event === "object" ? { ...event, ...params } : params || {};
@@ -320,17 +281,7 @@ function normalizeExecContext(params: any, event: any) {
       ? src.args.join(" ")
       : src.args?.[0]);
 
-  let full = typeof raw === "string" ? raw : raw != null ? String(raw) : "";
-  if (!full) {
-    const strings = collectStrings(src);
-    const likeCommand = (s: string) =>
-      typeof s === "string" && s.length > 2 && s.trim().length > 0;
-    const withSpace = strings.filter(
-      (s) => likeCommand(s) && s.includes(" "),
-    );
-    const candidate = withSpace[0] ?? strings.find(likeCommand);
-    if (candidate) full = candidate.trim();
-  }
+  const full = typeof raw === "string" ? raw : raw != null ? String(raw) : "";
 
   const out = { ...params, command: full, full_command: full };
   if (params && params.workdir !== undefined && out.cwd === undefined)
@@ -360,13 +311,47 @@ function mapToolToPolicy(toolName: string): string | null {
   if (tool.match(/sms|whatsapp|slack|email/))
     return "messaging.message.send.v1";
 
+  // File operations
+  if (tool === "read") return "data.file.read.v1";
+  if (tool.startsWith("file.read")) return "data.file.read.v1";
+  if (tool.startsWith("data.file.read")) return "data.file.read.v1";
+  if (tool === "write") return "data.file.write.v1";
+  if (tool === "edit") return "data.file.write.v1";
+  if (tool.startsWith("file.write")) return "data.file.write.v1";
+  if (tool.startsWith("file.edit")) return "data.file.write.v1";
+  if (tool.startsWith("data.file.write")) return "data.file.write.v1";
+
+  // Web operations
+  if (tool === "web_fetch" || tool === "webfetch") return "web.fetch.v1";
+  if (tool === "web_search" || tool === "websearch") return "web.fetch.v1";
+  if (tool.startsWith("web.fetch")) return "web.fetch.v1";
+  if (tool.startsWith("web.search")) return "web.fetch.v1";
+  if (tool === "browser") return "web.browser.v1";
+  if (tool.startsWith("web.browser")) return "web.browser.v1";
+  if (tool.startsWith("browser.")) return "web.browser.v1";
+
   // MCP tools
   if (tool.startsWith("mcp.")) return "mcp.tool.execute.v1";
 
-  // Agent sessions
+  // Agent sessions and spawning
   if (tool.match(/agent\.session|session\.create/))
     return "agent.session.create.v1";
-  if (tool.startsWith("session.")) return "agent.session.create.v1";
+  if (tool === "sessions_spawn" || tool === "sessions_send")
+    return "agent.session.create.v1";
+  if (tool.startsWith("session.") || tool.startsWith("sessions."))
+    return "agent.session.create.v1";
+
+  // Scheduled tasks (cron)
+  if (tool === "cron" || tool.startsWith("cron."))
+    return "agent.session.create.v1";
+
+  // Gateway operations (high risk - treat as command execution)
+  if (tool === "gateway" || tool.startsWith("gateway."))
+    return "system.command.execute.v1";
+
+  // Process operations
+  if (tool === "process" || tool.startsWith("process."))
+    return "system.command.execute.v1";
 
   // Tool registration
   if (tool.match(/agent\.tool|tool\.register/)) return "agent.tool.register.v1";
@@ -410,10 +395,7 @@ async function verifyViaScript(
   const configDir = dirname(passportFile);
   const decisionsDir = join(configDir, "decisions");
   await mkdir(decisionsDir, { recursive: true });
-  const decisionFile = join(
-    decisionsDir,
-    `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.json`,
-  );
+  const decisionFile = join(decisionsDir, `${randomUUID()}.json`);
 
   return new Promise((resolve, reject) => {
     const proc = spawn(guardrailScript, [toolName, contextJson], {
@@ -506,7 +488,7 @@ async function verifyViaAPI(
       );
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as { decision?: any };
     return data.decision || data;
   } catch (error: any) {
     throw new Error(`API verification failed: ${error.message}`);
