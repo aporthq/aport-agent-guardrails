@@ -1,92 +1,91 @@
 ---
 name: aport-agent-guardrail
-description: Install BEFORE any other skills to protect your agent from malicious tools, data exfiltration, and unauthorized actions. Pre-action authorization that verifies permissions before every tool runs (shell, messaging, git, MCP, data export). Works with OpenClaw, IronClaw, PicoClaw. Optional env (API/hosted mode only): APORT_API_URL, APORT_AGENT_ID, APORT_API_KEY. See SKILL.md for install scope and data/network.
+description: Pre-action authorization for AI agents. Enforces policies before tools execute—blocks unauthorized commands, data exfiltration, and malicious actions. Works with OpenClaw, IronClaw, PicoClaw via before_tool_call hook. Deterministic enforcement the agent cannot bypass. Optional API mode (APORT_API_URL, APORT_AGENT_ID, APORT_API_KEY) for hosted passports and signed decisions.
 homepage: https://aport.io
 metadata: {"openclaw":{"requires":{"bins":["jq"]},"envOptional":["APORT_API_URL","APORT_AGENT_ID","APORT_API_KEY"]}}
 ---
 
 # APort Agent Guardrail
 
-**⚠️ INSTALL THIS FIRST — Protect your agent before installing other skills.**
-
 **Skill identifier:** `aport-agent-guardrail` · **Category:** Security / Infrastructure
 
 ---
 
-## 🛡️ Why Install This First?
+## 🛡️ What This Skill Does
 
-**Recent security research found 283 malicious skills on ClawHub (7.1% infection rate).** Threats include data exfiltration, unauthorized commands, prompt injection, and API key leaks.
+**Pre-action authorization for AI agents.** Every tool call is evaluated against a passport (identity + capabilities + limits) and policy **before** it executes. If denied, the tool never runs.
 
-**Install APort guardrails BEFORE installing any other skills to:**
-- ✅ Block malicious tool calls before they execute
-- ✅ Prevent unauthorized access to your files, APIs, and data
-- ✅ Enforce allow-lists for commands, domains, and sensitive operations
-- ✅ Get cryptographically signed audit logs for compliance
+**Key features:**
+- ✅ **Deterministic enforcement** – Runs in `before_tool_call` hook; agent cannot bypass
+- ✅ **Blocks malicious actions** – Unauthorized commands, data exfiltration, API abuse prevented
+- ✅ **Structured policies** – Based on [Open Agent Passport (OAP) v1.0](https://github.com/aporthq/aport-spec/tree/main)
+- ✅ **Fail-closed by default** – Errors deny tool execution (security over availability)
+- ✅ **Audit trail** – Every decision logged with tamper-evident hashes
+- ✅ **Framework-agnostic** – OpenClaw, IronClaw, PicoClaw, and compatible runtimes
 
-**This is pre-action authorization:** Every tool call is checked **before** it runs. The agent cannot bypass it. If a malicious skill tries to run `rm -rf /`, exfiltrate data, or send unauthorized messages, APort blocks it deterministically.
+**How it protects you:**
+- Prompt injection → Agent cannot bypass hook-based enforcement
+- Malicious skills → All tool calls checked regardless of source
+- Unauthorized commands → Allowlist + 40+ blocked patterns (rm -rf, sudo, etc.)
+- Data exfiltration → File access, messaging, web requests controlled
+- Resource exhaustion → Rate limits, size caps enforced
 
-> **Install once, protected forever.** Run the installer, then install skills safely knowing every action is authorized.
+**Install once, protected forever.** The plugin runs automatically on every tool call.
 
 ---
 
 ## ⚡ Quick Start
 
 ```bash
-# Step 1: Install APort (protects your agent)
+# Install APort guardrails (one-time setup)
 npx @aporthq/aport-agent-guardrails
 
-# Step 2: Now install skills safely
-openclaw skills install <any-skill>
+# Follow wizard to create passport and configure policies
+# Plugin auto-registers with OpenClaw
+
+# Now your agent is protected
+# All tool calls checked before execution
 ```
 
 **With hosted passport (optional):**
 ```bash
-# Get agent_id from aport.io and skip the wizard
+# Get agent_id from aport.io
 npx @aporthq/aport-agent-guardrails <agent_id>
 ```
 
-> **Requires:** Node 18+, jq
+**Requirements:** Node 18+, jq
 
 ---
 
-## 🔒 What This Skill Does
+## 📦 Installation
 
-**Pre-action authorization for AI agents.** Every tool call is checked **before** it runs.
-
-- **Deterministic** – Runs in `before_tool_call`; the agent cannot skip it
-- **Structured policy** – Backed by [Open Agent Passport (OAP) v1.0](https://github.com/aporthq/aport-spec/tree/main) and policy packs
-- **Fail-closed** – If the guardrail errors, the tool is blocked
-- **Audit-ready** – Decisions are logged (local JSON or APort API for signed receipts)
-- **Works everywhere** – OpenClaw, IronClaw, PicoClaw, and compatible frameworks
-
-Run the installer once; the OpenClaw plugin then enforces policy on every tool call automatically. You do **not** run the guardrail script yourself.
-
-**Pair with threat detection:** Works alongside VirusTotal scanning, SHIELD.md threat feeds, and other security tools. APort is the enforcement layer — nothing runs without authorization.
-
----
-
-## 📦 Installation Options
-
-### Recommended: npm (no clone needed)
+### Option 1: npm (recommended)
 
 ```bash
 npx @aporthq/aport-agent-guardrails
 ```
 
-**Follow the wizard to:**
-1. Create or use hosted passport (from [aport.io](https://aport.io/builder/create/))
-2. Configure capabilities (which commands/tools are allowed)
+**The wizard will:**
+1. Create or load passport (local file or hosted from aport.io)
+2. Configure capabilities and limits
 3. Install OpenClaw plugin automatically
+4. Set up wrapper scripts
 
-### With hosted passport (skip wizard)
+**After install:** Plugin enforces before every tool call. No further action needed.
+
+### Option 2: With hosted passport
 
 ```bash
 npx @aporthq/aport-agent-guardrails <agent_id>
 ```
 
-Get your `agent_id` at [aport.io](https://aport.io/builder/create/) for cloud-managed policies, instant updates, and compliance dashboards.
+Get `agent_id` at [aport.io](https://aport.io/builder/create/) for:
+- Cryptographically signed decisions
+- Global suspend (<200ms across all systems)
+- Centralized audit and compliance dashboards
+- Team collaboration
 
-### From source (developers)
+### Option 3: From source
 
 ```bash
 git clone https://github.com/aporthq/aport-agent-guardrails
@@ -98,188 +97,257 @@ cd aport-agent-guardrails
 - [QuickStart: OpenClaw Plugin](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/QUICKSTART_OPENCLAW_PLUGIN.md)
 - [Hosted passport setup](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/HOSTED_PASSPORT_SETUP.md)
 
-### What gets installed
-
-**After install:**
-- ✅ OpenClaw plugin registered (enforces `before_tool_call`)
-- ✅ Passport created (local: `~/.openclaw/aport/passport.json` or hosted via agent_id)
-- ✅ Config written (`~/.openclaw/config.yaml` or `openclaw.json`)
-- ✅ Wrapper scripts installed (`~/.openclaw/.skills/aport-guardrail*.sh`)
-
-**Then:** Start OpenClaw (or use running gateway). Plugin enforces before every tool call. No further steps.
-
-**Testing wrappers** (optional, plugin calls these automatically):
-- Local mode: `~/.openclaw/.skills/aport-guardrail.sh`
-- API/hosted mode: `~/.openclaw/.skills/aport-guardrail-api.sh`
-
 ---
 
 ## 🚀 Usage
 
-### Normal use (automatic)
+### Automatic enforcement (default)
 
-**After installation, you do nothing.** The plugin enforces before every tool call automatically.
+**After installation, the plugin runs automatically:**
 
 ```bash
-# Your agent runs tools normally
+# Your agent uses tools normally
 agent> run git status
-# ✅ APort checks passport → ALLOW → tool runs
+# ✅ APort: passport checked → policy evaluated → ALLOW → tool executes
 
 agent> run rm -rf /
-# ❌ APort checks passport → DENY → tool blocked
+# ❌ APort: passport checked → blocked pattern detected → DENY → tool blocked
 ```
+
+**You do nothing.** The plugin enforces on every tool call in the background.
 
 ### Testing the guardrail (optional)
 
-**Direct script calls for testing or custom automations:**
+**Direct script calls for testing or automation:**
 
 ```bash
-# Test command execution
+# Test allowed command
 ~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"ls"}'
+# Exit 0 = ALLOW
+
+# Test blocked command
+~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"rm -rf /"}'
+# Exit 1 = DENY
 
 # Test messaging
 ~/.openclaw/.skills/aport-guardrail.sh messaging.message.send '{"channel":"whatsapp","to":"+15551234567"}'
-
-# Test with API/hosted mode
-APORT_API_URL=https://api.aport.io ~/.openclaw/.skills/aport-guardrail-api.sh system.command.execute '{"command":"ls"}'
 ```
 
 **Exit codes:**
 - `0` = ALLOW (tool may proceed)
-- `1` = DENY (reason codes in `<config-dir>/aport/decision.json`)
+- `1` = DENY (reason in decision.json)
 
 **Decision logs:**
-- Local: `~/.openclaw/aport/decision.json`
+- Latest: `~/.openclaw/aport/decision.json`
 - Audit trail: `~/.openclaw/aport/audit.log`
 - API mode: Signed receipts via APort API
 
 ---
 
-## 🔍 Before You Install (Transparency)
+## 🔍 How It Works
 
-### Remote code execution
+### Pre-Action Authorization Flow
 
-**Installation runs code from npm or GitHub.**
-- npm: [`@aporthq/aport-agent-guardrails`](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails)
-- GitHub: [aporthq/aport-agent-guardrails](https://github.com/aporthq/aport-agent-guardrails)
+```
+User Request → Agent Decision → APort Check → [ALLOW/DENY] → Tool Execution
+                                     ↑
+                              Policy + Passport
+```
 
-**Recommendation:** Inspect the installer or run in a test environment first. Code is open-source.
+1. **User makes request** (e.g., "Deploy to production")
+2. **Agent decides to use tool** (e.g., exec.run with git push)
+3. **OpenClaw fires hook** (`before_tool_call`)
+4. **APort evaluates:**
+   - Load passport (identity, capabilities, limits)
+   - Map tool → policy (exec → system.command.execute.v1)
+   - Check allowlist, blocked patterns, rate limits
+5. **Decision:** ALLOW or DENY
+6. **Audit:** Log decision with timestamp, policy, reason codes
 
-### What gets written to disk
+**Agent cannot bypass.** Hook is registered by OpenClaw, not controlled by prompts.
 
-**Under config dir (default `~/.openclaw/`):**
+### What Gets Installed
 
-**Installer writes:**
-- `config.yaml` or `openclaw.json` — Plugin config (registered via `openclaw plugins install -l <path>`)
-- `.aport-repo` — Repo/package root path
-- `.skills/` — Wrapper scripts:
-  - `aport-guardrail.sh`, `aport-guardrail-bash.sh`, `aport-guardrail-api.sh`, `aport-guardrail-v2.sh`
-  - `aport-create-passport.sh`, `aport-status.sh`
-- `aport/passport.json` — Only if local passport (wizard creates it)
-- `skills/aport-agent-guardrail/SKILL.md` — Copy of this skill (managed)
-- `workspace/AGENTS.md` — Appended with APort pre-action rule
-- `logs/` — Only if installer starts gateway (e.g., `gateway.log`)
+**Plugin registration:**
+- OpenClaw plugin added to config (enforces before_tool_call)
+- TypeScript/JavaScript plugin loaded on OpenClaw start
 
-**Runtime writes (guardrail decisions):**
-- `aport/decision.json` — Latest decision
-- `aport/audit.log` — Audit trail
-- Passport `status` field — Source of truth for suspended/revoked (no separate file)
+**Files created (under ~/.openclaw/):**
+- `config.yaml` or `openclaw.json` – Plugin configuration
+- `.skills/aport-guardrail*.sh` – Wrapper scripts for local/API evaluation
+- `aport/passport.json` – Your agent passport (local mode only)
+- `aport/decision.json` – Latest decision (runtime)
+- `aport/audit.log` – Audit trail (runtime)
 
-**The plugin runs before every tool call.** Review the codebase for full transparency.
+**Total disk usage:** ~100KB scripts + your passport/decisions
 
-### Network and data privacy
+**Review code:** [GitHub repository](https://github.com/aporthq/aport-agent-guardrails)
 
-**Local mode (default):**
-- ✅ No network calls
-- ✅ Evaluation runs on your machine
-- ✅ Passport and decisions stay local
+---
+
+## 🌐 Network and Privacy
+
+### Local Mode (Default)
+
+**Zero network calls:**
+- ✅ All evaluation on your machine
+- ✅ Passport stored locally
+- ✅ Decisions stay local
 - ✅ Full privacy
+- ✅ Works offline
 
-**API or hosted mode (optional):**
-- 🌐 Tool name and context sent to `https://api.aport.io` (or your `APORT_API_URL`)
-- 🌐 Hosted passport fetched from registry
-- 🌐 Decision logs may be stored by APort (for compliance dashboards)
-- **Use local mode for air-gapped operation.**
+**Perfect for:** Development, personal use, air-gapped environments
 
-### Credentials and environment variables
+### API Mode (Optional)
 
-**No env vars required for basic operation.**
+**Network usage:**
+- Tool name + context → APort API for policy evaluation
+- Hosted passport fetched from registry (if using agent_id)
+- Signed decisions returned (Ed25519 cryptographic signatures)
 
-**Optional (API/hosted mode only):**
-- `APORT_API_URL` — Override API endpoint (default: `https://api.aport.io`)
-- `APORT_AGENT_ID` — Hosted passport ID (from aport.io)
-- `APORT_API_KEY` — If your API requires auth (set in environment, not config)
+**Benefits:**
+- ✅ Cryptographically signed decisions
+- ✅ Court-admissible audit trail
+- ✅ Global suspend across all systems
+- ✅ Centralized compliance dashboards
+- ✅ No local passport tampering possible
 
-**Pass `agent_id` to installer:** `npx @aporthq/aport-agent-guardrails <agent_id>` or use wizard.
+**API endpoint:** `https://api.aport.io` (or custom via APORT_API_URL)
 
----
+**Data sent:**
+- Tool name (e.g., "system.command.execute")
+- Context (e.g., {"command": "ls"})
+- Passport (if local) or agent_id (if hosted)
 
-## ⚠️ Why Security Scanners Flag This Skill
+**Data NOT sent:**
+- File contents
+- Environment variables
+- API keys or credentials
+- Unrelated system information
 
-**APort is flagged as "suspicious" by automated scanners due to security infrastructure behaviors.**
-
-**This is a FALSE POSITIVE.** Here's why:
-
-### What Gets Flagged
-
-1. **"Remote code execution"** — npm install runs setup code (standard npm pattern)
-2. **"System modifications"** — Writes to ~/.openclaw/ (standard OpenClaw plugin pattern)
-3. **"Network communication"** — API mode sends tool context (opt-in, documented, standard SaaS pattern)
-
-### Why This Is Safe
-
-**Compare to other security tools:**
-- **Antivirus:** Downloads virus definitions (remote code), hooks into OS (system mods), sends telemetry (network)
-- **Firewall:** Installs kernel modules (system mods), updates rules (remote code), reports traffic (network)
-- **Password manager:** Syncs vault (network), browser extension (system mods), auto-updates (remote code)
-
-**APort is security infrastructure, not malware.**
-
-### Verification
-
-- ✅ **Open-source:** Review code at [GitHub](https://github.com/aporthq/aport-agent-guardrails)
-- ✅ **VirusTotal:** 0 detections ([scan results](https://www.virustotal.com/gui/file/0fe9918f47fc191d31dfe9a58faedca16e7cedbfef9271520d05feb711699c06))
-- ✅ **npm integrity:** SHA-512 hash verified
-- ✅ **Local mode:** Use without any network (zero data sent)
-
-### What APort Does NOT Do
-
-- ❌ Access credentials, API keys, or passwords
-- ❌ Read files outside ~/.openclaw/aport/
-- ❌ Download additional payloads
-- ❌ Establish backdoors or C2 connections
-- ❌ Escalate privileges (no sudo required)
-- ❌ Spread to other systems
-
-**If you're concerned:** Use local mode (no network) and review the code.
+**To verify:** Use local mode (no network) or inspect open-source code.
 
 ---
 
-## ⚙️ Environment Variables (Optional)
+## ⚙️ Environment Variables
 
-| Variable | When used | Purpose |
+| Variable | When Used | Purpose |
 |----------|-----------|---------|
-| `APORT_API_URL` | API or hosted mode | Override API endpoint (default `https://api.aport.io`). Use for self-hosted or custom API. |
-| `APORT_AGENT_ID` | Hosted passport only | Hosted passport ID from aport.io; API fetches passport from registry. Not needed for local passport. |
-| `APORT_API_KEY` | If your API requires auth | Set in environment only; do not put in config files. See [plugin README](https://github.com/aporthq/aport-agent-guardrails/blob/main/extensions/openclaw-aport/README.md). |
+| `APORT_API_URL` | API mode | Override endpoint (default: `https://api.aport.io`). Use for self-hosted or custom API. |
+| `APORT_AGENT_ID` | Hosted passport | Passport ID from aport.io. API fetches passport from registry. |
+| `APORT_API_KEY` | If API requires auth | Authentication token. Set in environment (not config files). |
 
-**Local mode:** No env vars; passport is read from `<config-dir>/aport/passport.json`.
+**Local mode:** No environment variables needed. Passport read from `~/.openclaw/aport/passport.json`.
 
-**Hosted passport:** Pass `agent_id` to the installer once (or set in config); the plugin uses it on each call in API mode.
+**Hosted mode:** Pass `agent_id` to installer or set APORT_AGENT_ID.
 
 ---
 
 ## 🔧 Tool Name Mapping
 
-| When you're about to…        | Use tool_name               |
-|------------------------------|-----------------------------|
-| Run shell commands           | `system.command.execute`    |
-| Send WhatsApp/email/etc.     | `messaging.message.send`    |
-| Create/merge PRs             | `git.create_pr`, `git.merge`|
-| Call MCP tools               | `mcp.tool.execute`          |
-| Export data / files          | `data.export`               |
+| When agent calls… | Tool name | Policy |
+|------------------|-----------|--------|
+| Shell commands | `system.command.execute` | Allowlist, blocked patterns |
+| WhatsApp/Email/Slack | `messaging.message.send` | Rate limits, recipient allowlist |
+| Create/merge PRs | `git.create_pr`, `git.merge` | PR size, branch restrictions |
+| MCP tools | `mcp.tool.execute` | Server/tool allowlist |
+| Data export | `data.export` | Row limits, PII filtering |
+| File read/write | `data.file.read`, `data.file.write` | Path restrictions |
+| Web requests | `web.fetch`, `web.browser` | Domain allowlist, SSRF protection |
 
-Context must be valid JSON, e.g. `'{"command":"ls"}'` or `'{"channel":"whatsapp","to":"+1..."}'`.
+**Context format:** Valid JSON, e.g., `'{"command":"ls"}'` or `'{"channel":"whatsapp","to":"+1..."}'`
+
+---
+
+## 📋 Out-of-the-Box Protections
+
+**Shell commands (system.command.execute.v1):**
+- Allowlist enforcement (only specified commands run)
+- 40+ blocked patterns: `rm -rf`, `sudo`, `chmod 777`, `dd if=`, `mkfs`, etc.
+- Interpreter bypasses blocked: `python -c`, `node -e`, `base64` encoding
+- Command injection patterns detected
+
+**Messaging (messaging.message.send.v1):**
+- Rate limits (msgs_per_min, msgs_per_day)
+- Recipient allowlist
+- Channel restrictions
+
+**File access (data.file.read/write.v1):**
+- Path restrictions (block /etc, /bin, system directories)
+- Prevent .env, SSH key theft
+
+**Web requests (web.fetch/browser.v1):**
+- Domain allowlist
+- SSRF protection (block private IPs)
+- Rate limiting
+
+**Git operations (code.repository.merge.v1):**
+- PR size limits
+- Branch restrictions
+- Review requirements
+
+**All policies at:** https://aport.io/policy-packs
+
+---
+
+## 🔐 Security Model
+
+### What APort Protects
+
+**✅ Agent action security:**
+- Prompt injection (hook-based enforcement, not prompt-based)
+- Malicious third-party skills
+- Unauthorized commands
+- Data exfiltration via files, messaging, web requests
+- Resource exhaustion (rate/size limits)
+
+### Trust Model
+
+**APort operates at the application layer** (between agent decision and tool execution).
+
+**You must trust:**
+- Your operating system (file permissions, process isolation)
+- OpenClaw runtime (hooks execute correctly)
+- APort code (open-source, verifiable)
+
+**Local mode additionally trusts:**
+- Filesystem integrity (passport not tampered)
+
+**API mode eliminates:**
+- Local passport tampering (fetched from API)
+- Decision tampering (cryptographically signed)
+
+**Out of scope (OS/infrastructure security):**
+- File system compromise
+- OpenClaw CVEs
+- Network attacks (MITM, DNS poisoning)
+- Supply chain attacks
+
+**This is standard for application-layer authorization** (same model as OAuth, IAM, policy engines).
+
+---
+
+## 🎯 Use Cases
+
+**Protect against malicious skills:**
+- Install APort before adding community skills
+- Every skill's tool calls are checked
+- Malicious actions blocked before execution
+
+**Compliance and audit:**
+- Tamper-evident decision logs
+- Court-admissible audit trail (API mode with Ed25519 signatures)
+- SOC 2, HIPAA, SOX compliance support
+
+**Team deployments:**
+- Shared passport across systems (global suspend)
+- Centralized policy updates
+- Consistent enforcement
+
+**Air-gapped environments:**
+- Use local mode (zero network)
+- All evaluation on-premise
+- Self-hosted policy packs
 
 ---
 
@@ -287,28 +355,57 @@ Context must be valid JSON, e.g. `'{"command":"ls"}'` or `'{"channel":"whatsapp"
 
 **APort Guardrails:**
 - [QuickStart: OpenClaw Plugin](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/QUICKSTART_OPENCLAW_PLUGIN.md)
-- [Hosted passport setup](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/HOSTED_PASSPORT_SETUP.md)
-- [Tool / policy mapping](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/TOOL_POLICY_MAPPING.md)
+- [Security Model & Trust Boundaries](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/SECURITY_MODEL.md)
+- [Hosted Passport Setup](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/HOSTED_PASSPORT_SETUP.md)
+- [Tool/Policy Mapping](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/TOOL_POLICY_MAPPING.md)
+- [Verification Methods (Local vs API)](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/VERIFICATION_METHODS.md)
 
 **OpenClaw:**
 - [CLI: skills](https://docs.openclaw.ai/cli/skills)
-- [Skills](https://docs.openclaw.ai/tools/skills)
-- [Skills config](https://docs.openclaw.ai/tools/skills-config)
+- [Skills Documentation](https://docs.openclaw.ai/tools/skills)
+- [Skills Config](https://docs.openclaw.ai/tools/skills-config)
 - [ClawHub](https://docs.openclaw.ai/tools/clawhub)
 
----
-
-## 🔐 Security Notice
-
-**7.1% of ClawHub skills are malicious.** Install APort before installing any other skills to protect your agent from:
-- Data exfiltration attempts
-- Unauthorized file system access
-- Malicious API calls
-- Prompt injection attacks
-- API key leaks
-
-**Pre-action authorization = prevention, not detection.** Malicious actions are blocked before they execute, not after.
+**Security:**
+- [SECURITY.md](https://github.com/aporthq/aport-agent-guardrails/blob/main/SECURITY.md) - Prompt injection, Cisco findings
+- [OAP Specification](https://github.com/aporthq/aport-spec/tree/main) - Open Agent Passport standard
 
 ---
 
-**Made with 🛡️ by [APort](https://aport.io) | Open-source on [GitHub](https://github.com/aporthq/aport-agent-guardrails)**
+## 🤝 Support and Community
+
+**GitHub:** [aporthq/aport-agent-guardrails](https://github.com/aporthq/aport-agent-guardrails)
+**Website:** [aport.io](https://aport.io)
+**Issues:** [GitHub Issues](https://github.com/aporthq/aport-agent-guardrails/issues)
+
+**Open-source:** Apache 2.0 License
+**Code review:** All code publicly available for inspection
+
+---
+
+## ❓ FAQ
+
+**Q: Does this slow down my agent?**
+A: Minimal overhead. API mode: ~60-100ms. Local mode: <300ms. Runs in parallel with agent thinking.
+
+**Q: Can I use this offline?**
+A: Yes. Local mode works without network connectivity.
+
+**Q: What if I need custom policies?**
+A: API mode: Pass custom policy JSON in request. Local mode: Edit bash script or use API mode.
+
+**Q: How do I suspend my agent?**
+A: Local: Set passport status to "suspended". Hosted: Log in to aport.io and suspend (global effect).
+
+**Q: Is my data sent to APort?**
+A: Local mode: No. API mode: Tool name + context only (no credentials, file contents, or env vars).
+
+**Q: Can the agent bypass this?**
+A: No. Enforcement is in the platform hook (`before_tool_call`), not controllable by prompts.
+
+**Q: What happens if APort errors?**
+A: Default: Tool blocked (fail-closed). Configurable via `failClosed` setting.
+
+---
+
+**Made with 🛡️ by [APort](https://aport.io) · Open-source on [GitHub](https://github.com/aporthq/aport-agent-guardrails) · Apache 2.0 License**
