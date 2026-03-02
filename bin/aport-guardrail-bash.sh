@@ -145,8 +145,9 @@ write_decision() {
             issued_at: $issued_at,
             expires_at: $expires_at,
             passport_digest: $passport_digest,
-            signature: "ed25519:local-unsigned",
+            signature: "local-unsigned",
             kid: "oap:local:dev-key",
+            verification_mode: "local",
             prev_decision_id: (if $prev_decision_id == "" then null else $prev_decision_id end),
             prev_content_hash: (if $prev_content_hash == "" then null else $prev_content_hash end)
         }')
@@ -163,13 +164,17 @@ write_decision() {
     # Update chain state for next decision (best-effort; do not block or fail the script)
     echo "{\"last_decision_id\":\"$decision_id\",\"last_content_hash\":\"$content_hash\"}" > "$chain_state" 2> /dev/null || true
 
-    # Audit trail is non-core: append in background so it never blocks the tool call.
-    # Include capability context (command, recipient, repo/branch) when set.
     audit_context=""
     if [ -n "${CONTEXT_SUMMARY:-}" ]; then
         audit_context=" context=\"${CONTEXT_SUMMARY}\""
     fi
-    (echo "[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$decision_id allow=$allow policy=$policy_id code=$deny_code${audit_context}" >> "$AUDIT_LOG") 2> /dev/null &
+    audit_entry="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$decision_id allow=$allow policy=$policy_id code=$deny_code${audit_context}"
+
+    if [ "$allow" = "false" ]; then
+        echo "$audit_entry" >> "$AUDIT_LOG" 2> /dev/null || true
+    else
+        (echo "$audit_entry" >> "$AUDIT_LOG") 2> /dev/null &
+    fi
 
     if [ "$allow" = "true" ]; then
         exit 0
@@ -211,20 +216,49 @@ fi
 # Map tool to policy pack ID
 POLICY_ID=""
 case "$TOOL_NAME" in
-    git.create_pr | git.merge | git.push)
+    git.create_pr | git.merge | git.push | git.*)
         POLICY_ID="code.repository.merge.v1"
         ;;
-    exec.run | exec.* | system.*)
+    exec | exec.run | exec.* | system.* | bash | shell | command)
         POLICY_ID="system.command.execute.v1"
         ;;
-    message.send | message.* | messaging.*)
+    gateway | gateway.* | process | process.*)
+        # High risk operations - treat as command execution
+        POLICY_ID="system.command.execute.v1"
+        ;;
+    message.send | message.* | messaging.* | sms | whatsapp | slack | email)
         POLICY_ID="messaging.message.send.v1"
         ;;
-    payment.* | finance.*)
+    read | file.read | file.read.* | data.file.read | data.file.read.*)
+        POLICY_ID="data.file.read.v1"
+        ;;
+    write | edit | file.write | file.write.* | file.edit | file.edit.* | data.file.write | data.file.write.*)
+        POLICY_ID="data.file.write.v1"
+        ;;
+    web_fetch | webfetch | web.fetch | web.fetch.* | web_search | websearch | web.search | web.search.*)
+        POLICY_ID="web.fetch.v1"
+        ;;
+    browser | browser.* | web.browser | web.browser.*)
+        POLICY_ID="web.browser.v1"
+        ;;
+    mcp.*)
+        POLICY_ID="mcp.tool.execute.v1"
+        ;;
+    agent.session.* | session.create | session.* | sessions.* | sessions_spawn | sessions_send)
+        POLICY_ID="agent.session.create.v1"
+        ;;
+    cron | cron.*)
+        # Scheduled tasks - treat as session management
+        POLICY_ID="agent.session.create.v1"
+        ;;
+    agent.tool.* | tool.register)
+        POLICY_ID="agent.tool.register.v1"
+        ;;
+    payment.refund | refund | payment.charge | charge | payment.* | finance.*)
         POLICY_ID="finance.payment.refund.v1"
         ;;
-    database.write | database.insert | database.update | database.delete | data.export)
-        POLICY_ID="data.export.v1"
+    database.write | database.insert | database.update | database.delete | data.export | data.export.*)
+        POLICY_ID="data.export.create.v1"
         ;;
     *)
         # Unknown tool - deny by default for security
@@ -232,7 +266,7 @@ case "$TOOL_NAME" in
         ;;
 esac
 
-# Capability-specific context summary for audit log (command, recipient, repo/branch, etc.)
+# Capability-specific context summary for audit log (command, recipient, repo/branch, file_path, etc.)
 CONTEXT_SUMMARY=""
 if [ -n "$CONTEXT_JSON" ] && [ "$CONTEXT_JSON" != "{}" ]; then
     if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
@@ -244,6 +278,17 @@ if [ -n "$CONTEXT_JSON" ] && [ "$CONTEXT_JSON" != "{}" ]; then
         BRANCH=$(echo "$CONTEXT_JSON" | jq -r '.branch // ""' 2> /dev/null || true)
         [ -n "$REPO" ] && CONTEXT_SUMMARY="$REPO"
         [ -n "$BRANCH" ] && CONTEXT_SUMMARY="${CONTEXT_SUMMARY:+$CONTEXT_SUMMARY }$BRANCH"
+    elif [[ "$POLICY_ID" == "data.file.read.v1" ]] || [[ "$POLICY_ID" == "data.file.write.v1" ]]; then
+        CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""' 2> /dev/null || true)
+    elif [[ "$POLICY_ID" == "web.fetch.v1" ]]; then
+        CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.url // ""' 2> /dev/null || true)
+    elif [[ "$POLICY_ID" == "web.browser.v1" ]]; then
+        ACTION=$(echo "$CONTEXT_JSON" | jq -r '.action // ""' 2> /dev/null || true)
+        URL=$(echo "$CONTEXT_JSON" | jq -r '.url // ""' 2> /dev/null || true)
+        [ -n "$ACTION" ] && CONTEXT_SUMMARY="$ACTION"
+        [ -n "$URL" ] && CONTEXT_SUMMARY="${CONTEXT_SUMMARY:+$CONTEXT_SUMMARY }$URL"
+    elif [[ "$POLICY_ID" == "agent.session.create.v1" ]]; then
+        CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.session_id // .agent_id // ""' 2> /dev/null || true)
     fi
     # Sanitize for one-line audit: no newlines, truncate, escape double quotes
     if [ -n "$CONTEXT_SUMMARY" ]; then
@@ -360,7 +405,26 @@ if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
             write_decision false "$POLICY_ID" "oap.command_not_allowed" "Command '$COMMAND' is not in allowed list"
         fi
 
-        # Check blocked patterns using safe pattern matching
+        # Check built-in security patterns (surgical - dangerous operations only)
+        # These are always enforced to prevent catastrophic damage
+        if [[ "$COMMAND" =~ rm[[:space:]]+-[^[:space:]]*r[^[:space:]]*f[^[:space:]]*[[:space:]]+/[[:space:]]*$ ]] \
+            || [[ "$COMMAND" =~ rm[[:space:]]+-[^[:space:]]*r[^[:space:]]*f[^[:space:]]+/\* ]]; then
+            write_decision false "$POLICY_ID" "oap.dangerous_operation" "Destructive file operation: rm -rf / or rm -rf /*"
+        fi
+        if [[ "$COMMAND" =~ dd[[:space:]]+if=/dev/ ]]; then
+            write_decision false "$POLICY_ID" "oap.dangerous_operation" "Dangerous disk operation: dd if=/dev/"
+        fi
+        if [[ "$COMMAND" =~ mkfs\. ]]; then
+            write_decision false "$POLICY_ID" "oap.dangerous_operation" "Filesystem creation: mkfs"
+        fi
+        if [[ "$COMMAND" =~ (curl|wget)[[:space:]][^\|]*\|[[:space:]]*(bash|sh|zsh|python|node) ]]; then
+            write_decision false "$POLICY_ID" "oap.dangerous_operation" "Download-and-execute pattern detected"
+        fi
+        if [[ "$COMMAND" =~ :\(\)[[:space:]]*\{[[:space:]]*:[[:space:]]*\|[[:space:]]*:[[:space:]]*\&[[:space:]]*\} ]] || [[ "$COMMAND" =~ fork\(\) ]]; then
+            write_decision false "$POLICY_ID" "oap.dangerous_operation" "Fork bomb detected"
+        fi
+
+        # Check user-defined blocked patterns using safe pattern matching
         while IFS= read -r pattern; do
             [ -z "$pattern" ] && continue
             # Use safe_pattern_match instead of bash glob patterns
@@ -386,6 +450,87 @@ if [[ "$POLICY_ID" == "messaging.message.send"* ]]; then
         HAS_ALLOWED=$(echo "$LIMITS" | jq -r '.allowed_recipients | length')
         if [ "$RECIPIENT_ALLOWED" = false ] && [ "${HAS_ALLOWED:-0}" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.recipient_not_allowed" "Recipient '$RECIPIENT' is not in allowed list"
+        fi
+    fi
+fi
+
+# File read policy evaluation
+if [[ "$POLICY_ID" == "data.file.read.v1" ]]; then
+    FILE_PATH=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""')
+    if [ -n "$FILE_PATH" ]; then
+        # Check allowed paths
+        PATH_ALLOWED=false
+        while IFS= read -r allowed_path; do
+            [ -z "$allowed_path" ] && continue
+            # Use safe prefix matching
+            if [[ "$FILE_PATH" == "$allowed_path"* ]] || [ "$allowed_path" = "*" ]; then
+                PATH_ALLOWED=true
+                break
+            fi
+        done < <(echo "$LIMITS" | jq -r '.allowed_paths[]? // empty')
+
+        HAS_ALLOWED=$(echo "$LIMITS" | jq -r '.allowed_paths | length' 2> /dev/null || echo "0")
+        if [ "$PATH_ALLOWED" = false ] && [ "${HAS_ALLOWED:-0}" -gt 0 ] 2> /dev/null; then
+            write_decision false "$POLICY_ID" "oap.path_not_allowed" "File path '$FILE_PATH' is not in allowed list"
+        fi
+
+        # Check blocked patterns (SSH keys, credentials, .env files)
+        while IFS= read -r pattern; do
+            [ -z "$pattern" ] && continue
+            # Simple glob-style matching for blocked patterns
+            if [[ "$FILE_PATH" == *"$pattern"* ]] || [[ "$FILE_PATH" == $pattern ]]; then
+                write_decision false "$POLICY_ID" "oap.blocked_pattern" "File path matches blocked pattern: $pattern"
+            fi
+        done < <(echo "$LIMITS" | jq -r '.blocked_patterns[]? // empty')
+    fi
+fi
+
+# File write policy evaluation
+if [[ "$POLICY_ID" == "data.file.write.v1" ]]; then
+    FILE_PATH=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""')
+    if [ -n "$FILE_PATH" ]; then
+        # Check allowed paths
+        PATH_ALLOWED=false
+        while IFS= read -r allowed_path; do
+            [ -z "$allowed_path" ] && continue
+            # Use safe prefix matching
+            if [[ "$FILE_PATH" == "$allowed_path"* ]] || [ "$allowed_path" = "*" ]; then
+                PATH_ALLOWED=true
+                break
+            fi
+        done < <(echo "$LIMITS" | jq -r '.allowed_paths[]? // empty')
+
+        HAS_ALLOWED=$(echo "$LIMITS" | jq -r '.allowed_paths | length' 2> /dev/null || echo "0")
+        if [ "$PATH_ALLOWED" = false ] && [ "${HAS_ALLOWED:-0}" -gt 0 ] 2> /dev/null; then
+            write_decision false "$POLICY_ID" "oap.path_not_allowed" "File path '$FILE_PATH' is not in allowed list"
+        fi
+
+        # Check blocked paths (system directories)
+        while IFS= read -r blocked_path; do
+            [ -z "$blocked_path" ] && continue
+            # Prefix match for blocked system dirs
+            if [[ "$FILE_PATH" == "$blocked_path"* ]]; then
+                write_decision false "$POLICY_ID" "oap.path_blocked" "Writing to system directory is not allowed: $blocked_path"
+            fi
+        done < <(echo "$LIMITS" | jq -r '.blocked_paths[]? // empty')
+
+        # Check allowed extensions (if configured)
+        if [ -n "$(echo "$LIMITS" | jq -r '.allowed_extensions | length' 2> /dev/null)" ]; then
+            FILE_EXT=$(echo "$FILE_PATH" | grep -o '\.[^.]*$' | tr '[:upper:]' '[:lower:]')
+            if [ -n "$FILE_EXT" ]; then
+                EXT_ALLOWED=false
+                while IFS= read -r allowed_ext; do
+                    [ -z "$allowed_ext" ] && continue
+                    if [ "$FILE_EXT" = "$allowed_ext" ]; then
+                        EXT_ALLOWED=true
+                        break
+                    fi
+                done < <(echo "$LIMITS" | jq -r '.allowed_extensions[]? // empty')
+
+                if [ "$EXT_ALLOWED" = false ]; then
+                    write_decision false "$POLICY_ID" "oap.extension_not_allowed" "File extension $FILE_EXT is not allowed"
+                fi
+            fi
         fi
     fi
 fi
