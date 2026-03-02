@@ -8,6 +8,8 @@ import json
 import os
 import ssl
 import subprocess
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 from urllib.request import Request, urlopen
@@ -91,6 +93,92 @@ def _get_guardrail_script_path(config: dict[str, Any]) -> str | None:
     if default.exists():
         return str(default)
     return None
+
+
+def _resolve_audit_log_path(
+    config: dict[str, Any],
+    config_path: Path | None,
+    framework: str,
+) -> str | None:
+    """Resolve audit log path from config/env. Returns None if audit logging disabled."""
+    env_val = os.environ.get("APORT_AUDIT_LOG")
+    if env_val is not None:
+        if env_val in ("0", "false", ""):
+            return None
+        if env_val in ("1", "true"):
+            return _default_audit_log_path(config_path, framework)
+        return env_val
+
+    audit_log = config.get("audit_log")
+    if audit_log is False or audit_log is None:
+        return None
+    if audit_log is True:
+        return _default_audit_log_path(config_path, framework)
+    if isinstance(audit_log, str):
+        return audit_log
+    return None
+
+
+def _default_audit_log_path(config_path: Path | None, framework: str) -> str:
+    if config_path:
+        return str(config_path.parent / "audit.log")
+    local_dir = Path.cwd() / ".aport"
+    if local_dir.is_dir():
+        return str(local_dir / "audit.log")
+    return str(Path.home() / ".aport" / framework / "audit.log")
+
+
+def _extract_context_summary(context: dict[str, Any]) -> str | None:
+    for key in ("command", "cmd", "full_command", "file_path", "path", "file", "recipient", "to", "url", "input"):
+        val = context.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def _log_decision(
+    audit_log_path: str,
+    *,
+    tool: str,
+    allow: bool,
+    policy_id: str,
+    code: str | None = None,
+    agent_id: str | None = None,
+    context_summary: str | None = None,
+) -> None:
+    """
+    Write one-line audit entry matching bash guardrail format.
+    Deny: sync (blocking). Allow: async (non-blocking). Best-effort: never raises.
+    """
+    try:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        effective_code = code or ("oap.allowed" if allow else "oap.denied")
+        line = f"[{ts}] tool={tool} allow={str(allow).lower()} policy={policy_id} code={effective_code}"
+        if agent_id:
+            line += f" agent_id={agent_id}"
+        if context_summary:
+            sanitized = context_summary.replace("\n", " ").replace("\r", " ").replace('"', '\\"')[:120]
+            line += f' context="{sanitized}"'
+        line += "\n"
+
+        p = Path(audit_log_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        if not allow:
+            # Deny: sync write (blocking)
+            with open(p, "a") as f:
+                f.write(line)
+        else:
+            # Allow: async write (non-blocking) via thread
+            def _write() -> None:
+                try:
+                    with open(p, "a") as f:
+                        f.write(line)
+                except Exception:
+                    pass
+            threading.Thread(target=_write, daemon=True).start()
+    except Exception:
+        pass
 
 
 def _run_guardrail_sync(
@@ -285,6 +373,31 @@ class Evaluator:
         self._config = {}
         return self._config
 
+    def _resolved_config_path(self) -> Path | None:
+        if self.config_path and self.config_path.is_file():
+            return self.config_path
+        return find_config_path(self._framework)
+
+    def _audit_log(self, config: dict[str, Any], tool_name: str, pack_id: str, decision: Decision, context: dict[str, Any]) -> None:
+        """Best-effort audit log write. Never raises."""
+        try:
+            audit_log_path = _resolve_audit_log_path(config, self._resolved_config_path(), self._framework)
+            if not audit_log_path:
+                return
+            reasons = decision.get("reasons", [])
+            code = reasons[0].get("code") if reasons else None
+            _log_decision(
+                audit_log_path,
+                tool=tool_name,
+                allow=bool(decision.get("allow", False)),
+                policy_id=pack_id,
+                code=code,
+                agent_id=config.get("agent_id"),
+                context_summary=_extract_context_summary(context),
+            )
+        except Exception:
+            pass
+
     async def verify(
         self,
         passport: Passport,
@@ -326,7 +439,7 @@ class Evaluator:
                 except (OSError, json.JSONDecodeError):
                     passport_body = None
             if agent_id:
-                return await asyncio.to_thread(
+                decision = await asyncio.to_thread(
                     _call_api_sync,
                     api_url,
                     pack_id,
@@ -336,8 +449,10 @@ class Evaluator:
                     api_key=api_key,
                     verify_ssl=verify_ssl,
                 )
+                self._audit_log(config, tool_name, pack_id, decision, ctx)
+                return decision
             if passport_body:
-                return await asyncio.to_thread(
+                decision = await asyncio.to_thread(
                     _call_api_sync,
                     api_url,
                     pack_id,
@@ -347,28 +462,36 @@ class Evaluator:
                     api_key=api_key,
                     verify_ssl=verify_ssl,
                 )
+                self._audit_log(config, tool_name, pack_id, decision, ctx)
+                return decision
         # Local mode or fallback
         passport_path = _resolve_passport_path(config)
         guardrail_script = _get_guardrail_script_path(config)
         if not passport_path or not guardrail_script:
+            decision: Decision
             if _get_fail_open_when_missing_config(config):
-                return {"allow": True}
-            return {
-                "allow": False,
-                "reasons": [
-                    {
-                        "code": "oap.misconfigured",
-                        "message": "Passport or guardrail script not found; deny by default. Set fail_open_when_missing_config or APORT_FAIL_OPEN_WHEN_MISSING_CONFIG=1 for legacy behavior.",
-                    }
-                ],
-            }
-        return await asyncio.to_thread(
+                decision = {"allow": True}
+            else:
+                decision = {
+                    "allow": False,
+                    "reasons": [
+                        {
+                            "code": "oap.misconfigured",
+                            "message": "Passport or guardrail script not found; deny by default. Set fail_open_when_missing_config or APORT_FAIL_OPEN_WHEN_MISSING_CONFIG=1 for legacy behavior.",
+                        }
+                    ],
+                }
+            self._audit_log(config, tool_name, pack_id, decision, ctx)
+            return decision
+        decision = await asyncio.to_thread(
             _run_guardrail_sync,
             guardrail_script,
             passport_path,
             tool_name,
             ctx,
         )
+        self._audit_log(config, tool_name, pack_id, decision, ctx)
+        return decision
 
     def verify_sync(
         self,
@@ -408,30 +531,40 @@ class Evaluator:
                 except (OSError, json.JSONDecodeError):
                     passport_body = None
             if agent_id:
-                return _call_api_sync(
+                decision = _call_api_sync(
                     api_url, pack_id, ctx, agent_id=agent_id, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl
                 )
+                self._audit_log(config, tool_name, pack_id, decision, ctx)
+                return decision
             if passport_body:
-                return _call_api_sync(
+                decision = _call_api_sync(
                     api_url, pack_id, ctx, passport=passport_body, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl
                 )
+                self._audit_log(config, tool_name, pack_id, decision, ctx)
+                return decision
         passport_path = _resolve_passport_path(config)
         guardrail_script = _get_guardrail_script_path(config)
         if not passport_path or not guardrail_script:
+            decision: Decision
             if _get_fail_open_when_missing_config(config):
-                return {"allow": True}
-            return {
-                "allow": False,
-                "reasons": [
-                    {
-                        "code": "oap.misconfigured",
-                        "message": "Passport or guardrail script not found; deny by default. Set fail_open_when_missing_config or APORT_FAIL_OPEN_WHEN_MISSING_CONFIG=1 for legacy behavior.",
-                    }
-                ],
-            }
-        return _run_guardrail_sync(
+                decision = {"allow": True}
+            else:
+                decision = {
+                    "allow": False,
+                    "reasons": [
+                        {
+                            "code": "oap.misconfigured",
+                            "message": "Passport or guardrail script not found; deny by default. Set fail_open_when_missing_config or APORT_FAIL_OPEN_WHEN_MISSING_CONFIG=1 for legacy behavior.",
+                        }
+                    ],
+                }
+            self._audit_log(config, tool_name, pack_id, decision, ctx)
+            return decision
+        decision = _run_guardrail_sync(
             guardrail_script,
             passport_path,
             tool_name,
             ctx,
         )
+        self._audit_log(config, tool_name, pack_id, decision, ctx)
+        return decision

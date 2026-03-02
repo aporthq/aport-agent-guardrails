@@ -9,4 +9,6 @@ export { loadPassport, validatePassport } from './core/passport.js';
 export type { Passport } from './core/passport.js';
 export { loadConfig, writeConfig, findConfigPath } from './core/config.js';
 export type { Config } from './core/config.js';
+export { logDecision, resolveAuditLogPath, extractContextSummary } from './core/auditLogger.js';
+export type { AuditEntry } from './core/auditLogger.js';
 export { BaseAdapter } from './frameworks/base.js';
