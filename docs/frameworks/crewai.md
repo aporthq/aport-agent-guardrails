@@ -95,10 +95,15 @@ withAPortGuardrail(() => {
 });
 ```
 
+### How tool parameters are handled
+
+The Node middleware automatically spreads object tool inputs into the verification context. For example, `{ tool_input: { file_path: "/tmp/data.txt" } }` will pass `file_path` at the top level of the context, ensuring policies like `data.file.read.v1` receive required fields for validation.
+
 ## Config
 
 - **Config path:** `~/.aport/crewai/config.yaml`, or `.aport/config.yaml` in the project root.
 - **Mode:** `api` (default for production) or `local` (bash evaluator, no network). Same options as [LangChain](langchain.md) and OpenClaw.
+- **`fail_open_on_api_error`**: Set to `true` in config to allow tool execution when the APort API is unreachable (genuine policy denials are never overridden). Default: `false` (fail-closed).
 
 ## Suspend (kill switch)
 

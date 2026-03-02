@@ -58,10 +58,15 @@ const callback = new APortGuardrailCallback(); // optional: { configPath: '...',
 // On deny, the callback throws GuardrailViolationError.
 ```
 
+### How tool parameters are handled
+
+The Node middleware automatically parses JSON tool input and spreads parameters (e.g. `file_path`, `command`) into the verification context. This ensures policies like `data.file.read.v1` and `data.file.write.v1` receive the required `file_path` field at the top level for proper validation.
+
 ## Config
 
 - **Config:** `~/.aport/langchain/` or `.aport/config.yaml`
 - **Usage:** Add the callback to your agent (see above).
+- **`fail_open_on_api_error`**: Set to `true` in config to allow tool execution when the APort API is unreachable (genuine policy denials are never overridden). Default: `false` (fail-closed).
 
 ## Suspend (kill switch)
 
