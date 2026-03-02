@@ -119,11 +119,19 @@ if [ -n "$NON_INTERACTIVE" ]; then
     exec_cap=y
     msg_cap=y
     data_cap=n
+    file_read_cap=n
+    file_write_cap=n
+    web_fetch_cap=n
+    web_browser_cap=n
     max_pr_size=500
     max_prs_per_day=10
     max_msgs_per_day=100
     allowed_repos_input="*"
     exec_allow_scope="*"
+    file_read_paths="*"
+    file_write_paths="*"
+    web_fetch_domains="*"
+    web_browser_domains="*"
     should_expire=n
     never_expires="true"
     expires_at=""
@@ -187,7 +195,7 @@ else
     # Choose capabilities
     echo "  🔐 Capabilities"
     echo "  ───────────────"
-    echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes (matches README/docs); data export = no."
+    echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes (matches README/docs); others = no."
     echo ""
     read -p "  • Create and merge pull requests? [Y/n]: " pr_cap
     pr_cap=${pr_cap:-y}
@@ -197,6 +205,18 @@ else
 
     read -p "  • Send messages (email, SMS, etc.)? [Y/n]: " msg_cap
     msg_cap=${msg_cap:-y}
+
+    read -p "  • Read files from disk? [y/N]: " file_read_cap
+    file_read_cap=${file_read_cap:-n}
+
+    read -p "  • Write/edit files on disk? [y/N]: " file_write_cap
+    file_write_cap=${file_write_cap:-n}
+
+    read -p "  • Fetch data from web (HTTP requests)? [y/N]: " web_fetch_cap
+    web_fetch_cap=${web_fetch_cap:-n}
+
+    read -p "  • Automate web browser? [y/N]: " web_browser_cap
+    web_browser_cap=${web_browser_cap:-n}
 
     read -p "  • Export data (database, files, etc.)? [y/N]: " data_cap
     data_cap=${data_cap:-n}
@@ -228,6 +248,30 @@ else
     if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then
         read -p "  Max messages per day [100]: " max_msgs_per_day
         max_msgs_per_day=${max_msgs_per_day:-100}
+    fi
+
+    if [ "$file_read_cap" = "y" ] || [ "$file_read_cap" = "Y" ]; then
+        echo "  File read paths: default is allow any (*); sensitive patterns (.env, id_rsa, etc.) still blocked."
+        read -p "  Allowed paths (comma-separated, * for all) [*]: " file_read_paths
+        file_read_paths=${file_read_paths:-"*"}
+    fi
+
+    if [ "$file_write_cap" = "y" ] || [ "$file_write_cap" = "Y" ]; then
+        echo "  File write paths: default is allow any (*); recommend restricting to project directories."
+        read -p "  Allowed paths (comma-separated, * for all) [*]: " file_write_paths
+        file_write_paths=${file_write_paths:-"*"}
+    fi
+
+    if [ "$web_fetch_cap" = "y" ] || [ "$web_fetch_cap" = "Y" ]; then
+        echo "  Web fetch domains: default is allow any (*); private IPs (127.0.0.1, etc.) are blocked."
+        read -p "  Allowed domains (comma-separated, * for all) [*]: " web_fetch_domains
+        web_fetch_domains=${web_fetch_domains:-"*"}
+    fi
+
+    if [ "$web_browser_cap" = "y" ] || [ "$web_browser_cap" = "Y" ]; then
+        echo "  Browser automation domains: default is allow any (*)."
+        read -p "  Allowed domains (comma-separated, * for all) [*]: " web_browser_domains
+        web_browser_domains=${web_browser_domains:-"*"}
     fi
 
     if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
@@ -292,6 +336,18 @@ fi
 if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then
     capabilities_json="$capabilities_json{\"id\": \"messaging.send\"},"
 fi
+if [ "$file_read_cap" = "y" ] || [ "$file_read_cap" = "Y" ]; then
+    capabilities_json="$capabilities_json{\"id\": \"data.file.read\"},"
+fi
+if [ "$file_write_cap" = "y" ] || [ "$file_write_cap" = "Y" ]; then
+    capabilities_json="$capabilities_json{\"id\": \"data.file.write\"},"
+fi
+if [ "$web_fetch_cap" = "y" ] || [ "$web_fetch_cap" = "Y" ]; then
+    capabilities_json="$capabilities_json{\"id\": \"web.fetch\"},"
+fi
+if [ "$web_browser_cap" = "y" ] || [ "$web_browser_cap" = "Y" ]; then
+    capabilities_json="$capabilities_json{\"id\": \"web.browser\"},"
+fi
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
     capabilities_json="$capabilities_json{\"id\": \"data.export\"},"
 fi
@@ -328,6 +384,54 @@ fi
 if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then
     # API/verifier expect flat keys at top level of limits (not nested under messaging.message.send)
     limits_json="$limits_json\"msgs_per_min\": 5, \"msgs_per_day\": $max_msgs_per_day, \"allowed_recipients\": [\"*\"], \"approval_required\": false,"
+fi
+
+if [ "$file_read_cap" = "y" ] || [ "$file_read_cap" = "Y" ]; then
+    # Parse allowed paths
+    IFS=',' read -ra PATHS <<< "$file_read_paths"
+    allowed_paths_json="["
+    for path in "${PATHS[@]}"; do
+        path=$(echo "$path" | xargs) # trim whitespace
+        allowed_paths_json="$allowed_paths_json\"$path\","
+    done
+    allowed_paths_json="${allowed_paths_json%,}]"
+    limits_json="$limits_json\"data.file.read\": {\"allowed_paths\": $allowed_paths_json, \"max_file_size_mb\": 100},"
+fi
+
+if [ "$file_write_cap" = "y" ] || [ "$file_write_cap" = "Y" ]; then
+    # Parse allowed paths
+    IFS=',' read -ra PATHS <<< "$file_write_paths"
+    allowed_paths_json="["
+    for path in "${PATHS[@]}"; do
+        path=$(echo "$path" | xargs) # trim whitespace
+        allowed_paths_json="$allowed_paths_json\"$path\","
+    done
+    allowed_paths_json="${allowed_paths_json%,}]"
+    limits_json="$limits_json\"data.file.write\": {\"allowed_paths\": $allowed_paths_json, \"max_file_size_mb\": 50},"
+fi
+
+if [ "$web_fetch_cap" = "y" ] || [ "$web_fetch_cap" = "Y" ]; then
+    # Parse allowed domains
+    IFS=',' read -ra DOMAINS <<< "$web_fetch_domains"
+    allowed_domains_json="["
+    for domain in "${DOMAINS[@]}"; do
+        domain=$(echo "$domain" | xargs) # trim whitespace
+        allowed_domains_json="$allowed_domains_json\"$domain\","
+    done
+    allowed_domains_json="${allowed_domains_json%,}]"
+    limits_json="$limits_json\"web.fetch\": {\"allowed_domains\": $allowed_domains_json, \"blocked_domains\": [], \"max_requests_per_min\": 60},"
+fi
+
+if [ "$web_browser_cap" = "y" ] || [ "$web_browser_cap" = "Y" ]; then
+    # Parse allowed domains
+    IFS=',' read -ra DOMAINS <<< "$web_browser_domains"
+    allowed_domains_json="["
+    for domain in "${DOMAINS[@]}"; do
+        domain=$(echo "$domain" | xargs) # trim whitespace
+        allowed_domains_json="$allowed_domains_json\"$domain\","
+    done
+    allowed_domains_json="${allowed_domains_json%,}]"
+    limits_json="$limits_json\"web.browser\": {\"allowed_domains\": $allowed_domains_json, \"max_screenshots_per_hour\": 100},"
 fi
 
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then

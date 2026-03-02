@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# Test web.fetch and web.browser capabilities with local and API mode
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+echo "🧪 Testing Web Fetch & Browser Capabilities"
+echo "============================================"
+echo ""
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+pass_count=0
+fail_count=0
+
+function test_pass() {
+    echo -e "${GREEN}✓ PASS:${NC} $1"
+    ((pass_count++))
+}
+
+function test_fail() {
+    echo -e "${RED}✗ FAIL:${NC} $1"
+    ((fail_count++))
+}
+
+function test_section() {
+    echo ""
+    echo -e "${YELLOW}═══ $1 ═══${NC}"
+    echo ""
+}
+
+# Create test passport with web capabilities
+TEST_PASSPORT_FILE="/tmp/test-web-passport-$$.json"
+cat > "$TEST_PASSPORT_FILE" << 'EOF'
+{
+  "passport_id": "test-web-caps",
+  "agent_id": "test-web-caps",
+  "kind": "template",
+  "spec_version": "oap/1.0",
+  "owner_id": "test@aport.io",
+  "owner_type": "user",
+  "assurance_level": "L0",
+  "status": "active",
+  "capabilities": [
+    {"id": "web.fetch"},
+    {"id": "web.browser"}
+  ],
+  "limits": {
+    "web.fetch": {
+      "allowed_domains": ["api.github.com", "example.com", "*"],
+      "blocked_domains": ["malicious.com"],
+      "max_requests_per_min": 60
+    },
+    "web.browser": {
+      "allowed_domains": ["example.com", "*"],
+      "max_screenshots_per_hour": 100,
+      "allowed_actions": ["navigate", "click", "type", "screenshot"]
+    }
+  },
+  "regions": ["US"],
+  "metadata": {
+    "name": "Web Capabilities Test Agent",
+    "version": "1.0.0"
+  },
+  "never_expires": true,
+  "created_at": "2026-03-01T00:00:00Z",
+  "updated_at": "2026-03-01T00:00:00Z",
+  "version": "1.0.0"
+}
+EOF
+
+test_section "Local Mode - Web Fetch"
+
+# Set passport file for guardrail script
+export OPENCLAW_PASSPORT_FILE="$TEST_PASSPORT_FILE"
+
+# Test 1: Allowed domain should succeed
+result=$("$ROOT_DIR/bin/aport-guardrail-bash.sh" web_fetch "{\"url\": \"https://api.github.com/users/github\"}"  < /dev/null 2>&1)
+if echo "$result" | grep -q '"allow": *true'; then
+    test_pass "Fetch from allowed domain (api.github.com)"
+else
+    test_fail "Fetch from allowed domain - Expected allow, got deny"
+fi
+
+# Test 2: Blocked domain should fail
+result=$("$ROOT_DIR/bin/aport-guardrail-bash.sh" web_fetch "{\"url\": \"https://malicious.com/data\"}"  < /dev/null 2>&1)
+if echo "$result" | grep -q '"allow": *false'; then
+    test_pass "Fetch from blocked domain denied"
+else
+    test_fail "Fetch from blocked domain - Expected deny, got allow"
+fi
+
+# Test 3: Private IP (SSRF protection) should be blocked
+result=$("$ROOT_DIR/bin/aport-guardrail-bash.sh" web_fetch "{\"url\": \"http://127.0.0.1:8080/admin\"}"  < /dev/null 2>&1)
+if echo "$result" | grep -q '"allow": *false'; then
+    test_pass "SSRF protection: Private IP (127.0.0.1) blocked"
+else
+    test_fail "SSRF protection - Expected deny for 127.0.0.1"
+fi
+
+# Test 4: Private network (10.0.0.0/8) should be blocked
+result=$("$ROOT_DIR/bin/aport-guardrail-bash.sh" web_fetch "{\"url\": \"http://10.0.0.1/internal\"}"  < /dev/null 2>&1)
+if echo "$result" | grep -q '"allow": *false'; then
+    test_pass "SSRF protection: Private network (10.0.0.1) blocked"
+else
+    test_fail "SSRF protection - Expected deny for 10.0.0.1"
+fi
+
+# Test 5: web_search should map to web.fetch
+result=$("$ROOT_DIR/bin/aport-guardrail-bash.sh" web_search "{\"query\": \"test\", \"url\": \"https://example.com\"}"  < /dev/null 2>&1)
+if echo "$result" | grep -q '"allow": *true'; then
+    test_pass "web_search mapped to web.fetch policy correctly"
+else
+    test_fail "web_search mapping - Expected allow"
+fi
+
+test_section "Local Mode - Web Browser"
+
+# Test 6: Allowed browser action
+result=$("$ROOT_DIR/bin/aport-guardrail-bash.sh" browser "{\"url\": \"https://example.com\", \"action\": \"navigate\"}"  < /dev/null 2>&1)
+if echo "$result" | grep -q '"allow": *true'; then
+    test_pass "Browser navigate to allowed domain"
+else
+    test_fail "Browser navigate - Expected allow, got deny"
+fi
+
+# Test 7: Screenshot action
+result=$("$ROOT_DIR/bin/aport-guardrail-bash.sh" browser "{\"url\": \"https://example.com\", \"action\": \"screenshot\"}"  < /dev/null 2>&1)
+if echo "$result" | grep -q '"allow": *true'; then
+    test_pass "Browser screenshot allowed"
+else
+    test_fail "Browser screenshot - Expected allow, got deny"
+fi
+
+test_section "API Mode - Web Fetch & Browser"
+
+# Check if API is running
+if ! curl -s "http://localhost:8787/health" > /dev/null 2>&1; then
+    echo -e "${YELLOW}⚠ API not running at http://localhost:8787, skipping API tests${NC}"
+else
+    # Test 8: API mode - web fetch allowed domain
+    result=$(curl -s -X POST "http://localhost:8787/api/verify/policy/web.fetch.v1" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"passport\": $(cat "$TEST_PASSPORT_FILE"),
+            \"context\": {
+                \"url\": \"https://api.github.com/repos/aporthq/aport-agent-guardrails\"
+            }
+        }"  < /dev/null 2>&1)
+
+    if echo "$result" | jq -e '.decision.allow == true' > /dev/null 2>&1; then
+        test_pass "API: Fetch from allowed domain"
+    else
+        test_fail "API: Fetch from allowed domain - Expected allow"
+    fi
+
+    # Test 9: API mode - web fetch SSRF protection
+    result=$(curl -s -X POST "http://localhost:8787/api/verify/policy/web.fetch.v1" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"passport\": $(cat "$TEST_PASSPORT_FILE"),
+            \"context\": {
+                \"url\": \"http://127.0.0.1:8787/admin\"
+            }
+        }"  < /dev/null 2>&1)
+
+    if echo "$result" | jq -e '.decision.allow == false' > /dev/null 2>&1; then
+        test_pass "API: SSRF protection for 127.0.0.1"
+    else
+        test_fail "API: SSRF protection - Expected deny for localhost"
+    fi
+
+    # Test 10: API mode - web fetch blocked domain
+    result=$(curl -s -X POST "http://localhost:8787/api/verify/policy/web.fetch.v1" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"passport\": $(cat "$TEST_PASSPORT_FILE"),
+            \"context\": {
+                \"url\": \"https://malicious.com/steal-data\"
+            }
+        }"  < /dev/null 2>&1)
+
+    if echo "$result" | jq -e '.decision.allow == false' > /dev/null 2>&1; then
+        test_pass "API: Blocked domain denied"
+    else
+        test_fail "API: Blocked domain - Expected deny"
+    fi
+
+    # Test 11: API mode - browser allowed action
+    result=$(curl -s -X POST "http://localhost:8787/api/verify/policy/web.browser.v1" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"passport\": $(cat "$TEST_PASSPORT_FILE"),
+            \"context\": {
+                \"url\": \"https://example.com\",
+                \"action\": \"navigate\"
+            }
+        }"  < /dev/null 2>&1)
+
+    if echo "$result" | jq -e '.decision.allow == true' > /dev/null 2>&1; then
+        test_pass "API: Browser navigate allowed"
+    else
+        test_fail "API: Browser navigate - Expected allow"
+    fi
+
+    # Test 12: API mode - private network check (192.168.x.x)
+    result=$(curl -s -X POST "http://localhost:8787/api/verify/policy/web.fetch.v1" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"passport\": $(cat "$TEST_PASSPORT_FILE"),
+            \"context\": {
+                \"url\": \"http://192.168.1.1/router\"
+            }
+        }"  < /dev/null 2>&1)
+
+    if echo "$result" | jq -e '.decision.allow == false' > /dev/null 2>&1; then
+        test_pass "API: SSRF protection for 192.168.1.1"
+    else
+        test_fail "API: SSRF protection - Expected deny for 192.168.1.1"
+    fi
+fi
+
+# Cleanup
+rm -f "$TEST_PASSPORT_FILE"
+
+echo ""
+echo "============================================"
+echo -e "Test Results: ${GREEN}$pass_count passed${NC}, ${RED}$fail_count failed${NC}"
+echo "============================================"
+
+if [ $fail_count -gt 0 ]; then
+    exit 1
+fi

@@ -3,7 +3,7 @@ aport_guardrails — Core evaluator, passport, and config for APort agent guardr
 Shared across Python framework adapters (LangChain, CrewAI, AutoGen).
 """
 
-__version__ = "1.0.8"
+__version__ = "1.0.11"
 
 from aport_guardrails.core.evaluator import Evaluator, Decision, ToolContext
 from aport_guardrails.core.passport import load_passport, validate_passport

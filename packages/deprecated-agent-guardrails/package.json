@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/agent-guardrails",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "[DEPRECATED] Use @aporthq/aport-agent-guardrails instead. This package has been renamed for better SEO.",
   "deprecated": "This package has been renamed to @aporthq/aport-agent-guardrails. Please update your dependencies: npm install @aporthq/aport-agent-guardrails",
   "main": "index.js",

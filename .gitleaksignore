@@ -1,19 +1,7 @@
-# Gitleaks ignore file
-# False positives and test fixtures
+# False positives - code comments and documentation
 
-# Test fixtures with dummy keys (not real secrets)
-tests/fixtures/dummy-passport.json:*
-tests/fixtures/test-api-key.txt:*
-tests/**/*test*.json:*
+# Line 311: Comment explaining Bearer token regex pattern (not actual token)
+python/aport_guardrails/core/validation.py:bearer-token:311
 
-# Example documentation with placeholder keys
-docs/examples/example-config.yaml:APORT_API_KEY
-docs/**/*.md:aprt_example
-docs/**/*.md:sk_test
-
-# Development environment examples
-.env.example:*
-.env.sample:*
-
-# Specific line ignores (format: file:line:rule)
-# Add entries here for known false positives
+# Line 29: Documentation text about "secret exfiltration" (not actual secret)
+docs/APORT_AGENT_GUARDRAILS_NAMING.md:generic-secret:29

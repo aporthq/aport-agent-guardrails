@@ -27,11 +27,17 @@ Per the **Open Agent Passport (OAP) spec**, the passport has a **limits** object
 
 ---
 
-## read, write, and other unmapped tools
+## read, write, and file operations (NOW PROTECTED)
 
-- **read**, **write**, **edit**, **apply_patch**, **browser**, **cron**, **gateway**, **sessions_***, **nodes**, **image**, **web_search**, **web_fetch** are **not** mapped to any APort policy in this plugin. They are **unmapped** and **allowed** by default (when `allowUnmappedTools: true`). So **read is enabled** by default: the plugin sees no policy for `read`, returns allow, and OpenClaw runs the read tool.
-- A failure like **read failed: ENOENT: no such file or directory** is the **tool** failing (e.g. wrong path or missing file, such as `config.json` when the app uses `config.yaml`), not the guardrail blocking. The guardrail already allowed the call; the error happens when the tool executes.
-- To enforce policy on file access you would add a new policy (e.g. **file.read.v1**) and map **read** to it in the plugin, with passport limits (e.g. **allowed_paths**). That is not implemented today.
+- **read** and **write** are **now mapped** to APort policies:
+  - **read** → `data.file.read.v1` (enforces path allowlists, blocked patterns for SSH keys/credentials/.env)
+  - **write** → `data.file.write.v1` (enforces path allowlists, blocks system directories, optional extension restrictions)
+- Configure passport limits for file operations:
+  - `limits.data.file.read.allowed_paths` - Array of allowed path prefixes (e.g. `["/tmp/*", "/home/user/projects/*"]`)
+  - `limits.data.file.read.blocked_patterns` - Array of patterns to block (e.g. `["**/.ssh/**", "**/.env"]`)
+  - `limits.data.file.write.allowed_paths` - Array of allowed write paths
+  - `limits.data.file.write.blocked_paths` - Array of system directories to block (e.g. `["/etc/**", "/bin/**"]`)
+- Other tools like **edit**, **apply_patch**, **browser**, **cron**, **gateway**, **sessions_***, **nodes**, **image**, **web_search**, **web_fetch** remain **unmapped** and **allowed** by default (when `allowUnmappedTools: true`).
 
 ---
 
@@ -42,8 +48,10 @@ Per the **Open Agent Passport (OAP) spec**, the passport has a **limits** object
 | exec                     | system.command.execute.v1 | limits.system.command.execute            |
 | message, messaging.*     | messaging.message.send.v1 | limits.messaging                         |
 | git.*                    | code.repository.merge.v1  | limits.code.repository.merge             |
+| read                     | data.file.read.v1         | limits.data.file.read                    |
+| write                    | data.file.write.v1        | limits.data.file.write                   |
 | mcp.*                    | mcp.tool.execute.v1       | (API / MCP limits)                       |
-| read, write, edit, etc.  | *(none)*                  | *(unmapped, allowed by default)*         |
+| edit, browser, etc.      | *(none)*                  | *(unmapped, allowed by default)*         |
 
 ---
 
