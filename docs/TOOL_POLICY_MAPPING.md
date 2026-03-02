@@ -11,6 +11,8 @@ This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guard
 | `git.create_pr`, `git.merge`, `git.push`, `git.*` | `code.repository.merge.v1` | `external/aport-policies/code.repository.merge.v1/` |
 | `exec.run`, `exec.*`, `system.command.*`, `system.*` | `system.command.execute.v1` | `local-overrides` or API |
 | `message.send`, `message.*`, `messaging.*` | `messaging.message.send.v1` | `external/aport-policies/messaging.message.send.v1/` |
+| `read`, `file.read`, `data.file.read` | `data.file.read.v1` | API / evaluator |
+| `write`, `file.write`, `data.file.write` | `data.file.write.v1` | API / evaluator |
 | `mcp.tool.*`, `mcp.*` | `mcp.tool.execute.v1` | API / evaluator |
 | `agent.session.*`, `session.create`, `session.*` | `agent.session.create.v1` | API / evaluator |
 | `agent.tool.*`, `tool.register`, `tool.*` | `agent.tool.register.v1` | API / evaluator |
