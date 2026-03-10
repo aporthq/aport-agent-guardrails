@@ -38,11 +38,29 @@ from autogen_adapter._utils import raise_if_denied
 logger = logging.getLogger(__name__)
 
 # Module-level cached evaluator (lazy-init, shared across tools in process).
+# This singleton is used by all hooks that don't specify an explicit config_path.
+# First call wins: subsequent calls with a different config_path will NOT override
+# the singleton — use APortGuardedTool(inner, config_path=...) to get a separate
+# evaluator for that tool only.
 _autogen_evaluator: Evaluator | None = None
 
 
 def _get_evaluator(config_path: str | None = None) -> Evaluator:
-    """Return the module-level Evaluator, creating it on first call."""
+    """
+    Return the module-level Evaluator, creating it on first call.
+
+    Args:
+        config_path: Optional explicit path to a config YAML file.
+                     Passed only during first-call initialisation; ignored if
+                     the singleton is already created.  Pass ``None`` to use
+                     auto-detected config.
+
+    Note:
+        The singleton is process-scoped.  If two callers pass different
+        ``config_path`` values in the same process, the **first** call's path
+        wins.  To use a non-default config for a specific tool, create a
+        dedicated ``Evaluator`` instance rather than relying on this singleton.
+    """
     global _autogen_evaluator
     if _autogen_evaluator is None:
         _autogen_evaluator = Evaluator(
@@ -50,6 +68,20 @@ def _get_evaluator(config_path: str | None = None) -> Evaluator:
             framework="autogen",
         )
     return _autogen_evaluator
+
+
+def _make_evaluator(config_path: str | None) -> Evaluator:
+    """
+    Return an Evaluator for the given config_path.
+
+    - If ``config_path`` is None → return the shared module-level singleton.
+    - If ``config_path`` is explicitly provided → create a *dedicated* Evaluator
+      so that callers with custom config paths are not subject to the singleton's
+      first-call-wins semantics.
+    """
+    if config_path is None:
+        return _get_evaluator()
+    return Evaluator(config_path=config_path, framework="autogen")
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +100,11 @@ class APortGuardedTool:
     satisfies the AutoGen BaseTool duck-type (``name``, ``description``,
     ``schema``, async ``run_json``) is accepted.
 
+    Config:
+        If ``config_path`` is ``None`` (default), the process-level shared
+        Evaluator is used.  If ``config_path`` is provided, a dedicated Evaluator
+        is created for this tool only (avoids singleton first-call-wins hazard).
+
     Example (AutoGen 0.4.x)::
 
         from autogen_core.tools import FunctionTool
@@ -82,7 +119,8 @@ class APortGuardedTool:
 
     def __init__(self, inner_tool: Any, config_path: str | None = None) -> None:
         self._inner = inner_tool
-        self._evaluator = _get_evaluator(config_path)
+        # Use dedicated evaluator when config_path is given; shared singleton otherwise.
+        self._evaluator = _make_evaluator(config_path)
 
     # ------------------------------------------------------------------ #
     # Forward attribute access / property proxying to inner tool          #
@@ -120,7 +158,7 @@ class APortGuardedTool:
         """
         APort-guarded ``run_json``:
         1. Build tool context from args.
-        2. Verify with APort evaluator.
+        2. Verify with APort evaluator (async — non-blocking).
         3. Raise ``GuardrailViolation`` on deny.
         4. Delegate to inner tool on allow.
         """
@@ -138,7 +176,12 @@ class APortGuardedTool:
 
         if cancellation_token is not None:
             return await self._inner.run_json(args, cancellation_token)
-        return await self._inner.run_json(args)
+        # Inner tool may or may not accept cancellation_token
+        try:
+            return await self._inner.run_json(args)
+        except AttributeError:
+            # Fallback: inner has no run_json, delegate to run
+            return await self._inner.run(args)
 
     async def run(self, args: Any, cancellation_token: Any = None) -> Any:
         """
@@ -181,18 +224,21 @@ def _make_guarded_callable(
     evaluator: Evaluator,
 ) -> Callable[..., Any]:
     """
-    Return a wrapper around *fn* that calls ``evaluator.verify_sync`` first.
+    Return a wrapper around *fn* that calls the APort evaluator first.
     Used to patch ``agent.function_map`` for AutoGen 0.2.x.
 
     Supports both sync and async callables:
     - Sync fn → sync wrapper (standard 0.2.x use case).
-    - Async fn → async wrapper with proper await (edge case, supported).
+    - Async fn → async wrapper with ``await evaluator.verify()`` (avoids blocking
+      the event loop), plus a ``warnings.warn()`` since 0.2.x function_map is
+      typically sync.
     """
     if asyncio.iscoroutinefunction(fn):
         warnings.warn(
             f"wrap_agent_tools: tool '{tool_name}' is an async function registered in "
             "function_map. AutoGen 0.2.x function_map is typically sync. "
-            "An async wrapper will be used; ensure your agent runtime awaits it.",
+            "An async wrapper will be used; ensure your agent runtime awaits it. "
+            "Note: APort policy verification is async and non-blocking in this wrapper.",
             stacklevel=3,
         )
 
@@ -206,7 +252,8 @@ def _make_guarded_callable(
             tool_ctx = build_tool_context(tool_name, input_str)
             pack_id = tool_to_pack_id(tool_name)
 
-            decision = evaluator.verify_sync(
+            # Use async verify to avoid blocking the event loop
+            decision = await evaluator.verify(
                 {},
                 {"capability": pack_id},
                 tool_ctx,
@@ -263,7 +310,8 @@ def wrap_agent_tools(
             "Expected an AutoGen 0.2.x ConversableAgent subclass."
         )
 
-    evaluator = _get_evaluator(config_path)
+    # Use dedicated evaluator when config_path given; shared singleton otherwise.
+    evaluator = _make_evaluator(config_path)
     guarded_map: dict[str, Callable[..., Any]] = {}
     for name, fn in agent.function_map.items():
         guarded_map[name] = _make_guarded_callable(fn, name, evaluator)

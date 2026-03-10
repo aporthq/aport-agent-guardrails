@@ -22,7 +22,9 @@ def raise_if_denied(decision: dict) -> None:
     """
     if decision.get("allow", False):
         return
+    # ``or [{}]`` guarantees reasons is non-empty; ``reason`` is always a dict.
     reasons = decision.get("reasons") or [{}]
-    msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
-    code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
+    reason = reasons[0]
+    msg = reason.get("message") or "APort denied"
+    code = reason.get("code") or "oap.denied"
     raise GuardrailViolation(msg, code=code, reasons=reasons)

@@ -286,9 +286,10 @@ class TestWrapAgentTools:
     async def test_async_function_in_function_map_warns_and_works(
         self, mock_evaluator_cls: MagicMock
     ) -> None:
-        """Async function in function_map triggers a warning and still executes."""
+        """Async function in function_map triggers a warning and uses await evaluator.verify()."""
         hook_module._autogen_evaluator = None
-        mock_evaluator_cls.return_value.verify_sync.return_value = {"allow": True}
+        mock_evaluator_cls.return_value.verify = AsyncMock(return_value={"allow": True})
+        mock_evaluator_cls.return_value.verify_sync = MagicMock(return_value={"allow": True})
 
         async def async_search(query: str) -> str:
             return f"async results: {query}"
@@ -298,9 +299,42 @@ class TestWrapAgentTools:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             wrap_agent_tools(agent)
-            # Warning should have been issued during wrapping of async function
             assert any("async" in str(warning.message).lower() for warning in w)
 
-        # The async wrapper should be awaitable and return the correct result
         result = await agent.function_map["async_search"](query="test")
         assert result == "async results: test"
+
+        # Async wrapper uses await evaluator.verify() (not blocking verify_sync)
+        mock_evaluator_cls.return_value.verify.assert_called_once()
+        mock_evaluator_cls.return_value.verify_sync.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _make_evaluator — config_path semantics
+# ---------------------------------------------------------------------------
+
+
+class TestMakeEvaluator:
+    """Tests for _make_evaluator singleton vs dedicated evaluator logic."""
+
+    @patch("autogen_adapter.hook.Evaluator")
+    def test_none_config_path_uses_singleton(self, mock_evaluator_cls: MagicMock) -> None:
+        """_make_evaluator(None) returns and reuses the module-level singleton."""
+        hook_module._autogen_evaluator = None
+        from autogen_adapter.hook import _make_evaluator
+
+        e1 = _make_evaluator(None)
+        e2 = _make_evaluator(None)
+        assert e1 is e2
+        assert mock_evaluator_cls.call_count == 1  # created once
+
+    @patch("autogen_adapter.hook.Evaluator")
+    def test_explicit_config_path_creates_dedicated(self, mock_evaluator_cls: MagicMock) -> None:
+        """_make_evaluator('/path') creates a dedicated Evaluator, not the singleton."""
+        hook_module._autogen_evaluator = None
+        from autogen_adapter.hook import _make_evaluator
+
+        e1 = _make_evaluator("/custom/config.yaml")
+        e2 = _make_evaluator(None)
+        assert mock_evaluator_cls.call_count == 2  # two separate instances
+        assert hook_module._autogen_evaluator is e2  # singleton is the None-path one
