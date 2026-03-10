@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aport-agent-guardrails-autogen"
+version = "1.0.12"
+description = "APort Agent Guardrail for AutoGen 0.4.x / 0.2.x — APortGuardedTool and wrap_agent_tools for AI agent pre-action authorization"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "APort Technologies Inc.", email = "team@aport.io" }]
+keywords = [
+    "aport",
+    "agent guardrail",
+    "LLM guardrail",
+    "autogen",
+    "autogen-agentchat",
+    "autogen-core",
+    "pyautogen",
+    "guardrails",
+    "agent",
+    "AI agent",
+    "pre-action authorization",
+    "OAP",
+]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "aport-agent-guardrails",
+]
+
+[project.optional-dependencies]
+autogen4 = ["autogen-agentchat>=0.4.0", "autogen-core>=0.4.0"]
+autogen2 = ["pyautogen>=0.2.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+
+[project.scripts]
+aport-autogen = "aport_guardrails_autogen.cli:main"
+
+[project.urls]
+Homepage = "https://aport.io"
+Documentation = "https://github.com/aporthq/agent-guardrails/blob/main/docs/frameworks/autogen.md"
+Repository = "https://github.com/aporthq/agent-guardrails"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["autogen_adapter*", "aport_guardrails_autogen*"]

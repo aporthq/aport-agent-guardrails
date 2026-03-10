@@ -1,0 +1,38 @@
+"""
+Minimal APort + AutoGen 0.4.x example.
+
+Prerequisites:
+    pip install aport-agent-guardrails-autogen[autogen4]
+    aport-autogen  # passport wizard
+"""
+
+# AutoGen 0.4.x: wrap a FunctionTool
+from autogen_core.tools import FunctionTool
+from autogen_agentchat.agents import AssistantAgent
+from aport_guardrails_autogen import APortGuardedTool, GuardrailViolation
+
+
+async def send_email(recipient: str, body: str) -> str:
+    """Send an email to the recipient."""
+    print(f"Sending email to {recipient}: {body}")
+    return "sent"
+
+
+# 1. Create the FunctionTool
+email_tool = FunctionTool(send_email, description="Send an email")
+
+# 2. Wrap with APort guardrails
+guarded_email_tool = APortGuardedTool(email_tool)
+
+# 3. Pass to agent — APort verifies each call before send_email runs
+agent = AssistantAgent(
+    "EmailAgent",
+    model_client=None,  # replace with your model client
+    tools=[guarded_email_tool],
+)
+
+# Tool calls that violate policy raise GuardrailViolation before executing:
+# try:
+#     await guarded_email_tool.run_json({"recipient": "...", "body": "..."})
+# except GuardrailViolation as e:
+#     print(f"APort denied: {e.code} — {e}")

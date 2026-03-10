@@ -1,0 +1,36 @@
+{
+  "name": "@aporthq/aport-agent-guardrails-autogen",
+  "version": "1.0.12",
+  "description": "APort guardrails for AutoGen-compatible agents — APortGuardedTool and guardFunction for pre-action authorization",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "jest"
+  },
+  "keywords": [
+    "aport",
+    "autogen",
+    "guardrails",
+    "agent",
+    "AI agent",
+    "pre-action authorization",
+    "OAP"
+  ],
+  "author": "APort Technologies Inc.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aporthq/aport-agent-guardrails-core": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
