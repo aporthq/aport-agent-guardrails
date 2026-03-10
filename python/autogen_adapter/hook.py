@@ -180,7 +180,10 @@ class APortGuardedTool:
         try:
             return await self._inner.run_json(args)
         except AttributeError:
-            # Fallback: inner has no run_json, delegate to run
+            # Fallback: inner tool has no run_json method, delegate to run.
+            # Note: if inner.run_json EXISTS but internally raises AttributeError,
+            # this will silently fall through to run().  That edge case is unlikely
+            # with well-behaved AutoGen tools but worth noting for future hardening.
             return await self._inner.run(args)
 
     async def run(self, args: Any, cancellation_token: Any = None) -> Any:
@@ -239,7 +242,7 @@ def _make_guarded_callable(
             "function_map. AutoGen 0.2.x function_map is typically sync. "
             "An async wrapper will be used; ensure your agent runtime awaits it. "
             "Note: APort policy verification is async and non-blocking in this wrapper.",
-            stacklevel=3,
+            stacklevel=2,  # points to the wrap_agent_tools(...) call site
         )
 
         @functools.wraps(fn)
