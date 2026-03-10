@@ -1,22 +1,14 @@
-"""Unit tests for with_aport_guardrail decorator (async and sync functions)."""
+"""Unit tests for with_aport_guardrail decorator (async and sync functions).
+
+Note: decorator.py uses _get_evaluator() from hook.py (shared singleton), so
+tests patch autogen_adapter.hook.Evaluator to control the evaluator instance.
+"""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from autogen_adapter import decorator as decorator_module
+from autogen_adapter import hook as hook_module
 from autogen_adapter.decorator import with_aport_guardrail
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _reset_evaluator(mock_cls: MagicMock) -> None:
-    """Clear the per-decorator evaluator cache so the mock is used on next call."""
-    # The decorator holds evaluator in a closure list; we patch Evaluator at
-    # module level so the next function call creates a fresh instance.
-    pass  # Patching at module level is sufficient since closures call Evaluator() lazily.
 
 
 # ---------------------------------------------------------------------------
@@ -28,9 +20,10 @@ class TestWithAportGuardrailAsync:
     """Tests for @with_aport_guardrail on async (coroutine) functions."""
 
     @pytest.mark.asyncio
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     async def test_allow_executes_async_fn(self, mock_evaluator_cls: MagicMock) -> None:
         """When evaluator allows, async function executes and returns its value."""
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify = AsyncMock(return_value={"allow": True})
 
         @with_aport_guardrail
@@ -42,11 +35,12 @@ class TestWithAportGuardrailAsync:
         mock_evaluator_cls.return_value.verify.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     async def test_deny_raises_async(self, mock_evaluator_cls: MagicMock) -> None:
         """When evaluator denies, async function raises GuardrailViolation."""
         from aport_guardrails.core import GuardrailViolation
 
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify = AsyncMock(
             return_value={
                 "allow": False,
@@ -65,9 +59,10 @@ class TestWithAportGuardrailAsync:
         assert "blocked" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     async def test_context_uses_function_name_async(self, mock_evaluator_cls: MagicMock) -> None:
         """Tool context uses the decorated function name."""
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify = AsyncMock(return_value={"allow": True})
 
         @with_aport_guardrail
@@ -81,9 +76,10 @@ class TestWithAportGuardrailAsync:
         assert context.get("tool") == "call_external_api"
 
     @pytest.mark.asyncio
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     async def test_wrapped_async_preserves_name(self, mock_evaluator_cls: MagicMock) -> None:
         """functools.wraps: wrapped function retains original __name__."""
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify = AsyncMock(return_value={"allow": True})
 
         @with_aport_guardrail
@@ -101,9 +97,10 @@ class TestWithAportGuardrailAsync:
 class TestWithAportGuardrailSync:
     """Tests for @with_aport_guardrail on plain (sync) functions."""
 
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     def test_allow_executes_sync_fn(self, mock_evaluator_cls: MagicMock) -> None:
         """When evaluator allows, sync function executes and returns its value."""
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify_sync.return_value = {"allow": True}
 
         @with_aport_guardrail
@@ -114,11 +111,12 @@ class TestWithAportGuardrailSync:
         assert result == "rows: SELECT 1"
         mock_evaluator_cls.return_value.verify_sync.assert_called_once()
 
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     def test_deny_raises_sync(self, mock_evaluator_cls: MagicMock) -> None:
         """When evaluator denies, sync function raises GuardrailViolation."""
         from aport_guardrails.core import GuardrailViolation
 
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify_sync.return_value = {
             "allow": False,
             "reasons": [{"code": "oap.sql_denied", "message": "SQL execution blocked"}],
@@ -134,9 +132,10 @@ class TestWithAportGuardrailSync:
         assert exc_info.value.code == "oap.sql_denied"
         assert "blocked" in str(exc_info.value)
 
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     def test_context_uses_function_name_sync(self, mock_evaluator_cls: MagicMock) -> None:
         """Tool context uses the decorated function name (sync path)."""
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify_sync.return_value = {"allow": True}
 
         @with_aport_guardrail
@@ -149,9 +148,10 @@ class TestWithAportGuardrailSync:
         context = call_args[2]
         assert context.get("tool") == "write_file"
 
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     def test_wrapped_sync_preserves_name(self, mock_evaluator_cls: MagicMock) -> None:
         """functools.wraps: wrapped sync function retains original __name__."""
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify_sync.return_value = {"allow": True}
 
         @with_aport_guardrail
@@ -161,11 +161,12 @@ class TestWithAportGuardrailSync:
         assert my_sync_tool.__name__ == "my_sync_tool"
 
     @pytest.mark.asyncio
-    @patch("autogen_adapter.decorator.Evaluator")
+    @patch("autogen_adapter.hook.Evaluator")
     async def test_async_flag_detection(self, mock_evaluator_cls: MagicMock) -> None:
         """Async functions get async wrappers; sync functions get sync wrappers."""
         import asyncio
 
+        hook_module._autogen_evaluator = None
         mock_evaluator_cls.return_value.verify = AsyncMock(return_value={"allow": True})
         mock_evaluator_cls.return_value.verify_sync.return_value = {"allow": True}
 
@@ -182,3 +183,21 @@ class TestWithAportGuardrailSync:
 
         assert await async_fn() == "async"
         assert sync_fn() == "sync"
+
+    @patch("autogen_adapter.hook.Evaluator")
+    def test_decorator_shares_evaluator_with_hook_module(self, mock_evaluator_cls: MagicMock) -> None:
+        """Decorator uses the same _get_evaluator() as hook.py (shared singleton)."""
+        hook_module._autogen_evaluator = None
+        mock_evaluator_cls.return_value.verify_sync.return_value = {"allow": True}
+
+        @with_aport_guardrail
+        def my_tool() -> str:
+            return "done"
+
+        from autogen_adapter.hook import _get_evaluator
+        my_tool()
+
+        # The evaluator was created once (shared via _get_evaluator)
+        assert mock_evaluator_cls.call_count == 1
+        # And the module-level cache is now populated
+        assert hook_module._autogen_evaluator is not None

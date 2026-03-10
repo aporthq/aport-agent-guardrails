@@ -30,15 +30,14 @@ from __future__ import annotations
 
 import functools
 import json
-from typing import Any, Callable, Coroutine, TypeVar
+from typing import Any, Callable, TypeVar
 
 from aport_guardrails.core import (
-    Evaluator,
-    GuardrailViolation,
     build_tool_context,
     tool_to_pack_id,
 )
-from aport_guardrails.core.config import find_config_path
+from autogen_adapter._utils import raise_if_denied
+from autogen_adapter.hook import _get_evaluator  # shared singleton evaluator
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -50,27 +49,19 @@ def with_aport_guardrail(fn: F) -> F:
     - If *fn* is a coroutine function (``async def``), the wrapper is async.
     - If *fn* is a plain function, the wrapper is sync.
 
-    The tool name is taken from ``fn.__name__``.  Override by passing a
-    ``_aport_tool_name`` keyword argument at call time (stripped before
-    forwarding to the original function).
-
+    The tool name is taken from ``fn.__name__``.
     Config is auto-loaded from ``.aport/config.yaml`` or
-    ``~/.aport/autogen/config.yaml``.
+    ``~/.aport/autogen/config.yaml`` (shared with the module-level evaluator).
+
+    The evaluator is shared with the ``hook.py`` module-level instance so that
+    all guardrail calls in a process use a single Evaluator and consistent config.
     """
     import inspect
 
     tool_name = fn.__name__
-    evaluator_holder: list[Evaluator] = []  # lazy-init closure
 
-    def _evaluator() -> Evaluator:
-        if not evaluator_holder:
-            evaluator_holder.append(
-                Evaluator(config_path=find_config_path("autogen"), framework="autogen")
-            )
-        return evaluator_holder[0]
-
-    def _build_ctx(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Build context dict from positional + keyword args."""
+    def _build_tool_ctx(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Build APort tool context dict from positional + keyword args."""
         ctx: dict[str, Any] = dict(kwargs)
         if args:
             ctx.setdefault("args", list(args))
@@ -84,18 +75,15 @@ def with_aport_guardrail(fn: F) -> F:
 
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            tool_ctx = _build_ctx(args, kwargs)
+            tool_ctx = _build_tool_ctx(args, kwargs)
             pack_id = tool_to_pack_id(tool_name)
-            decision = await _evaluator().verify(
+            evaluator = _get_evaluator()
+            decision = await evaluator.verify(
                 {},
                 {"capability": pack_id},
                 tool_ctx,
             )
-            if not decision.get("allow", False):
-                reasons = decision.get("reasons") or [{}]
-                msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
-                code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
-                raise GuardrailViolation(msg, code=code, reasons=reasons)
+            raise_if_denied(decision)
             return await fn(*args, **kwargs)
 
         return async_wrapper  # type: ignore[return-value]
@@ -104,18 +92,15 @@ def with_aport_guardrail(fn: F) -> F:
 
         @functools.wraps(fn)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            tool_ctx = _build_ctx(args, kwargs)
+            tool_ctx = _build_tool_ctx(args, kwargs)
             pack_id = tool_to_pack_id(tool_name)
-            decision = _evaluator().verify_sync(
+            evaluator = _get_evaluator()
+            decision = evaluator.verify_sync(
                 {},
                 {"capability": pack_id},
                 tool_ctx,
             )
-            if not decision.get("allow", False):
-                reasons = decision.get("reasons") or [{}]
-                msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
-                code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
-                raise GuardrailViolation(msg, code=code, reasons=reasons)
+            raise_if_denied(decision)
             return fn(*args, **kwargs)
 
         return sync_wrapper  # type: ignore[return-value]

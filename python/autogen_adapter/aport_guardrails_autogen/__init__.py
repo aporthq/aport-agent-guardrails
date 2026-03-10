@@ -17,7 +17,7 @@ Import as:
 # distribution (see pyproject.toml [tool.setuptools.packages.find]).
 # Absolute imports from autogen_adapter work in both editable-dev and installed modes.
 
-from autogen_adapter.hook import APortGuardedTool, wrap_agent_tools
+from autogen_adapter.hook import APortGuardedTool, wrap_agent_tools, _get_evaluator
 from autogen_adapter.decorator import with_aport_guardrail
 from aport_guardrails.core import GuardrailViolation
 
@@ -25,5 +25,6 @@ __all__ = [
     "APortGuardedTool",
     "wrap_agent_tools",
     "with_aport_guardrail",
+    "_get_evaluator",
     "GuardrailViolation",
 ]

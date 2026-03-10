@@ -4,7 +4,7 @@ AutoGen hook: wrap agent tools with APort pre-action guardrails.
 Supports:
 - AutoGen 0.4.x (autogen-agentchat / autogen-core):
     APortGuardedTool — wraps any BaseTool with APort verification before run_json.
-- AutoGen 0.2.x (pyautogen / autogen):
+- AutoGen 0.2.x (pyautogen):
     wrap_agent_tools(agent) — patches agent.function_map callables with APort checks.
 
 Usage (0.4.x):
@@ -20,17 +20,22 @@ Usage (0.2.x):
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
+import logging
+import warnings
 from typing import Any, Callable, Mapping
 
 from aport_guardrails.core import (
     Evaluator,
-    GuardrailViolation,
     build_tool_context,
     tool_to_pack_id,
 )
 from aport_guardrails.core.config import find_config_path
+from autogen_adapter._utils import raise_if_denied
+
+logger = logging.getLogger(__name__)
 
 # Module-level cached evaluator (lazy-init, shared across tools in process).
 _autogen_evaluator: Evaluator | None = None
@@ -96,7 +101,11 @@ class APortGuardedTool:
         return self._inner.schema  # type: ignore[no-any-return]
 
     def __getattr__(self, item: str) -> Any:
-        # Proxy anything not explicitly overridden to the inner tool.
+        # Proxy to inner tool for any attribute not explicitly defined on the
+        # wrapper.  Note: methods defined on this class (run_json, run) are
+        # resolved before __getattr__ fires, so they will NOT be bypassed.
+        # __getattr__ only fires for attributes that genuinely don't exist on
+        # the wrapper itself, making it safe for metadata/property access.
         return getattr(self._inner, item)
 
     # ------------------------------------------------------------------ #
@@ -125,26 +134,21 @@ class APortGuardedTool:
             {"capability": pack_id},
             tool_ctx,
         )
+        raise_if_denied(decision)
 
-        if not decision.get("allow", False):
-            reasons = decision.get("reasons") or [{}]
-            msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
-            code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
-            raise GuardrailViolation(msg, code=code, reasons=reasons)
-
-        # AutoGen 0.4.x: run_json(args, cancellation_token)
         if cancellation_token is not None:
             return await self._inner.run_json(args, cancellation_token)
         return await self._inner.run_json(args)
 
     async def run(self, args: Any, cancellation_token: Any = None) -> Any:
         """
-        APort-guarded ``run``: serialises args, runs the guardrail, then delegates
-        to the inner tool's ``run`` (which in turn calls ``run_json``).
+        APort-guarded ``run``.  Serialises args, runs the guardrail, then
+        delegates to the inner tool's ``run``.
 
-        Prefer attaching guardrails at the ``run_json`` level; this override
-        prevents double-checking by delegating directly without calling
-        ``self.run_json`` again.
+        Note: ``run`` and ``run_json`` each independently check the guardrail.
+        This avoids any path (framework calling run vs run_json) bypassing the
+        policy gate.  The double-check is intentional: both entry points must be
+        authorised separately.
         """
         tool_name = self.name
         try:
@@ -159,12 +163,7 @@ class APortGuardedTool:
             {"capability": pack_id},
             tool_ctx,
         )
-
-        if not decision.get("allow", False):
-            reasons = decision.get("reasons") or [{}]
-            msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
-            code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
-            raise GuardrailViolation(msg, code=code, reasons=reasons)
+        raise_if_denied(decision)
 
         if cancellation_token is not None:
             return await self._inner.run(args, cancellation_token)
@@ -182,12 +181,43 @@ def _make_guarded_callable(
     evaluator: Evaluator,
 ) -> Callable[..., Any]:
     """
-    Return a sync wrapper around *fn* that calls ``evaluator.verify_sync`` first.
+    Return a wrapper around *fn* that calls ``evaluator.verify_sync`` first.
     Used to patch ``agent.function_map`` for AutoGen 0.2.x.
+
+    Supports both sync and async callables:
+    - Sync fn → sync wrapper (standard 0.2.x use case).
+    - Async fn → async wrapper with proper await (edge case, supported).
     """
+    if asyncio.iscoroutinefunction(fn):
+        warnings.warn(
+            f"wrap_agent_tools: tool '{tool_name}' is an async function registered in "
+            "function_map. AutoGen 0.2.x function_map is typically sync. "
+            "An async wrapper will be used; ensure your agent runtime awaits it.",
+            stacklevel=3,
+        )
+
+        @functools.wraps(fn)
+        async def async_guarded(*args: Any, **kwargs: Any) -> Any:
+            context_dict = kwargs if kwargs else ({"args": list(args)} if args else {})
+            try:
+                input_str = json.dumps(context_dict)
+            except (TypeError, ValueError):
+                input_str = str(context_dict)
+            tool_ctx = build_tool_context(tool_name, input_str)
+            pack_id = tool_to_pack_id(tool_name)
+
+            decision = evaluator.verify_sync(
+                {},
+                {"capability": pack_id},
+                tool_ctx,
+            )
+            raise_if_denied(decision)
+            return await fn(*args, **kwargs)
+
+        return async_guarded
 
     @functools.wraps(fn)
-    def guarded(*args: Any, **kwargs: Any) -> Any:
+    def sync_guarded(*args: Any, **kwargs: Any) -> Any:
         context_dict = kwargs if kwargs else ({"args": list(args)} if args else {})
         try:
             input_str = json.dumps(context_dict)
@@ -201,16 +231,10 @@ def _make_guarded_callable(
             {"capability": pack_id},
             tool_ctx,
         )
-
-        if not decision.get("allow", False):
-            reasons = decision.get("reasons") or [{}]
-            msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
-            code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
-            raise GuardrailViolation(msg, code=code, reasons=reasons)
-
+        raise_if_denied(decision)
         return fn(*args, **kwargs)
 
-    return guarded
+    return sync_guarded
 
 
 def wrap_agent_tools(

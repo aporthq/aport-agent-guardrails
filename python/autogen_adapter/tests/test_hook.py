@@ -1,12 +1,14 @@
-"""Unit tests for AutoGen APortGuardedTool and wrap_agent_tools."""
+"""Unit tests for AutoGen APortGuardedTool, wrap_agent_tools, and _utils helpers."""
 
 import json
 import pytest
+import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from autogen_adapter import hook as hook_module
 from autogen_adapter.hook import APortGuardedTool, wrap_agent_tools
+from autogen_adapter._utils import raise_if_denied
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +30,50 @@ def _make_mock_tool(name: str = "send_email") -> MagicMock:
 def _make_mock_agent(function_map: dict | None = None) -> SimpleNamespace:
     """Return a SimpleNamespace that looks like an AutoGen 0.2.x ConversableAgent."""
     return SimpleNamespace(function_map=function_map or {"search": lambda q: f"results for {q}"})
+
+
+# ---------------------------------------------------------------------------
+# _utils.raise_if_denied
+# ---------------------------------------------------------------------------
+
+
+class TestRaiseIfDenied:
+    """Tests for the shared raise_if_denied helper."""
+
+    def test_allow_does_not_raise(self) -> None:
+        """Decision with allow=True does not raise."""
+        raise_if_denied({"allow": True})  # should not raise
+
+    def test_deny_raises_guardrail_violation(self) -> None:
+        """Decision with allow=False raises GuardrailViolation with correct code/message."""
+        from aport_guardrails.core import GuardrailViolation
+
+        with pytest.raises(GuardrailViolation) as exc_info:
+            raise_if_denied(
+                {
+                    "allow": False,
+                    "reasons": [{"code": "oap.blocked", "message": "Blocked by policy"}],
+                }
+            )
+        assert exc_info.value.code == "oap.blocked"
+        assert "Blocked by policy" in str(exc_info.value)
+
+    def test_deny_empty_reasons_defaults(self) -> None:
+        """Empty reasons list produces default code/message."""
+        from aport_guardrails.core import GuardrailViolation
+
+        with pytest.raises(GuardrailViolation) as exc_info:
+            raise_if_denied({"allow": False, "reasons": []})
+
+        assert exc_info.value.code == "oap.denied"
+        assert "APort denied" in str(exc_info.value)
+
+    def test_deny_missing_allow_field_defaults_to_deny(self) -> None:
+        """Missing 'allow' key treated as deny (safe default)."""
+        from aport_guardrails.core import GuardrailViolation
+
+        with pytest.raises(GuardrailViolation):
+            raise_if_denied({})
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +177,23 @@ class TestAPortGuardedTool:
         assert "APort denied" in str(exc_info.value)
         assert exc_info.value.code == "oap.denied"
 
+    @pytest.mark.asyncio
+    @patch("autogen_adapter.hook.Evaluator")
+    async def test_run_json_fallback_to_run_when_no_run_json(self, mock_evaluator_cls: MagicMock) -> None:
+        """run_json falls back to inner.run when inner has no run_json method."""
+        hook_module._autogen_evaluator = None
+        inner = MagicMock()
+        inner.name = "no_run_json_tool"
+        inner.description = "No run_json"
+        inner.schema = {}
+        del inner.run_json  # remove run_json from mock
+        inner.run = AsyncMock(return_value="fallback_result")
+        mock_evaluator_cls.return_value.verify = AsyncMock(return_value={"allow": True})
+
+        guarded = APortGuardedTool(inner)
+        result = await guarded.run_json({})
+        assert result == "fallback_result"
+
 
 # ---------------------------------------------------------------------------
 # wrap_agent_tools — 0.2.x
@@ -217,3 +280,27 @@ class TestWrapAgentTools:
         call_args = mock_evaluator_cls.return_value.verify_sync.call_args[0]
         context = call_args[2]
         assert context.get("tool") == "run_query"
+
+    @pytest.mark.asyncio
+    @patch("autogen_adapter.hook.Evaluator")
+    async def test_async_function_in_function_map_warns_and_works(
+        self, mock_evaluator_cls: MagicMock
+    ) -> None:
+        """Async function in function_map triggers a warning and still executes."""
+        hook_module._autogen_evaluator = None
+        mock_evaluator_cls.return_value.verify_sync.return_value = {"allow": True}
+
+        async def async_search(query: str) -> str:
+            return f"async results: {query}"
+
+        agent = _make_mock_agent({"async_search": async_search})
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            wrap_agent_tools(agent)
+            # Warning should have been issued during wrapping of async function
+            assert any("async" in str(warning.message).lower() for warning in w)
+
+        # The async wrapper should be awaitable and return the correct result
+        result = await agent.function_map["async_search"](query="test")
+        assert result == "async results: test"
