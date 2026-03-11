@@ -50,7 +50,7 @@ jobs:
 
       - name: Build and test Node packages
         run: |
-          npm run build --workspaces --if-present
+          npm run build
           npm run test -w @aporthq/aport-agent-guardrails-core -w @aporthq/aport-agent-guardrails-langchain
 
       - name: Run OpenClaw integration (Node)
