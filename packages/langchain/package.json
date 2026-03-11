@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-langchain",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "APort guardrails for LangChain/LangGraph — callback handler",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
