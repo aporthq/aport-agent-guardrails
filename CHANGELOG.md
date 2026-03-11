@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.14] - 2026-03-11
+
+### Added
+- **Passport wizard: framework-aware capability defaults.** Each framework (`claude-code`, `cursor`, `crewai`, `langchain`, `n8n`) now gets sensible default capabilities during passport creation. Claude Code defaults include all capabilities; Cursor enables file, web, and session capabilities; other frameworks get appropriate subsets.
+- **Passport wizard: `agent.session.create` and `mcp.tool.execute` capabilities.** New interactive prompts for sub-agent spawning and MCP tool execution, with corresponding limits (`max_concurrent`, `allowed_servers`).
+- **Cursor hook: full hook event support.** Rewritten `aport-cursor-hook.sh` to handle all Cursor hook events:
+  - `beforeShellExecution` — shell command policy check
+  - `preToolUse` — routes Shell, Read, Write, Grep, Delete, Task, and MCP:\<name\> tools
+  - `beforeMCPExecution` — MCP server tool calls (detected by `server`/`url` field)
+  - `beforeReadFile` — allowed without evaluator (performance)
+  - `subagentStart` — sub-agent spawning policy check
+  - Legacy Copilot-style payloads still supported
+- **Cursor installer: 4 hook events.** `cursor.sh` now registers `beforeShellExecution`, `preToolUse`, `beforeMCPExecution`, and `subagentStart` (was only 2).
+- **Cursor hook unit tests.** 15 test cases covering all hook event types, including fail-closed for unknown tools and fail-open for empty stdin.
+
+### Changed
+- **Test fixture:** `passport.oap-v1.json` expanded from 3 to 9 capabilities with matching limits.
+- Read-family tools (`Read`, `Grep`) exit 0 without calling evaluator in Cursor hook (matches Claude Code behavior).
+- Unknown `preToolUse` tools are denied (fail-closed) in Cursor hook.
+
+### Security
+- Per-invocation decision files in Cursor hook (PID-suffixed) prevent race conditions with concurrent tool calls.
+- Fail-closed design: unrecognized hook input shapes are denied by default.
+
 ## [1.0.13] - 2026-03-11
 
 ### Added
