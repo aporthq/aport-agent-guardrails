@@ -64,6 +64,14 @@ got=$(get_config_dir cursor)
 }
 echo "  ✅ get_config_dir cursor"
 
+# get_config_dir claude-code -> $HOME/.claude
+got=$(get_config_dir claude-code)
+[[ "$got" == *".claude"* ]] || {
+    echo "FAIL: get_config_dir claude-code" >&2
+    exit 1
+}
+echo "  ✅ get_config_dir claude-code"
+
 # get_default_passport_path: returns config_dir/aport/passport.json per framework
 got=$(get_default_passport_path cursor)
 [[ "$got" == *"/aport/passport.json"* ]] && [[ "$got" == *"cursor"* ]] || {

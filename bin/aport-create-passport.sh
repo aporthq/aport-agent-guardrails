@@ -503,6 +503,11 @@ else
 EOF
 fi
 
+# Archive existing passport before overwrite
+if [ -f "$PASSPORT_FILE" ]; then
+    cp "$PASSPORT_FILE" "${PASSPORT_FILE}.bak"
+fi
+
 # Format JSON with jq if available
 if command -v jq &> /dev/null; then
     jq . "$PASSPORT_FILE.tmp" > "$PASSPORT_FILE"

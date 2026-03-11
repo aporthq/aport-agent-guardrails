@@ -15,6 +15,7 @@ EMPTY_DIR="$TEST_DIR/empty_cwd"
 mkdir -p "$EMPTY_DIR"
 
 chmod +x "$DISPATCHER" 2> /dev/null || true
+chmod +x "$REPO_ROOT/bin/frameworks/"*.sh 2> /dev/null || true
 
 run_dispatcher() {
     local outfile="$1" cwd="${2:-}"
@@ -62,14 +63,10 @@ grep -q "Invalid agent_id format" "$out2" || {
 }
 echo "  ✅ -f openclaw invalid_agent_id -> pass-through"
 
-# 3. Positional: openclaw invalid_agent_id from empty cwd -> prompt; pipe "openclaw" so we run openclaw with REST.
-#    Unset CI/APORT_NONINTERACTIVE so dispatcher prompts instead of exiting.
+# 3. Positional: openclaw invalid_agent_id -> openclaw receives args (use APORT_FRAMEWORK to skip detection).
 out3="$TEST_DIR/dispatcher-3.txt"
 set +e
-printf 'openclaw\n' | (
-    unset CI APORT_NONINTERACTIVE
-    cd "$EMPTY_DIR" && "$DISPATCHER" openclaw invalid_agent_id > "$out3" 2>&1
-)
+APORT_FRAMEWORK=openclaw APORT_NONINTERACTIVE=1 "$DISPATCHER" openclaw invalid_agent_id > "$out3" 2>&1
 DISPATCHER_EXIT=$?
 set -e
 [[ "$DISPATCHER_EXIT" -ne 0 ]] || {
@@ -110,9 +107,12 @@ grep -q "requires a value\|ERROR" "$out5" || {
 echo "  ✅ -f without value -> exit 1"
 
 # 6. Non-interactive: no detection -> exit 1 and hint (APORT_NONINTERACTIVE=1)
+#    Restrict PATH and HOME so host `claude` binary / ~/.claude don't trigger auto-detection
+CLEAN_HOME="$TEST_DIR/clean_home"
+mkdir -p "$CLEAN_HOME"
 out6="$TEST_DIR/dispatcher-6.txt"
 set +e
-APORT_NONINTERACTIVE=1 APORT_PROJECT_DIR="$EMPTY_DIR" "$DISPATCHER" < /dev/null > "$out6" 2>&1
+PATH="/usr/bin:/bin" HOME="$CLEAN_HOME" APORT_NONINTERACTIVE=1 APORT_PROJECT_DIR="$EMPTY_DIR" "$DISPATCHER" < /dev/null > "$out6" 2>&1
 e6=$?
 set -e
 [[ "$e6" -ne 0 ]] || {
@@ -168,6 +168,19 @@ grep -q "langchain" "$out8" && grep -q "openclaw" "$out8" || {
     exit 1
 }
 echo "  ✅ Non-interactive (multiple detected) -> exit 1 and show both options"
+
+# 9. --framework=claude-code -> runs claude-code installer (not "unknown framework")
+out9="$TEST_DIR/dispatcher-9.txt"
+CLAUDE_TEST_DIR="$TEST_DIR/claude_install"
+mkdir -p "$CLAUDE_TEST_DIR"
+run_dispatcher "$out9" "" --framework=claude-code --output "$CLAUDE_TEST_DIR/aport/passport.json" --non-interactive
+# Installer may exit 0 or non-zero (e.g. wizard); we only require it's not "unknown framework"
+if grep -q "Unknown or unsupported framework" "$out9"; then
+    echo "FAIL: claude-code should be supported" >&2
+    cat "$out9" >&2
+    exit 1
+fi
+echo "  ✅ --framework=claude-code -> runs claude-code (not unknown)"
 
 echo ""
 echo "  All dispatcher tests passed."

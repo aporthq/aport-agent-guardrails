@@ -374,6 +374,12 @@ YAML
         fi
     fi
 
+    # Backup a file before overwriting (creates .bak); defined here before first use
+    backup_file() {
+        local f="$1"
+        [ -f "$f" ] && cp "$f" "${f}.bak"
+    }
+
     # So the default config (openclaw.json) has plugin mode/apiUrl - gateway often loads it, not config.yaml
     OPENCLAW_JSON="$CONFIG_DIR/openclaw.json"
     if [ -f "$OPENCLAW_JSON" ] && command -v jq &>/dev/null; then
@@ -411,7 +417,7 @@ YAML
                 | .source = "path"
                 | .sourcePath = $plugin_path
                 | .installPath = $plugin_path)
-        ' "$OPENCLAW_JSON" > "$OPENCLAW_JSON.tmp" 2>/dev/null && mv "$OPENCLAW_JSON.tmp" "$OPENCLAW_JSON"; then
+        ' "$OPENCLAW_JSON" > "$OPENCLAW_JSON.tmp" 2>/dev/null && { backup_file "$OPENCLAW_JSON"; mv "$OPENCLAW_JSON.tmp" "$OPENCLAW_JSON"; }; then
             if [ "$USE_HOSTED_PASSPORT" = true ]; then
                 echo "  ✅ Merged plugin config into $OPENCLAW_JSON (mode=$PLUGIN_MODE, hosted passport, allowUnmappedTools=$ALLOW_UNMAPPED)"
             else
@@ -484,7 +490,7 @@ if [ -f "$PASSPORT_FILE" ] && command -v jq &>/dev/null; then
                     .max_execution_time = (.limits.max_execution_time // 300)) |
                 .limits |= del(.allowed_commands, .blocked_patterns, .max_execution_time)
             else . end)
-        ' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"
+        ' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && { backup_file "$PASSPORT_FILE"; mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"; }
         echo "  ✅ Passport normalized."
     fi
     echo "  📋 Updating passport allowed_commands (default commands: bash, sh, ls, mkdir, npm, …)..."
@@ -501,12 +507,12 @@ if [ -f "$PASSPORT_FILE" ] && command -v jq &>/dev/null; then
                 --argjson default "$DEFAULT_CMDS" \
                 '$existing + $default | unique')
         fi
-        jq --argjson merged "$MERGED" '.limits["system.command.execute"].allowed_commands = $merged' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"
+        jq --argjson merged "$MERGED" '.limits["system.command.execute"].allowed_commands = $merged' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && { backup_file "$PASSPORT_FILE"; mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"; }
     else
         # New nested block: default to ["*"] per README (blocked_patterns still apply)
         MERGED='["*"]'
         jq --argjson merged "$MERGED" \
-            '.limits["system.command.execute"] = ((.limits["system.command.execute"] // {}) | .allowed_commands = $merged | .blocked_patterns = (.blocked_patterns // ["rm -rf", "sudo"]) | .max_execution_time = (.max_execution_time // 300))' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"
+            '.limits["system.command.execute"] = ((.limits["system.command.execute"] // {}) | .allowed_commands = $merged | .blocked_patterns = (.blocked_patterns // ["rm -rf", "sudo"]) | .max_execution_time = (.max_execution_time // 300))' "$PASSPORT_FILE" > "$PASSPORT_FILE.tmp" && { backup_file "$PASSPORT_FILE"; mv "$PASSPORT_FILE.tmp" "$PASSPORT_FILE"; }
     fi
     echo "  ✅ Passport updated: default commands are in allowed_commands."
     echo ""

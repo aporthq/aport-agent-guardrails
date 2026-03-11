@@ -86,12 +86,13 @@ The **kill switch suspends the agent**: once active, every tool call is denied u
 
 **Two ways to use APort:** (1) **Guardrails (CLI/setup)** — run the installer to create your passport and config; (2) **Core (library)** — use the evaluator or framework callback in your app so each tool call is verified. Each framework doc ([LangChain](docs/frameworks/langchain.md), [CrewAI](docs/frameworks/crewai.md), [Cursor](docs/frameworks/cursor.md), [OpenClaw](docs/frameworks/openclaw.md)) describes both and how to use them for that framework (Python and Node where applicable).
 
-**Production-ready today:** OpenClaw (plugin + full installer), Cursor (hooks), **Python** LangChain/CrewAI (`pip install aport-agent-guardrails-langchain` / `aport-agent-guardrails-crewai`), and **Node** (CLI + `@aporthq/aport-agent-guardrails-core`, `-langchain`, `-crewai`, `-cursor` published via CI). See [Deployment readiness](docs/DEPLOYMENT_READINESS.md).
+**Production-ready today:** OpenClaw (plugin + full installer), Cursor (hooks), **Claude Code** (PreToolUse hook), **Python** LangChain/CrewAI (`pip install aport-agent-guardrails-langchain` / `aport-agent-guardrails-crewai`), and **Node** (CLI + `@aporthq/aport-agent-guardrails-core`, `-langchain`, `-crewai`, `-cursor`, `-claude-code` published via CI). See [Deployment readiness](docs/DEPLOYMENT_READINESS.md).
 
 | Framework | Doc | Integration | Install |
 |-----------|-----|--------------|--------|
 | **OpenClaw** | [docs/frameworks/openclaw.md](docs/frameworks/openclaw.md) | `before_tool_call` plugin | `npx @aporthq/aport-agent-guardrails openclaw` |
 | **Cursor** | [docs/frameworks/cursor.md](docs/frameworks/cursor.md) | `beforeShellExecution` / `preToolUse` hooks → writes `~/.cursor/hooks.json`. **Runtime enforcement is the bash hook;** the Node package `@aporthq/aport-agent-guardrails-cursor` is a helper only (Evaluator, `getHookPath()`). | `npx @aporthq/aport-agent-guardrails cursor` |
+| **Claude Code** | [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md) | PreToolUse hook → writes `~/.claude/settings.json` (Claude Code format; not Cursor). | `npx @aporthq/aport-agent-guardrails claude-code` |
 | **LangChain / LangGraph** | [docs/frameworks/langchain.md](docs/frameworks/langchain.md) | **Python:** `APortCallback` (`on_tool_start`) | `npx @aporthq/aport-agent-guardrails langchain` then `pip install aport-agent-guardrails-langchain` + `aport-langchain setup` |
 | **CrewAI** | [docs/frameworks/crewai.md](docs/frameworks/crewai.md) | **Python:** `@before_tool_call` hook, `register_aport_guardrail` | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
 | **n8n** | [docs/frameworks/n8n.md](docs/frameworks/n8n.md) | *Coming soon* — custom node and runtime in progress | — |
