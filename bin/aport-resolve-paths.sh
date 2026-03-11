@@ -14,8 +14,24 @@ resolve_aport_paths() {
     local passport_path
     local data_dir
 
+    # Source validation if available (for validate_passport_path)
+    local _resolve_script_dir
+    _resolve_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -f "$_resolve_script_dir/lib/validation.sh" ]; then
+        # shellcheck source=lib/validation.sh
+        . "$_resolve_script_dir/lib/validation.sh" 2> /dev/null || true
+    elif [ -f "$_resolve_script_dir/../bin/lib/validation.sh" ]; then
+        . "$_resolve_script_dir/../bin/lib/validation.sh" 2> /dev/null || true
+    fi
+
     # 1) Explicit path set and file exists → use it (plugin or wrapper)
     if [ -n "${OPENCLAW_PASSPORT_FILE:-}" ] && [ -f "$OPENCLAW_PASSPORT_FILE" ]; then
+        # Validate env-provided path if validator is available
+        if type validate_passport_path &> /dev/null; then
+            if ! validate_passport_path "$OPENCLAW_PASSPORT_FILE"; then
+                echo "[aport] WARN: OPENCLAW_PASSPORT_FILE path failed validation: $OPENCLAW_PASSPORT_FILE" >&2
+            fi
+        fi
         data_dir="$(dirname "$OPENCLAW_PASSPORT_FILE")"
         passport_path="$OPENCLAW_PASSPORT_FILE"
     # 2) Explicit path set but file missing → legacy: try parent dir (e.g. .../openclaw/passport.json)
@@ -31,7 +47,7 @@ resolve_aport_paths() {
     # 3) No env → probe framework-specific default paths (where each framework stores data), then OpenClaw legacy
     else
         config_dir=""
-        for candidate in "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.n8n"; do
+        for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.n8n"; do
             if [ -f "${candidate}/aport/passport.json" ]; then
                 config_dir="$candidate"
                 break

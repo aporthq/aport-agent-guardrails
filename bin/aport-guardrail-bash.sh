@@ -44,8 +44,9 @@ if [ -n "$DEBUG_APORT" ]; then
     echo "DEBUG: CONTEXT length=${#CONTEXT_JSON}" >&2
 fi
 
-# Ensure APort data dir exists (for decision.json, audit.log)
+# Ensure APort data dir exists (for decision.json, audit.log) with restricted permissions
 mkdir -p "$(dirname "$AUDIT_LOG")"
+chmod 700 "$(dirname "$AUDIT_LOG")" 2> /dev/null || true
 
 # Function to load policy from upstream or local-overrides
 load_policy() {
@@ -160,9 +161,11 @@ write_decision() {
     local final_json
     final_json=$(echo "$base_json" | jq -c --arg h "$content_hash" '. + {content_hash: $h}')
     echo "$final_json" > "$DECISION_FILE"
+    chmod 600 "$DECISION_FILE" 2> /dev/null || true
 
     # Update chain state for next decision (best-effort; do not block or fail the script)
     echo "{\"last_decision_id\":\"$decision_id\",\"last_content_hash\":\"$content_hash\"}" > "$chain_state" 2> /dev/null || true
+    chmod 600 "$chain_state" 2> /dev/null || true
 
     audit_context=""
     if [ -n "${CONTEXT_SUMMARY:-}" ]; then
@@ -514,8 +517,9 @@ if [[ "$POLICY_ID" == "data.file.write.v1" ]]; then
             fi
         done < <(echo "$LIMITS" | jq -r '.blocked_paths[]? // empty')
 
-        # Check allowed extensions (if configured)
-        if [ -n "$(echo "$LIMITS" | jq -r '.allowed_extensions | length' 2> /dev/null)" ]; then
+        # Check allowed extensions (only when the list has entries)
+        _ext_count="$(echo "$LIMITS" | jq -r 'if .allowed_extensions then (.allowed_extensions | length) else 0 end' 2> /dev/null || echo "0")"
+        if [ "$_ext_count" -gt 0 ] 2> /dev/null; then
             FILE_EXT=$(echo "$FILE_PATH" | grep -o '\.[^.]*$' | tr '[:upper:]' '[:lower:]')
             if [ -n "$FILE_EXT" ]; then
                 EXT_ALLOWED=false

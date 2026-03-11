@@ -15,6 +15,7 @@ get_config_dir() {
         crewai) echo "${APORT_CREWAI_CONFIG_DIR:-$HOME/.aport/crewai}" ;;
         n8n) echo "${APORT_N8N_CONFIG_DIR:-$HOME/.n8n}" ;;
         cursor) echo "${APORT_CURSOR_CONFIG_DIR:-$HOME/.cursor}" ;;
+        claude-code) echo "${APORT_CLAUDE_CODE_CONFIG_DIR:-$HOME/.claude}" ;;
         *) echo "${APORT_CONFIG_DIR:-$HOME/.aport}" ;;
     esac
 }

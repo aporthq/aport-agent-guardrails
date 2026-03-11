@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.13] - 2026-03-11
+
+### Added
+- **Claude Code Integration:** Pre-action authorization via Claude Code's `PreToolUse` hook.
+  - New hook script: `bin/aport-claude-code-hook.sh` — handles all Claude Code tool types
+    (Bash, Write, Edit, MultiEdit, TodoWrite, WebSearch, WebFetch, Browser, Task, Agent, Skill, MCP tools)
+  - New installer: `npx @aporthq/aport-agent-guardrails claude-code`
+    Writes `~/.claude/settings.json` with APort hook registered for all tools via `"matcher": "*"`
+  - New npm package: `@aporthq/aport-agent-guardrails-claude-code`
+  - Default passport path: `~/.claude/aport/passport.json`
+  - Deny format: Claude Code's official `hookSpecificOutput.permissionDecision: "deny"` schema
+  - Read-family tools (Read, Glob, LS, Grep, TodoRead, ToolSearch, AskUserQuestion) allow-by-default (exit 0)
+  - Read-only queries (TaskGet, TaskList, TaskOutput, CronList) allow-by-default
+  - State transitions (EnterPlanMode, ExitPlanMode) allow-by-default
+  - Fail-closed: unknown tool names are denied (exit 2)
+  - Framework auto-detection: `detect.sh` detects Claude Code via `claude` binary or `~/.claude` dir
+  - New `docs/frameworks/claude-code.md`
+
+### Changed
+- `bin/lib/config.sh`: Added `claude-code` framework with default config dir `~/.claude`
+- `bin/aport-resolve-paths.sh`: Added `~/.claude` to passport probe list (before `~/.cursor`)
+- `bin/lib/detect.sh`: Added Claude Code auto-detection
+- `bin/agent-guardrails`: Added `claude-code` to supported frameworks list; framework name validation (alphanumeric + hyphen only)
+- `extensions/openclaw-aport/index.ts`: Added `mapToolToPolicy()` entries for all Claude Code tools
+  (`Agent`, `Skill`, `EnterWorktree`, `Task*`, `Cron*`, `NotebookEdit`, `MultiEdit`, `TodoWrite`, `ToolSearch`, `mcp__*`)
+- `.changeset/config.json`: Added claude-code package to `fixed` version group
+- `docs/frameworks/cursor.md`: Corrected Claude Code compatibility claim (hook output formats are incompatible)
+
+### Security
+- **Hook hardening:** Claude Code hook uses `hookSpecificOutput.permissionDecision: "deny"` + exit 2 (belt-and-suspenders); safe jq parsing (never crashes on malformed input); per-invocation decision files (PID suffix prevents race conditions)
+- **File permission hardening (all frameworks):** `chmod 700` on aport directories, `chmod 600` on passport.json, settings.json, decision files, and chain-state across Claude Code, Cursor, LangChain, CrewAI, and n8n installers
+- **Input validation improvements:** `validate_command_string` rewritten to allow legitimate shell syntax (pipes, chains, redirects, variables) while blocking actual injection patterns (backticks, dangerous `$()` subshells, null/control characters); `validate_passport_path` expanded to allow `~/.claude`, `~/.cursor`, `~/.n8n`
+- **Evaluator fix:** `allowed_extensions` check no longer blocks all file writes when no extensions are configured (jq `null | length` returns 0, but `[ -n "0" ]` is true in bash — fixed with explicit conditional)
+- **Allowlist stub:** `check_command_allowed` stub changed to return 1 (deny) instead of 0; function is unused (real enforcement in `aport-guardrail-bash.sh`) but deny-by-default is correct for any future callers
+- **Secure temp files:** Framework installers use `mktemp` for intermediate files during settings merge
+- **Fail-closed on unknown tools** at both hook level and evaluator level
+- **30 tests passing** (unit, integration, policy, hook)
+- **Limitation:** `claude --dangerously-skip-permissions` bypasses ALL hooks including APort (documented; cannot be mitigated in code)
+
 ## [1.0.12] - 2026-03-02
 
 ### Added
@@ -214,7 +253,10 @@ None (first release).
 
 ---
 
-[Unreleased]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.8...HEAD
+[Unreleased]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.13...HEAD
+[1.0.13]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.12...v1.0.13
+[1.0.12]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.11...v1.0.12
+[1.0.11]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.8...v1.0.11
 [1.0.8]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/aporthq/aport-agent-guardrails/compare/v1.0.5...v1.0.6

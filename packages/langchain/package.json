@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-langchain",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "APort guardrails for LangChain/LangGraph — callback handler",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,7 +19,7 @@
   "author": "APort Technologies Inc.",
   "license": "Apache-2.0",
   "dependencies": {
-    "@aporthq/aport-agent-guardrails-core": ">=1.0.0",
+    "@aporthq/aport-agent-guardrails-core": ">=1.0.13",
     "@langchain/core": "^0.3.0"
   },
   "devDependencies": {

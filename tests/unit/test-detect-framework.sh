@@ -35,36 +35,42 @@ echo "  Unit — bin/lib/detect.sh (detect_framework + detect_frameworks_list)"
 echo "  Test dir: $TEST_DIR"
 echo ""
 
-# 1. Empty dir -> empty
+# Use a clean HOME without .claude so "empty dir" and others are deterministic
+SAVED_HOME="${HOME:-}"
+export HOME="$TEST_DIR/detect_home"
+mkdir -p "$HOME"
+
+# 1. Empty dir -> empty (use clean HOME and minimal PATH so system claude/.claude don't affect)
 dir_empty="$TEST_DIR/empty"
 mkdir -p "$dir_empty"
-assert_eq "$(detect_framework "$dir_empty")" "" "empty dir"
-assert_eq "$(detect_frameworks_list "$dir_empty")" "" "empty dir list"
+empty_result=$(PATH="/usr/bin:/bin" HOME="$TEST_DIR/detect_home" detect_frameworks_list "$dir_empty")
+assert_eq "$empty_result" "" "empty dir list"
+assert_eq "$(PATH="/usr/bin:/bin" HOME="$TEST_DIR/detect_home" detect_framework "$dir_empty")" "" "empty dir"
 echo "  ✅ empty dir -> ''"
 
-# 2. Single: pyproject langchain
+# 2. Single: pyproject langchain (restrict PATH so host `claude` binary doesn't add claude-code)
 dir_lc="$TEST_DIR/langchain-py"
 mkdir -p "$dir_lc"
 echo 'dependencies = ["langchain"]' > "$dir_lc/pyproject.toml"
-assert_eq "$(detect_framework "$dir_lc")" "langchain" "single langchain"
-assert_eq "$(detect_frameworks_list "$dir_lc")" "langchain" "list langchain"
+assert_eq "$(PATH="/usr/bin:/bin" detect_framework "$dir_lc")" "langchain" "single langchain"
+assert_eq "$(PATH="/usr/bin:/bin" detect_frameworks_list "$dir_lc")" "langchain" "list langchain"
 echo "  ✅ pyproject (langchain) -> langchain"
 
-# 3. Single: package.json openclaw
+# 3. Single: package.json openclaw (restrict PATH so host `claude` binary doesn't add claude-code)
 dir_oc="$TEST_DIR/openclaw-js"
 mkdir -p "$dir_oc"
 echo '{"dependencies":{"openclaw":"^1.0.0"}}' > "$dir_oc/package.json"
-assert_eq "$(detect_framework "$dir_oc")" "openclaw" "single openclaw"
-assert_eq "$(detect_frameworks_list "$dir_oc")" "openclaw" "list openclaw"
+assert_eq "$(PATH="/usr/bin:/bin" detect_framework "$dir_oc")" "openclaw" "single openclaw"
+assert_eq "$(PATH="/usr/bin:/bin" detect_frameworks_list "$dir_oc")" "openclaw" "list openclaw"
 echo "  ✅ package.json (openclaw) -> openclaw"
 
-# 4. Conflict: both langchain and openclaw (pyproject + package.json)
+# 4. Conflict: both langchain and openclaw (pyproject + package.json) — restrict PATH
 dir_both="$TEST_DIR/both"
 mkdir -p "$dir_both"
 echo 'dependencies = ["langchain"]' > "$dir_both/pyproject.toml"
 echo '{"dependencies":{"openclaw":"x"}}' > "$dir_both/package.json"
-first="$(detect_framework "$dir_both")"
-list="$(detect_frameworks_list "$dir_both")"
+first="$(PATH="/usr/bin:/bin" detect_framework "$dir_both")"
+list="$(PATH="/usr/bin:/bin" detect_frameworks_list "$dir_both")"
 assert_eq "$first" "langchain" "first detected in conflict (pyproject before package.json)"
 assert_list_contains "$list" "langchain"
 assert_list_contains "$list" "openclaw"
@@ -74,21 +80,32 @@ assert_list_contains "$list" "openclaw"
 }
 echo "  ✅ conflict (langchain + openclaw) -> list has both, first=langchain"
 
-# 5. Conflict: langchain + crewai in same pyproject
+# 5. Conflict: langchain + crewai in same pyproject — restrict PATH
 dir_lc_cr="$TEST_DIR/langchain-crewai"
 mkdir -p "$dir_lc_cr"
 echo 'dependencies = ["langchain", "crewai"]' > "$dir_lc_cr/pyproject.toml"
-first2="$(detect_framework "$dir_lc_cr")"
-list2="$(detect_frameworks_list "$dir_lc_cr")"
+first2="$(PATH="/usr/bin:/bin" detect_framework "$dir_lc_cr")"
+list2="$(PATH="/usr/bin:/bin" detect_frameworks_list "$dir_lc_cr")"
 assert_list_contains "$list2" "langchain"
 assert_list_contains "$list2" "crewai"
 assert_eq "$first2" "langchain" "first in pyproject is langchain (before crewai)"
 echo "  ✅ conflict (langchain + crewai in pyproject) -> list has both"
 
 # 6. Nonexistent dir -> empty
-assert_eq "$(detect_framework "$TEST_DIR/nonexistent")" "" "nonexistent"
+assert_eq "$(PATH="/usr/bin:/bin" HOME="$TEST_DIR/detect_home" detect_framework "$TEST_DIR/nonexistent")" "" "nonexistent"
 echo "  ✅ nonexistent dir -> ''"
 
+# 7. Claude Code: $HOME/.claude directory -> claude-code in list
+dir_claude_home="$TEST_DIR/claude_home"
+mkdir -p "$dir_claude_home/.claude"
+old_home="$HOME"
+export HOME="$dir_claude_home"
+list_claude="$(detect_frameworks_list "$dir_claude_home")"
+export HOME="$old_home"
+assert_list_contains "$list_claude" "claude-code"
+echo "  ✅ \$HOME/.claude exists -> claude-code in list"
+
+export HOME="$SAVED_HOME"
 echo ""
 echo "  All detect_framework / detect_frameworks_list tests passed."
 echo ""
