@@ -333,6 +333,17 @@ function mapToolToPolicy(toolName: string): string | null {
   if (tool.startsWith("data.file.read")) return "data.file.read.v1";
   if (tool === "write") return "data.file.write.v1";
   if (tool === "edit") return "data.file.write.v1";
+  // Claude Code tool names
+  if (tool === "multiedit" || tool === "notebookedit") return "data.file.write.v1";
+  if (tool === "glob" || tool === "ls" || tool === "grep" || tool === "toolsearch") return "data.file.read.v1";
+  if (tool === "todoread") return "data.file.read.v1";
+  if (tool === "todowrite") return "data.file.write.v1";
+  if (tool === "task" || tool === "taskcreate" || tool === "taskupdate" || tool === "taskstop") return "agent.session.create.v1";
+  if (tool === "taskget" || tool === "tasklist" || tool === "taskoutput") return "data.file.read.v1";
+  if (tool === "agent" || tool === "skill" || tool === "enterworktree") return "agent.session.create.v1";
+  if (tool === "askuserquestion" || tool === "enterplanmode" || tool === "exitplanmode") return null; // allow
+  if (tool === "croncreate" || tool === "crondelete") return "agent.session.create.v1";
+  if (tool === "cronlist") return "data.file.read.v1";
   if (tool.startsWith("file.write")) return "data.file.write.v1";
   if (tool.startsWith("file.edit")) return "data.file.write.v1";
   if (tool.startsWith("data.file.write")) return "data.file.write.v1";
@@ -348,6 +359,8 @@ function mapToolToPolicy(toolName: string): string | null {
 
   // MCP tools
   if (tool.startsWith("mcp.")) return "mcp.tool.execute.v1";
+  // Claude Code MCP tools use mcp__ prefix (double underscore, not mcp.)
+  if (tool.startsWith("mcp__")) return "mcp.tool.execute.v1";
 
   // Agent sessions and spawning
   if (tool.match(/agent\.session|session\.create/))

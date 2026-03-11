@@ -23,18 +23,18 @@ if check_command_allowed "" 2> /dev/null; then
 fi
 echo "  ✅ check_command_allowed '' -> 1"
 
-# check_command_allowed: non-empty -> return 0 (current stub allows any)
-check_command_allowed "ls -la" || {
-    echo "FAIL: check_command_allowed 'ls -la'" >&2
+# check_command_allowed: non-empty -> return 1 (stub denies by default; real enforcement in aport-guardrail-bash.sh)
+if check_command_allowed "ls -la" 2> /dev/null; then
+    echo "FAIL: check_command_allowed 'ls -la' should return 1 (stub)" >&2
     exit 1
-}
-echo "  ✅ check_command_allowed 'ls -la' -> 0"
+fi
+echo "  ✅ check_command_allowed 'ls -la' -> 1 (stub denies)"
 
-check_command_allowed "bash" || {
-    echo "FAIL: check_command_allowed 'bash'" >&2
+if check_command_allowed "bash" 2> /dev/null; then
+    echo "FAIL: check_command_allowed 'bash' should return 1 (stub)" >&2
     exit 1
-}
-echo "  ✅ check_command_allowed 'bash' -> 0"
+fi
+echo "  ✅ check_command_allowed 'bash' -> 1 (stub denies)"
 
 echo ""
 echo "  All allowlist.sh tests passed."

@@ -218,11 +218,17 @@ if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
         # Parse log line: [timestamp] tool=X decision_id=Y allow=Z ... context="..." (optional)
         timestamp=$(echo "$line" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
         tool=$(echo "$line" | sed -n 's/.*tool=\([^ ]*\).*/\1/p')
+        decision_id=$(echo "$line" | sed -n 's/.*decision_id=\([^ ]*\).*/\1/p')
         allow=$(echo "$line" | sed -n 's/.*allow=\([^ ]*\).*/\1/p')
         context=$(echo "$line" | sed -n 's/.*context="\([^"]*\)".*/\1/p')
         timestamp=${timestamp:-unknown}
         tool=${tool:-unknown}
         allow=${allow:-unknown}
+        # Synthetic decision_id for old log formats that lack one
+        if [ -z "$decision_id" ]; then
+            ctx_slug=$(printf '%.16s' "${context:-}" | tr ' ' '_')
+            decision_id="${timestamp}-${tool}-${ctx_slug}"
+        fi
 
         short_time=$(echo "$timestamp" | cut -d' ' -f1-2 | cut -d'.' -f1)
         # Show capability + context when present (e.g. "exec.run | cat test.md"); truncate long context

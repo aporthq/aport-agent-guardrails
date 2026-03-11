@@ -14,8 +14,11 @@ run_setup() {
     log_info "Setting up APort guardrails for CrewAI..."
     config_dir="$(write_config_template crewai)"
     mkdir -p "$config_dir/aport"
+    chmod 700 "$config_dir/aport"
     export APORT_FRAMEWORK=crewai
     run_passport_wizard "$@"
+    # Harden permissions on passport (contains policy/capabilities)
+    [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
     echo ""
     echo "  Next steps (CrewAI):"
     echo "  ───────────────────"

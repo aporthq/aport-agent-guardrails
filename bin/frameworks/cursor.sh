@@ -16,9 +16,13 @@ run_setup() {
     # Passport and data live under Cursor's config dir (~/.cursor/aport/ by default).
     config_dir="$(get_config_dir cursor)"
     mkdir -p "$config_dir/aport"
+    chmod 700 "$config_dir/aport"
 
     export APORT_FRAMEWORK=cursor
     run_passport_wizard "$@"
+
+    # Harden permissions on passport (contains policy/capabilities)
+    [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
 
     # Resolve absolute path to hook script (works from repo or npx package)
     HOOK_SCRIPT="${APORT_CURSOR_HOOK_SCRIPT:-}"
@@ -48,6 +52,7 @@ run_setup() {
         .hooks.beforeShellExecution = ($b | map(select(.command != $cmd)) | . + [{ "command": $cmd }]) |
         .hooks.preToolUse = ($p | map(select(.command != $cmd)) | . + [{ "command": $cmd }])
       ')
+            [ -f "$CURSOR_HOOKS_FILE" ] && cp "$CURSOR_HOOKS_FILE" "${CURSOR_HOOKS_FILE}.bak"
             echo "$NEW_HOOKS" > "$CURSOR_HOOKS_FILE"
         else
             _write_cursor_hooks_file "$CURSOR_HOOKS_FILE" "$HOOK_SCRIPT"
@@ -55,6 +60,7 @@ run_setup() {
     else
         _write_cursor_hooks_file "$CURSOR_HOOKS_FILE" "$HOOK_SCRIPT"
     fi
+    chmod 600 "$CURSOR_HOOKS_FILE"
 
     echo ""
     echo "  Next steps (Cursor):"
@@ -64,7 +70,7 @@ run_setup() {
     echo "  3. Restart Cursor (or reload window) so hooks are picked up."
     echo "  4. Shell commands and tool use will be checked by APort policy (exit 2 = block)."
     echo ""
-    echo "  Same script works for VS Code + Copilot and Claude Code — see: docs/frameworks/cursor.md"
+    echo "  Same script works for VS Code + Copilot. For Claude Code use the dedicated integration: docs/frameworks/claude-code.md"
     echo ""
 }
 
@@ -80,12 +86,14 @@ _write_cursor_hooks_file() {
       }
     }' > "$file"
     else
+        local escaped_cmd
+        escaped_cmd="$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g')"
         cat > "$file" << EOF
 {
   "version": 1,
   "hooks": {
-    "beforeShellExecution": [{"command": "$cmd"}],
-    "preToolUse": [{"command": "$cmd"}]
+    "beforeShellExecution": [{"command": "${escaped_cmd}"}],
+    "preToolUse": [{"command": "${escaped_cmd}"}]
   }
 }
 EOF

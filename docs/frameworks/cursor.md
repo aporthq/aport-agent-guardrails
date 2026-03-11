@@ -1,6 +1,14 @@
-# APort Agent Guardrail — Cursor (and VS Code Copilot / Claude Code)
+# APort Agent Guardrail — Cursor (and VS Code Copilot)
 
-Cursor, VS Code with GitHub Copilot, and Claude Code support **config-driven hooks** that run before shell execution or tool use. The **APort hook script** reads JSON from stdin, calls the existing APort guardrail (policy + passport), and returns allow/deny; **exit 2** blocks the action. One script works across Cursor, Copilot, and Claude Code.
+> **Update (v1.0.13):** The claim that the cursor hook works for Claude Code is incorrect.
+> The cursor hook outputs `permission: allow/deny` — Claude Code expects `hookSpecificOutput.permissionDecision`.
+> A dedicated Claude Code integration is now available:
+> ```bash
+> npx @aporthq/aport-agent-guardrails claude-code
+> ```
+> See [docs/frameworks/claude-code.md](./claude-code.md).
+
+Cursor and VS Code with GitHub Copilot support **config-driven hooks** that run before shell execution or tool use. The **APort hook script** reads JSON from stdin, calls the existing APort guardrail (policy + passport), and returns allow/deny; **exit 2** blocks the action.
 
 ## Two ways to use APort
 
@@ -17,9 +25,9 @@ For Cursor, you almost always use **Guardrails (CLI)** once to install the hook;
 
 - **Hooks:** Cursor uses `~/.cursor/hooks.json` (or `.cursor/hooks.json` in the project). Hooks such as `beforeShellExecution` and `preToolUse` run a command (our script). The host sends JSON to stdin and reads JSON from stdout; **exit code 2** = block.
 - **VS Code Copilot:** Agent hooks (Preview) use `~/.claude/settings.json` or `.github/hooks/*.json` with `PreToolUse`; same idea: command, stdin JSON, stdout JSON, exit 2 = block.
-- **Claude Code:** `~/.claude/settings.json`, same PreToolUse style.
+- **Claude Code:** Uses `~/.claude/settings.json` with a **different** output format (`hookSpecificOutput.permissionDecision`). Use the **dedicated Claude Code integration** instead of this Cursor hook — see [claude-code.md](./claude-code.md).
 
-Our script accepts Cursor- and Copilot-style payloads (e.g. `command`, or `tool`/`input`), maps to the **system.command.execute** policy, calls the bash guardrail, and returns `permission: allow|deny` plus optional `agentMessage`. No VS Code extension is required for interception; hooks are the mechanism.
+Our script accepts Cursor- and Copilot-style payloads (e.g. `command`, or `tool`/`input`), maps to the **system.command.execute** policy, calls the bash guardrail, and returns `permission: allow|deny` plus optional `agentMessage`.
 
 **Hook script path:** The hook script (`aport-cursor-hook.sh`) resolves `bin/aport-guardrail-bash.sh` relative to its own directory (script dir → parent = package root). When you install via **npx**, the installer writes the path to the script inside the npx cache (e.g. `…/node_modules/@aporthq/aport-agent-guardrails/bin/aport-cursor-hook.sh`), so the guardrail script is found at `…/bin/aport-guardrail-bash.sh`. If you copy the hook script elsewhere, ensure `bin/aport-guardrail-bash.sh` exists at the same relative location or set `APORT_GUARDRAIL_SCRIPT` (or equivalent) so the hook can find the evaluator.
 
@@ -121,10 +129,11 @@ Then run `bin/aport-status.sh` and `cat ~/.cursor/aport/audit.log` to confirm th
 
 Same as all frameworks: **passport is the source of truth**. Set passport `status` to `suspended` (or `active` to resume). The guardrail denies every call until the passport is active again.
 
-## Using the same script in VS Code (Copilot) and Claude Code
+## Using the same script in VS Code (Copilot)
 
 - **VS Code + GitHub Copilot:** Add a PreToolUse hook in `~/.claude/settings.json` (or project `.claude/settings.json`, or `.github/hooks/*.json`) that runs the same script. See [Agent hooks (Preview)](https://code.visualstudio.com/docs/copilot/customization/hooks).
-- **Claude Code:** Configure `~/.claude/settings.json` to run the same APort hook script for PreToolUse.
+
+For **Claude Code**, use the [dedicated Claude Code integration](./claude-code.md) instead — it uses the correct output format (`hookSpecificOutput.permissionDecision`) and supports all Claude Code tool types.
 
 The script accepts multiple input shapes (e.g. `command`, `tool`/`input`) and returns the host-expected JSON; **exit 0** = allow, **exit 2** = block.
 
@@ -156,4 +165,4 @@ Runtime enforcement in Cursor is done by the **hook script**, not by this packag
 
 ## Status
 
-Implemented (Story E). **APort Agent Guardrail for Cursor.** Installer: `npx @aporthq/aport-agent-guardrails cursor`; hook script: `bin/aport-cursor-hook.sh`; config: `~/.cursor/hooks.json`. Same script usable for VS Code Copilot and Claude Code.
+Implemented (Story E). **APort Agent Guardrail for Cursor.** Installer: `npx @aporthq/aport-agent-guardrails cursor`; hook script: `bin/aport-cursor-hook.sh`; config: `~/.cursor/hooks.json`. Same script usable for VS Code Copilot. For Claude Code, use the dedicated integration: `npx @aporthq/aport-agent-guardrails claude-code` (see [claude-code.md](./claude-code.md)).
