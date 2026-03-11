@@ -2,15 +2,32 @@
 # validation.sh - Input validation functions for security
 # Used to prevent command injection, path traversal, and other injection attacks
 
-# Validate command string doesn't contain bash metacharacters
-# Returns 0 if safe, 1 if contains dangerous characters
+# Validate command string for dangerous injection patterns.
+# Returns 0 if safe, 1 if contains dangerous patterns.
+# NOTE: Pipes (|), chains (&&/||), redirects (>), and variable refs ($) are legitimate
+# shell syntax used by Claude Code, Cursor, and other AI tools. We block dangerous
+# OPERATIONS (handled by built-in security patterns and blocked_patterns in the evaluator),
+# not normal shell syntax. This function catches injection-specific patterns only.
 validate_command_string() {
     local cmd="$1"
 
-    # Check for bash metacharacters that could be used for injection
-    # Allow: alphanumeric, space, dash, underscore, dot, slash, equals, colon
-    # Block: $, `, |, &, ;, <, >, (, ), {, }, [, ], *, ?, \, newline, tab
-    if echo "$cmd" | grep -qE '[$`|&;<>(){}[\]*?\\\n\t]'; then
+    # Block backtick command substitution (injection vector; $() is caught by patterns below)
+    if echo "$cmd" | grep -qF '`'; then
+        return 1
+    fi
+
+    # Block $( ) command substitution containing dangerous commands
+    if echo "$cmd" | grep -qE '\$\([^)]*\b(rm|dd|mkfs|curl|wget|chmod|chown|sudo|kill|nc|netcat)\b'; then
+        return 1
+    fi
+
+    # Block null bytes (string termination attack)
+    if printf '%s' "$cmd" | grep -qP '\x00' 2> /dev/null; then
+        return 1
+    fi
+
+    # Block control characters (except tab/newline which are normal in shell)
+    if printf '%s' "$cmd" | grep -qP '[\x01-\x08\x0e-\x1f]' 2> /dev/null; then
         return 1
     fi
 
@@ -55,10 +72,13 @@ validate_passport_path() {
     local abs_path
     abs_path=$(readlink -f "$path" 2> /dev/null || realpath "$path" 2> /dev/null || echo "$path")
 
-    # Allowed base directories (home .openclaw, .aport, /tmp/aport-*)
+    # Allowed base directories for passport storage
     local allowed_bases=(
         "$HOME/.openclaw"
         "$HOME/.aport"
+        "$HOME/.claude"
+        "$HOME/.cursor"
+        "$HOME/.n8n"
         "/tmp/aport-"
     )
 

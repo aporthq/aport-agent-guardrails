@@ -22,13 +22,24 @@ function sanitize(s: string, maxLen: number = 120): string {
   return s.replace(/[\r\n]+/g, ' ').replace(/"/g, '\\"').slice(0, maxLen);
 }
 
+/** Generate a UUID v4 decision_id matching the API format. */
+function generateDecisionId(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 function formatEntry(entry: AuditEntry): string {
   const now = new Date();
   const ts = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
   const code = entry.code || (entry.allow ? 'oap.allowed' : 'oap.denied');
+  // Ensure decision_id is always present (generate UUID v4 matching API format if missing)
+  const decisionId = entry.decision_id || generateDecisionId();
   // Match bash format: [ts] tool=X decision_id=D allow=T policy=P code=C agent_id=A context="..."
   let line = `[${ts}] tool=${entry.tool}`;
-  if (entry.decision_id) line += ` decision_id=${entry.decision_id}`;
+  line += ` decision_id=${decisionId}`;
   line += ` allow=${entry.allow} policy=${entry.policy_id} code=${code}`;
   if (entry.agent_id) line += ` agent_id=${entry.agent_id}`;
   if (entry.context_summary) line += ` context="${sanitize(entry.context_summary)}"`;

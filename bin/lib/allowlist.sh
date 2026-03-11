@@ -5,14 +5,16 @@
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]:-.}")/common.sh"
 
-# Placeholder: allowlist check logic can be shared between bash evaluator and API
-# Returns 0 if command is allowed, 1 if denied
+# Stub: command allowlist checking is implemented directly in aport-guardrail-bash.sh
+# (safe_prefix_match + blocked_patterns). This file is kept for backward compatibility
+# but callers MUST NOT rely on this function for security enforcement.
 check_command_allowed() {
     local command_line="$1"
     local allowed_list="${2:-*}"
-    # TODO: Implement against passport allowed_commands + blocked patterns
     [[ -z "$command_line" ]] && return 1
-    return 0
+    # SECURITY: Not implemented here — use aport-guardrail-bash.sh for actual enforcement
+    echo "[aport] WARN: check_command_allowed is a stub; use aport-guardrail-bash.sh" >&2
+    return 1
 }
 
 export -f check_command_allowed
