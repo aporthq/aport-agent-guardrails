@@ -45,12 +45,13 @@ run_setup() {
     if [ -f "$CURSOR_HOOKS_FILE" ] && command -v jq &> /dev/null; then
         EXISTING=$(cat "$CURSOR_HOOKS_FILE")
         if echo "$EXISTING" | jq -e '.hooks' &> /dev/null; then
-            # Add APort hook to beforeShellExecution and preToolUse (avoid duplicate)
+            # Add APort hook to all supported lifecycle events (avoid duplicate)
             NEW_HOOKS=$(echo "$EXISTING" | jq -c --arg cmd "$HOOK_SCRIPT" '
-        (.hooks.beforeShellExecution // []) as $b |
-        (.hooks.preToolUse // []) as $p |
-        .hooks.beforeShellExecution = ($b | map(select(.command != $cmd)) | . + [{ "command": $cmd }]) |
-        .hooks.preToolUse = ($p | map(select(.command != $cmd)) | . + [{ "command": $cmd }])
+        def upsert_hook: map(select(.command != $cmd)) | . + [{ "command": $cmd }];
+        .hooks.beforeShellExecution = ((.hooks.beforeShellExecution // []) | upsert_hook) |
+        .hooks.preToolUse = ((.hooks.preToolUse // []) | upsert_hook) |
+        .hooks.beforeMCPExecution = ((.hooks.beforeMCPExecution // []) | upsert_hook) |
+        .hooks.subagentStart = ((.hooks.subagentStart // []) | upsert_hook)
       ')
             [ -f "$CURSOR_HOOKS_FILE" ] && cp "$CURSOR_HOOKS_FILE" "${CURSOR_HOOKS_FILE}.bak"
             echo "$NEW_HOOKS" > "$CURSOR_HOOKS_FILE"
@@ -82,7 +83,9 @@ _write_cursor_hooks_file() {
       version: 1,
       hooks: {
         beforeShellExecution: [{ command: $cmd }],
-        preToolUse: [{ command: $cmd }]
+        preToolUse: [{ command: $cmd }],
+        beforeMCPExecution: [{ command: $cmd }],
+        subagentStart: [{ command: $cmd }]
       }
     }' > "$file"
     else
@@ -93,7 +96,9 @@ _write_cursor_hooks_file() {
   "version": 1,
   "hooks": {
     "beforeShellExecution": [{"command": "${escaped_cmd}"}],
-    "preToolUse": [{"command": "${escaped_cmd}"}]
+    "preToolUse": [{"command": "${escaped_cmd}"}],
+    "beforeMCPExecution": [{"command": "${escaped_cmd}"}],
+    "subagentStart": [{"command": "${escaped_cmd}"}]
   }
 }
 EOF

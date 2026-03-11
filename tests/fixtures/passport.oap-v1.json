@@ -9,7 +9,13 @@
   "capabilities": [
     {"id": "repo.pr.create"},
     {"id": "repo.merge"},
-    {"id": "system.command.execute"}
+    {"id": "system.command.execute"},
+    {"id": "data.file.read"},
+    {"id": "data.file.write"},
+    {"id": "web.fetch"},
+    {"id": "web.browser"},
+    {"id": "agent.session.create"},
+    {"id": "mcp.tool.execute"}
   ],
   "limits": {
     "code.repository.merge": {
@@ -23,6 +29,29 @@
     "system.command.execute": {
       "allowed_commands": ["mkdir", "ls", "bash", "npm", "git", "node", "pnpm"],
       "blocked_patterns": ["rm -rf", "sudo"]
+    },
+    "data.file.read": {
+      "allowed_paths": ["*"],
+      "max_file_size_mb": 100
+    },
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_mb": 50
+    },
+    "web.fetch": {
+      "allowed_domains": ["*"],
+      "blocked_domains": [],
+      "max_requests_per_min": 60
+    },
+    "web.browser": {
+      "allowed_domains": ["*"],
+      "max_screenshots_per_hour": 100
+    },
+    "agent.session.create": {
+      "max_concurrent": 10
+    },
+    "mcp.tool.execute": {
+      "allowed_servers": ["*"]
     }
   },
   "regions": ["US", "CA"],
