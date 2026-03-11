@@ -53,6 +53,7 @@ jobs:
           npm publish -w @aporthq/aport-agent-guardrails-langchain --access public
           npm publish -w @aporthq/aport-agent-guardrails-crewai --access public
           npm publish -w @aporthq/aport-agent-guardrails-cursor --access public
+          npm publish -w @aporthq/aport-agent-guardrails-claude-code --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -183,6 +184,7 @@ jobs:
           npm install @aporthq/aport-agent-guardrails-langchain@$VERSION
           npm install @aporthq/aport-agent-guardrails-crewai@$VERSION
           npm install @aporthq/aport-agent-guardrails-cursor@$VERSION
+          npm install @aporthq/aport-agent-guardrails-claude-code@$VERSION
           \`\`\`
           (n8n package not published yet — coming soon.)
 

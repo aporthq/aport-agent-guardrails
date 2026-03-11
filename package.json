@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Policy enforcement guardrails for OpenClaw-compatible agent frameworks",
   "workspaces": [
     "packages/*",
@@ -22,7 +22,7 @@
     "changeset": "changeset",
     "version": "changeset version && node scripts/sync-version.mjs",
     "sync-version": "node scripts/sync-version.mjs",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build:core && npm run build --workspaces --if-present",
     "build:core": "npm run build -w @aporthq/aport-agent-guardrails-core",
     "release:version": "npm run version",
     "prepublishOnly": "npm run build 2>/dev/null || true"

@@ -41,6 +41,7 @@ run_one "$TESTS_DIR/frameworks/langchain/setup.sh"
 run_one "$TESTS_DIR/frameworks/crewai/setup.sh"
 run_one "$TESTS_DIR/frameworks/n8n/setup.sh"
 run_one "$TESTS_DIR/frameworks/cursor/setup.sh"
+run_one "$TESTS_DIR/frameworks/claude-code/setup.sh"
 
 # Node integration test (setup.test.mjs)
 if [[ -f "$TESTS_DIR/frameworks/openclaw/setup.test.mjs" ]]; then

@@ -32,7 +32,12 @@ detect_frameworks_list() {
         grep -qi 'crewai' "$dir/requirements.txt" 2> /dev/null && list+=(crewai)
     fi
 
-    # Dedupe preserving order (first occurrence wins). Safe for set -u when list is empty.
+    # Claude Code: detect claude binary or ~/.claude directory
+    if command -v claude &> /dev/null || [[ -d "$HOME/.claude" ]]; then
+        list+=(claude-code)
+    fi
+
+    # Dedupe preserving order
     local seen=() out=()
     if [[ ${#list[@]} -gt 0 ]]; then
         for fw in "${list[@]}"; do
