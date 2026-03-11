@@ -109,6 +109,64 @@ DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"OpenClaw Agent"}
 DEFAULT_AGENT_DESC=$(get_identity_description) || true
 DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
 
+# Framework-aware defaults: each framework needs different capabilities to function
+case "${APORT_FRAMEWORK:-}" in
+    claude-code)
+        # Claude Code: file ops, web, sub-agents, MCP tools are core functionality
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=y
+        DEFAULT_AGENT_SESSION=y
+        DEFAULT_MCP_TOOL=y
+        ;;
+    cursor)
+        # Cursor: IDE with shell, file ops, web search, agent mode
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=y
+        DEFAULT_MCP_TOOL=n
+        ;;
+    crewai)
+        # CrewAI: multi-agent framework — agents spawn sub-agents, use tools
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=y
+        DEFAULT_MCP_TOOL=y
+        ;;
+    langchain)
+        # LangChain/LangGraph: tool calling, web, files
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=n
+        DEFAULT_MCP_TOOL=n
+        ;;
+    n8n)
+        # n8n: workflow automation — HTTP, file, database, messaging
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=n
+        DEFAULT_MCP_TOOL=n
+        ;;
+    *)
+        # Generic / unknown framework: conservative defaults
+        DEFAULT_FILE_READ=n
+        DEFAULT_FILE_WRITE=n
+        DEFAULT_WEB_FETCH=n
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=n
+        DEFAULT_MCP_TOOL=n
+        ;;
+esac
+
 if [ -n "$NON_INTERACTIVE" ]; then
     # CI/tests: use defaults, no prompts. Use --output or APORT_FRAMEWORK for default path. Match interactive defaults (README: messaging out of the box).
     owner_id="$DEFAULT_EMAIL"
@@ -119,10 +177,12 @@ if [ -n "$NON_INTERACTIVE" ]; then
     exec_cap=y
     msg_cap=y
     data_cap=n
-    file_read_cap=n
-    file_write_cap=n
-    web_fetch_cap=n
-    web_browser_cap=n
+    file_read_cap=$DEFAULT_FILE_READ
+    file_write_cap=$DEFAULT_FILE_WRITE
+    web_fetch_cap=$DEFAULT_WEB_FETCH
+    web_browser_cap=$DEFAULT_WEB_BROWSER
+    agent_session_cap=$DEFAULT_AGENT_SESSION
+    mcp_tool_cap=$DEFAULT_MCP_TOOL
     max_pr_size=500
     max_prs_per_day=10
     max_msgs_per_day=100
@@ -195,7 +255,11 @@ else
     # Choose capabilities
     echo "  🔐 Capabilities"
     echo "  ───────────────"
-    echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes (matches README/docs); others = no."
+    if [ "${APORT_FRAMEWORK:-}" = "claude-code" ]; then
+        echo "  Choose what your agent can do (y/n). Claude Code defaults: most capabilities = yes."
+    else
+        echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes (matches README/docs); others = no."
+    fi
     echo ""
     read -p "  • Create and merge pull requests? [Y/n]: " pr_cap
     pr_cap=${pr_cap:-y}
@@ -206,20 +270,50 @@ else
     read -p "  • Send messages (email, SMS, etc.)? [Y/n]: " msg_cap
     msg_cap=${msg_cap:-y}
 
-    read -p "  • Read files from disk? [y/N]: " file_read_cap
-    file_read_cap=${file_read_cap:-n}
+    if [ "$DEFAULT_FILE_READ" = "y" ]; then
+        read -p "  • Read files from disk? [Y/n]: " file_read_cap
+    else
+        read -p "  • Read files from disk? [y/N]: " file_read_cap
+    fi
+    file_read_cap=${file_read_cap:-$DEFAULT_FILE_READ}
 
-    read -p "  • Write/edit files on disk? [y/N]: " file_write_cap
-    file_write_cap=${file_write_cap:-n}
+    if [ "$DEFAULT_FILE_WRITE" = "y" ]; then
+        read -p "  • Write/edit files on disk? [Y/n]: " file_write_cap
+    else
+        read -p "  • Write/edit files on disk? [y/N]: " file_write_cap
+    fi
+    file_write_cap=${file_write_cap:-$DEFAULT_FILE_WRITE}
 
-    read -p "  • Fetch data from web (HTTP requests)? [y/N]: " web_fetch_cap
-    web_fetch_cap=${web_fetch_cap:-n}
+    if [ "$DEFAULT_WEB_FETCH" = "y" ]; then
+        read -p "  • Fetch data from web (HTTP requests)? [Y/n]: " web_fetch_cap
+    else
+        read -p "  • Fetch data from web (HTTP requests)? [y/N]: " web_fetch_cap
+    fi
+    web_fetch_cap=${web_fetch_cap:-$DEFAULT_WEB_FETCH}
 
-    read -p "  • Automate web browser? [y/N]: " web_browser_cap
-    web_browser_cap=${web_browser_cap:-n}
+    if [ "$DEFAULT_WEB_BROWSER" = "y" ]; then
+        read -p "  • Automate web browser? [Y/n]: " web_browser_cap
+    else
+        read -p "  • Automate web browser? [y/N]: " web_browser_cap
+    fi
+    web_browser_cap=${web_browser_cap:-$DEFAULT_WEB_BROWSER}
 
     read -p "  • Export data (database, files, etc.)? [y/N]: " data_cap
     data_cap=${data_cap:-n}
+
+    if [ "$DEFAULT_AGENT_SESSION" = "y" ]; then
+        read -p "  • Spawn sub-agents and tasks? [Y/n]: " agent_session_cap
+    else
+        read -p "  • Spawn sub-agents and tasks? [y/N]: " agent_session_cap
+    fi
+    agent_session_cap=${agent_session_cap:-$DEFAULT_AGENT_SESSION}
+
+    if [ "$DEFAULT_MCP_TOOL" = "y" ]; then
+        read -p "  • Use MCP tools (external integrations)? [Y/n]: " mcp_tool_cap
+    else
+        read -p "  • Use MCP tools (external integrations)? [y/N]: " mcp_tool_cap
+    fi
+    mcp_tool_cap=${mcp_tool_cap:-$DEFAULT_MCP_TOOL}
 
     echo ""
 
@@ -351,6 +445,12 @@ fi
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
     capabilities_json="$capabilities_json{\"id\": \"data.export\"},"
 fi
+if [ "${agent_session_cap:-n}" = "y" ] || [ "${agent_session_cap:-n}" = "Y" ]; then
+    capabilities_json="$capabilities_json{\"id\": \"agent.session.create\"},"
+fi
+if [ "${mcp_tool_cap:-n}" = "y" ] || [ "${mcp_tool_cap:-n}" = "Y" ]; then
+    capabilities_json="$capabilities_json{\"id\": \"mcp.tool.execute\"},"
+fi
 # Remove trailing comma
 capabilities_json="${capabilities_json%,}]"
 
@@ -436,6 +536,14 @@ fi
 
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
     limits_json="$limits_json\"data.export\": {\"max_rows\": $max_export_rows, \"allow_pii\": $allow_pii_bool, \"allowed_collections\": [\"*\"]},"
+fi
+
+if [ "${agent_session_cap:-n}" = "y" ] || [ "${agent_session_cap:-n}" = "Y" ]; then
+    limits_json="$limits_json\"agent.session.create\": {\"max_concurrent\": 10},"
+fi
+
+if [ "${mcp_tool_cap:-n}" = "y" ] || [ "${mcp_tool_cap:-n}" = "Y" ]; then
+    limits_json="$limits_json\"mcp.tool.execute\": {\"allowed_servers\": [\"*\"]},"
 fi
 
 # Remove trailing comma
@@ -540,7 +648,13 @@ echo "  🔐 Capabilities:"
 [ "$pr_cap" = "y" ] || [ "$pr_cap" = "Y" ] && echo "    • Create and merge pull requests"
 [ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ] && echo "    • Execute system commands"
 [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ] && echo "    • Send messages"
+[ "$file_read_cap" = "y" ] || [ "$file_read_cap" = "Y" ] && echo "    • Read files"
+[ "$file_write_cap" = "y" ] || [ "$file_write_cap" = "Y" ] && echo "    • Write/edit files"
+[ "$web_fetch_cap" = "y" ] || [ "$web_fetch_cap" = "Y" ] && echo "    • Fetch from web"
+[ "$web_browser_cap" = "y" ] || [ "$web_browser_cap" = "Y" ] && echo "    • Automate browser"
 [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ] && echo "    • Export data"
+[ "${agent_session_cap:-n}" = "y" ] || [ "${agent_session_cap:-n}" = "Y" ] && echo "    • Spawn sub-agents and tasks"
+[ "${mcp_tool_cap:-n}" = "y" ] || [ "${mcp_tool_cap:-n}" = "Y" ] && echo "    • Use MCP tools"
 echo ""
 echo "  📝 Next steps:"
 echo "    • Review limits:  vim $PASSPORT_FILE"

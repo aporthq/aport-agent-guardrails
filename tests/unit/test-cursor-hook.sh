@@ -1,5 +1,6 @@
 #!/bin/bash
-# Unit tests for Cursor hook script: mock stdin (allow/deny), assert exit 0/2 and output JSON.
+# Unit tests for Cursor hook script: tests all hook event types (beforeShellExecution,
+# preToolUse with Shell/Read/Write/Delete/Task/MCP, beforeMCPExecution, subagentStart).
 # Uses test passport and guardrail; hook reads stdin and calls guardrail.
 
 set -e
@@ -18,81 +19,86 @@ HOOK_SCRIPT="$REPO_ROOT/bin/aport-cursor-hook.sh"
 chmod +x "$HOOK_SCRIPT" 2> /dev/null || true
 
 echo ""
-echo "  Unit — Cursor hook script (allow/deny, exit 0/2)"
+echo "  Unit — Cursor hook script (all hook events)"
 echo "  Hook: $HOOK_SCRIPT"
 echo ""
 
-# 1. Allow: command in allowlist (e.g. ls) -> exit 0, allowed: true
-echo "  Test: stdin allow (command allowed by passport)..."
-OUT1="$TEST_DIR/hook-allow-out.txt"
-echo '{"command":"ls -la"}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT1" 2> /dev/null
-EXIT1=$?
-[[ "$EXIT1" -eq 0 ]] || {
-    echo "FAIL: expected exit 0 for allow, got $EXIT1" >&2
-    exit 1
+# Helper: run hook with input, check exit code and output
+run_hook() {
+    local desc="$1" input="$2" expect_exit="$3" expect_field="$4"
+    local out="$TEST_DIR/hook-out-$RANDOM.txt"
+    set +e
+    echo "$input" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$out" 2> /dev/null
+    local actual_exit=$?
+    set -e
+    if [[ "$actual_exit" -ne "$expect_exit" ]]; then
+        echo "FAIL: $desc — expected exit $expect_exit, got $actual_exit (output: $(cat "$out"))" >&2
+        exit 1
+    fi
+    if [ -n "$expect_field" ] && ! grep -q "$expect_field" "$out"; then
+        echo "FAIL: $desc — expected '$expect_field' in output: $(cat "$out")" >&2
+        exit 1
+    fi
+    echo "  ✅ $desc"
 }
-grep -q '"allowed":true' "$OUT1" || {
-    echo "FAIL: output should contain allowed:true" >&2
-    cat "$OUT1" >&2
-    exit 1
-}
-grep -q '"permission":"allow"' "$OUT1" || {
-    echo "FAIL: output should contain permission:allow" >&2
-    exit 1
-}
-echo "  ✅ Allow: exit 0, permission allow, allowed true"
 
-# 2. Deny: blocked pattern (e.g. rm -rf) -> exit 2, allowed: false
-echo "  Test: stdin deny (blocked pattern)..."
-OUT2="$TEST_DIR/hook-deny-out.txt"
-set +e
-echo '{"command":"rm -rf /tmp/x"}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" "$HOOK_SCRIPT" > "$OUT2" 2> /dev/null
-EXIT2=$?
-set -e
-[[ "$EXIT2" -eq 2 ]] || {
-    echo "FAIL: expected exit 2 for deny, got $EXIT2 (output: $(cat "$OUT2"))" >&2
-    exit 1
-}
-grep -q '"allowed":false' "$OUT2" || {
-    echo "FAIL: output should contain allowed:false" >&2
-    cat "$OUT2" >&2
-    exit 1
-}
-grep -q '"permission":"deny"' "$OUT2" || {
-    echo "FAIL: output should contain permission:deny" >&2
-    exit 1
-}
-echo "  ✅ Deny: exit 2, permission deny, allowed false"
+# --- beforeShellExecution ---
+run_hook "beforeShellExecution: allow (ls)" \
+    '{"command":"ls -la"}' 0 '"permission":"allow"'
 
-# 3. Copilot-style input: input.command
-echo "  Test: Copilot-style JSON (input.command)..."
-OUT3="$TEST_DIR/hook-copilot-out.txt"
-echo '{"tool":"runTerminalCommand","input":{"command":"npm install"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT3" 2> /dev/null
-EXIT3=$?
-[[ "$EXIT3" -eq 0 ]] || {
-    echo "FAIL: expected exit 0 for npm install, got $EXIT3" >&2
-    exit 1
-}
-grep -q '"allowed":true' "$OUT3" || {
-    echo "FAIL: Copilot-style allow" >&2
-    exit 1
-}
-echo "  ✅ Copilot-style input -> allow"
+run_hook "beforeShellExecution: deny (rm -rf)" \
+    '{"command":"rm -rf /tmp/x"}' 2 '"permission":"deny"'
 
-# 4. Empty stdin -> fail-open allow (per script)
-echo "  Test: empty stdin -> allow with message..."
-OUT4="$TEST_DIR/hook-empty-out.txt"
-printf '' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4" 2> /dev/null
-EXIT4=$?
-[[ "$EXIT4" -eq 0 ]] || {
-    echo "FAIL: empty stdin should exit 0 (fail-open)" >&2
-    exit 1
-}
-grep -q '"allowed":true' "$OUT4" || {
-    echo "FAIL: empty stdin allow" >&2
-    exit 1
-}
-echo "  ✅ Empty stdin -> allow (fail-open)"
+# --- preToolUse: Shell ---
+run_hook "preToolUse Shell: allow (ls)" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
+
+run_hook "preToolUse Shell: deny (sudo)" \
+    '{"tool_name":"Shell","tool_input":{"command":"sudo reboot"}}' 2 '"permission":"deny"'
+
+# --- preToolUse: Read (allow without evaluator) ---
+run_hook "preToolUse Read: allow (no evaluator)" \
+    '{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"}}' 0 ''
+
+# --- preToolUse: Grep (allow without evaluator) ---
+run_hook "preToolUse Grep: allow (no evaluator)" \
+    '{"tool_name":"Grep","tool_input":{"pattern":"TODO"}}' 0 ''
+
+# --- preToolUse: Write ---
+run_hook "preToolUse Write: allow" \
+    '{"tool_name":"Write","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
+
+# --- preToolUse: Delete ---
+run_hook "preToolUse Delete: allow" \
+    '{"tool_name":"Delete","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
+
+# --- preToolUse: Task ---
+run_hook "preToolUse Task: allow" \
+    '{"tool_name":"Task","tool_input":{"description":"run tests"}}' 0 '"permission":"allow"'
+
+# --- preToolUse: MCP:<name> ---
+run_hook "preToolUse MCP:tool: allow" \
+    '{"tool_name":"MCP:github_search","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
+
+# --- preToolUse: unknown tool (fail-closed) ---
+run_hook "preToolUse unknown: deny (fail-closed)" \
+    '{"tool_name":"SomethingNew","tool_input":{}}' 2 '"permission":"deny"'
+
+# --- beforeMCPExecution ---
+run_hook "beforeMCPExecution: allow" \
+    '{"tool_name":"github_search","tool_input":{"query":"test"},"server":"github","url":"http://localhost:3000"}' 0 '"permission":"allow"'
+
+# --- subagentStart ---
+run_hook "subagentStart: allow" \
+    '{"subagent_id":"abc-123","subagent_type":"worker","task":"run unit tests"}' 0 '"permission":"allow"'
+
+# --- Legacy Copilot-style ---
+run_hook "Copilot-style: allow (npm install)" \
+    '{"tool":"runTerminalCommand","input":{"command":"npm install"}}' 0 '"permission":"allow"'
+
+# --- Empty stdin -> fail-open ---
+run_hook "Empty stdin: allow (fail-open)" \
+    '' 0 '"allowed":true'
 
 echo ""
 echo "  All Cursor hook unit tests passed."
