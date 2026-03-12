@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.15] - 2026-03-12
+
+### Added
+- **Framework-specific package executables:** All framework packages (`@aporthq/aport-agent-guardrails-cursor`, `@aporthq/aport-agent-guardrails-langchain`, `@aporthq/aport-agent-guardrails-crewai`, `@aporthq/aport-agent-guardrails-claude-code`, `@aporthq/aport-agent-guardrails-n8n`) now include `bin/install` executables.
+  - Users can now run: `npx @aporthq/aport-agent-guardrails-cursor`, `npx @aporthq/aport-agent-guardrails-langchain`, etc.
+  - Each wrapper calls the main package with the correct framework argument
+  - Fixes npm error "could not determine executable to run"
+
+### Fixed
+- **Framework argument parsing:** CLI now correctly recognizes framework names as first positional argument (e.g., `npx @aporthq/aport-agent-guardrails cursor`)
+  - Previously framework names were ignored and auto-detection would incorrectly default to `claude-code`
+  - Now correctly parses: `cursor`, `langchain`, `crewai`, `openclaw`, `claude-code`, `n8n` as first argument
+  - Maintains backward compatibility with `--framework=` and `-f` flags
+
 ## [1.0.14] - 2026-03-11
 
 ### Added
