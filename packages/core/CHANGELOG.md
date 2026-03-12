@@ -1,5 +1,7 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.15
+
 ## 1.0.13
 
 ### Patch Changes
