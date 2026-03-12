@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Wrapper for npx @aporthq/aport-agent-guardrails-claude-code
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if command -v aport-agent-guardrails &> /dev/null; then
+  exec aport-agent-guardrails claude-code "$@"
+elif [[ -x "$SCRIPT_DIR/../../../@aporthq/aport-agent-guardrails/bin/agent-guardrails" ]]; then
+  exec "$SCRIPT_DIR/../../../@aporthq/aport-agent-guardrails/bin/agent-guardrails" claude-code "$@"
+elif [[ -x "$SCRIPT_DIR/../../../../aport-agent-guardrails/bin/agent-guardrails" ]]; then
+  exec "$SCRIPT_DIR/../../../../aport-agent-guardrails/bin/agent-guardrails" claude-code "$@"
+else
+  exec npx @aporthq/aport-agent-guardrails claude-code "$@"
+fi
