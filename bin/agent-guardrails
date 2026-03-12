@@ -54,7 +54,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# If no framework from args, try APORT_FRAMEWORK (non-interactive) or detection
+# If no framework from args, check if first REST argument is a framework name
+if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]]; then
+  first_arg="${REST[0]}"
+  # Check if first arg looks like a framework name (lowercase alphanumeric + hyphen)
+  if [[ "$first_arg" =~ ^[a-z0-9-]+$ ]]; then
+    # Valid framework names
+    valid_frameworks=(openclaw langchain crewai cursor claude-code n8n)
+    for valid_fw in "${valid_frameworks[@]}"; do
+      if [[ "$first_arg" == "$valid_fw" ]]; then
+        framework="$first_arg"
+        # Remove framework from REST so remaining args are pass-through
+        REST=("${REST[@]:1}")
+        break
+      fi
+    done
+  fi
+fi
+
+# If still no framework from args, try APORT_FRAMEWORK (non-interactive) or detection
 if [[ -z "$framework" ]]; then
   if [[ -n "${APORT_FRAMEWORK:-}" ]]; then
     framework="$APORT_FRAMEWORK"
