@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Wrapper for npx @aporthq/aport-agent-guardrails-cursor
+# Calls the main package with cursor framework argument
+set -euo pipefail
+
+# Find the main package's agent-guardrails script
+# This script is in node_modules/@aporthq/aport-agent-guardrails-cursor/bin/install
+# We need to call ../../../aport-agent-guardrails/bin/agent-guardrails
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Try to find the main package
+MAIN_BIN=""
+if command -v aport-agent-guardrails &> /dev/null; then
+  # If main package is globally installed or in PATH
+  MAIN_BIN="aport-agent-guardrails"
+elif [[ -x "$SCRIPT_DIR/../../../@aporthq/aport-agent-guardrails/bin/agent-guardrails" ]]; then
+  # If installed via npx (sibling in node_modules)
+  MAIN_BIN="$SCRIPT_DIR/../../../@aporthq/aport-agent-guardrails/bin/agent-guardrails"
+elif [[ -x "$SCRIPT_DIR/../../../../aport-agent-guardrails/bin/agent-guardrails" ]]; then
+  # If in workspace (monorepo)
+  MAIN_BIN="$SCRIPT_DIR/../../../../aport-agent-guardrails/bin/agent-guardrails"
+else
+  # Fallback: use npx to run the main package
+  exec npx @aporthq/aport-agent-guardrails cursor "$@"
+fi
+
+# Execute main package with cursor framework
+exec "$MAIN_BIN" cursor "$@"
