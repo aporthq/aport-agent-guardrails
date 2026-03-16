@@ -8,7 +8,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { spawn } from "child_process";
 import { createHash, randomUUID } from "crypto";
-import { readFile, mkdir, appendFile } from "fs/promises";
+import { readFile, writeFile, mkdir, appendFile } from "fs/promises";
 import { appendFileSync, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
@@ -259,7 +259,235 @@ const plugin = {
       }
     });
 
+    // --- Optional agent tools (opt-in via agents.list[].tools.allow) ---
+
+    api.registerTool(
+      {
+        name: "aport_check",
+        label: "APort Authorization Check",
+        description:
+          "Check whether a tool call is authorized by the APort OAP policy before executing it. Returns {allowed, policy, reason}. Use before any sensitive operation to verify authorization.",
+        parameters: {
+          type: "object",
+          properties: {
+            tool_name: {
+              type: "string",
+              description:
+                "The OpenClaw tool name to check (e.g. 'exec', 'message', 'write')",
+            },
+            params: {
+              type: "object",
+              description:
+                "The parameters that would be passed to the tool",
+              additionalProperties: true,
+            },
+          },
+          required: ["tool_name"],
+        },
+        async execute(
+          _id: string,
+          params: { tool_name: string; params?: Record<string, unknown> },
+        ) {
+          const policyName = mapToolToPolicy(params.tool_name);
+          let result: {
+            allowed: boolean;
+            policy: string | null;
+            reason: string;
+          };
+
+          try {
+            if (!policyName) {
+              result = allowUnmappedTools
+                ? {
+                    allowed: true,
+                    policy: null,
+                    reason:
+                      "No policy mapping — tool allowed (allowUnmappedTools: true)",
+                  }
+                : {
+                    allowed: false,
+                    policy: null,
+                    reason:
+                      "No policy mapping — tool blocked (allowUnmappedTools: false)",
+                  };
+              return {
+                content: [{ type: "text" as const, text: JSON.stringify(result) }],
+                details: result,
+              };
+            }
+
+            const scriptToolName = policyName.replace(/\.v\d+$/, "");
+            let decision: any;
+            if (mode === "api") {
+              decision = await verifyViaAPI(policyName, params.params || {}, {
+                apiUrl,
+                apiKey,
+                passportFile: agentId ? null : passportFile,
+                agentId,
+              });
+              const configDir = dirname(passportFile);
+              const auditLogPath = join(configDir, "audit.log");
+              logAuditEntry(auditLogPath, {
+                tool: params.tool_name,
+                allow: Boolean(decision.allow),
+                policy: policyName,
+                code: decision.reasons?.[0]?.code,
+                agentId: agentId || undefined,
+                context: `aport_check:${params.tool_name}`,
+              });
+            } else {
+              decision = await verifyViaScript(
+                scriptToolName,
+                params.params || {},
+                { guardrailScript, passportFile },
+              );
+            }
+
+            if (!verifyDecisionIntegrity(decision)) {
+              result = {
+                allowed: false,
+                policy: policyName,
+                reason:
+                  "Decision integrity verification failed (content_hash mismatch)",
+              };
+            } else {
+              result = {
+                allowed: Boolean(decision.allow),
+                policy: policyName,
+                reason:
+                  decision.reasons?.[0]?.message ??
+                  (decision.allow ? "Allowed" : "Denied"),
+              };
+            }
+          } catch (error: any) {
+            result = {
+              allowed: false,
+              policy: policyName,
+              reason: error.message,
+            };
+          }
+
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(result) }],
+            details: result,
+          };
+        },
+      } as any,
+      { optional: true },
+    );
+
+    api.registerTool(
+      {
+        name: "aport_passport",
+        label: "APort Passport Manager",
+        description:
+          "Read or generate an APort agent passport (agent-passport.yaml / passport.json). Use action='read' to inspect current capabilities, action='generate' to scaffold a new passport.",
+        parameters: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["read", "generate"],
+              description:
+                "read = return current passport; generate = create default passport file if missing",
+            },
+          },
+          required: ["action"],
+        },
+        async execute(
+          _id: string,
+          params: { action: "read" | "generate" },
+        ) {
+          let result: Record<string, unknown>;
+
+          try {
+            if (params.action === "read") {
+              try {
+                const data = await readFile(passportFile, "utf8");
+                const passport = JSON.parse(data);
+                result = {
+                  status: "ok",
+                  passport_id:
+                    passport.passport_id ?? passport.agent_id ?? null,
+                  assurance_level: passport.assurance_level ?? null,
+                  capabilities: (passport.capabilities ?? []).map(
+                    (c: any) => c.id ?? c,
+                  ),
+                  passport_status: passport.status ?? "unknown",
+                };
+              } catch (readErr: any) {
+                if (readErr.code === "ENOENT") {
+                  result = {
+                    status: "not_found",
+                    path: passportFile,
+                    hint: "Run action='generate' to create a default passport, or run: npx @aporthq/aport-agent-guardrails openclaw",
+                  };
+                } else {
+                  throw readErr;
+                }
+              }
+            } else {
+              // action === "generate"
+              if (existsSync(passportFile)) {
+                result = {
+                  status: "exists",
+                  path: passportFile,
+                  hint: "Passport already exists. Use action='read' to inspect it.",
+                };
+              } else {
+                await mkdir(dirname(passportFile), { recursive: true });
+                const defaultPassport = {
+                  spec_version: "oap/1.0",
+                  passport_id: randomUUID(),
+                  agent_id: "my-openclaw-agent",
+                  owner_id: "configure-me",
+                  status: "active",
+                  assurance_level: "L1",
+                  capabilities: [
+                    { id: "system.command.execute" },
+                    { id: "data.file.read" },
+                    { id: "data.file.write" },
+                    { id: "web.fetch" },
+                  ],
+                  limits: {
+                    "system.command.execute": {
+                      allowed_commands: ["*"],
+                      blocked_patterns: [],
+                    },
+                    "data.file.write": { allowed_paths: ["~/.openclaw/"] },
+                    "web.fetch": { allowed_domains: ["*"] },
+                  },
+                };
+                await writeFile(
+                  passportFile,
+                  JSON.stringify(defaultPassport, null, 2),
+                  "utf8",
+                );
+                result = {
+                  status: "created",
+                  path: passportFile,
+                  hint: "Edit this file to restrict capabilities. Restart OpenClaw to apply.",
+                };
+              }
+            }
+          } catch (error: any) {
+            result = {
+              status: "error",
+              reason: error.message,
+            };
+          }
+
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(result) }],
+            details: result,
+          };
+        },
+      } as any,
+      { optional: true },
+    );
+
     log(`[APort] Registered hooks: before_tool_call`);
+    log(`[APort] Registered optional tools: aport_check, aport_passport`);
   },
 };
 

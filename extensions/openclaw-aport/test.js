@@ -13,7 +13,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import {
+import plugin, {
   mapToolToPolicy,
   canonicalize,
   verifyDecisionIntegrity,
@@ -301,6 +301,196 @@ describe('integration (guardrail script)', () => {
       'second decision should chain',
     );
     assert.ok(verifyDecisionIntegrity(dec2), 'second decision must verify');
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+});
+
+// --- Agent tool registration and behavior tests ---
+
+describe('aport_check and aport_passport tool registration', () => {
+  it('registers both tools with optional: true', () => {
+    const registeredTools = [];
+    const mockApi = {
+      pluginConfig: { mode: 'local', passportFile: '/tmp/nonexistent-passport.json' },
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+      on: () => {},
+      registerTool: (def, opts) => {
+        registeredTools.push({ name: def.name, opts, parameters: def.parameters, execute: def.execute });
+      },
+    };
+
+    plugin(mockApi);
+
+    const checkTool = registeredTools.find((t) => t.name === 'aport_check');
+    const passportTool = registeredTools.find((t) => t.name === 'aport_passport');
+
+    assert.ok(checkTool, 'aport_check tool must be registered');
+    assert.ok(passportTool, 'aport_passport tool must be registered');
+    assert.deepStrictEqual(checkTool.opts, { optional: true });
+    assert.deepStrictEqual(passportTool.opts, { optional: true });
+
+    // Verify parameter schemas
+    assert.ok(checkTool.parameters.properties.tool_name, 'aport_check must have tool_name param');
+    assert.ok(checkTool.parameters.properties.params, 'aport_check must have params param');
+    assert.deepStrictEqual(checkTool.parameters.required, ['tool_name']);
+
+    assert.ok(passportTool.parameters.properties.action, 'aport_passport must have action param');
+    assert.deepStrictEqual(passportTool.parameters.required, ['action']);
+  });
+});
+
+describe('aport_check tool behavior', () => {
+  /** Helper: register plugin and extract tool executors */
+  function getTools(configOverrides = {}) {
+    const registeredTools = {};
+    const mockApi = {
+      pluginConfig: {
+        mode: 'local',
+        passportFile: '/tmp/nonexistent-passport.json',
+        guardrailScript: '/tmp/nonexistent-guardrail.sh',
+        ...configOverrides,
+      },
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+      on: () => {},
+      registerTool: (def, _opts) => {
+        registeredTools[def.name] = def.execute;
+      },
+    };
+    plugin(mockApi);
+    return registeredTools;
+  }
+
+  it('returns allowed:false for unmapped tool (allowUnmappedTools=false)', async () => {
+    const tools = getTools({ allowUnmappedTools: false });
+    const result = await tools.aport_check('id-1', { tool_name: 'unknown.tool.xyz' });
+    const parsed = JSON.parse(result.content[0].text);
+    assert.strictEqual(parsed.allowed, false);
+    assert.strictEqual(parsed.policy, null);
+    assert.ok(parsed.reason.includes('allowUnmappedTools: false'));
+  });
+
+  it('returns allowed:true for unmapped tool (allowUnmappedTools=true)', async () => {
+    const tools = getTools({ allowUnmappedTools: true });
+    const result = await tools.aport_check('id-2', { tool_name: 'unknown.tool.xyz' });
+    const parsed = JSON.parse(result.content[0].text);
+    assert.strictEqual(parsed.allowed, true);
+    assert.strictEqual(parsed.policy, null);
+    assert.ok(parsed.reason.includes('allowUnmappedTools: true'));
+  });
+
+  it('returns allowed:false with error reason when guardrail script missing', async () => {
+    const tools = getTools({ mode: 'local', guardrailScript: '/tmp/no-such-script.sh' });
+    const result = await tools.aport_check('id-3', { tool_name: 'exec', params: { command: 'ls' } });
+    const parsed = JSON.parse(result.content[0].text);
+    assert.strictEqual(parsed.allowed, false);
+    assert.strictEqual(parsed.policy, 'system.command.execute.v1');
+    assert.ok(parsed.reason.length > 0, 'should have error reason');
+  });
+
+  it('returns structured content with type:text', async () => {
+    const tools = getTools({ allowUnmappedTools: true });
+    const result = await tools.aport_check('id-4', { tool_name: 'some.tool' });
+    assert.ok(Array.isArray(result.content));
+    assert.strictEqual(result.content[0].type, 'text');
+    const parsed = JSON.parse(result.content[0].text);
+    assert.ok('allowed' in parsed);
+    assert.ok('policy' in parsed);
+    assert.ok('reason' in parsed);
+  });
+});
+
+describe('aport_passport tool behavior', () => {
+  function getTools(configOverrides = {}) {
+    const registeredTools = {};
+    const mockApi = {
+      pluginConfig: {
+        mode: 'local',
+        ...configOverrides,
+      },
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+      on: () => {},
+      registerTool: (def, _opts) => {
+        registeredTools[def.name] = def.execute;
+      },
+    };
+    plugin(mockApi);
+    return registeredTools;
+  }
+
+  it('read — returns passport data when file exists', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'aport-passport-test-'));
+    const passportPath = join(tmp, 'passport.json');
+    const passport = {
+      spec_version: 'oap/1.0',
+      passport_id: 'test-id-123',
+      agent_id: 'test-agent',
+      status: 'active',
+      assurance_level: 'L2',
+      capabilities: [{ id: 'system.command.execute' }, { id: 'data.file.read' }],
+    };
+    await writeFile(passportPath, JSON.stringify(passport));
+
+    const tools = getTools({ passportFile: passportPath });
+    const result = await tools.aport_passport('id-1', { action: 'read' });
+    const parsed = JSON.parse(result.content[0].text);
+
+    assert.strictEqual(parsed.status, 'ok');
+    assert.strictEqual(parsed.passport_id, 'test-id-123');
+    assert.strictEqual(parsed.assurance_level, 'L2');
+    assert.deepStrictEqual(parsed.capabilities, ['system.command.execute', 'data.file.read']);
+    assert.strictEqual(parsed.passport_status, 'active');
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('read — returns not_found when file missing', async () => {
+    const tools = getTools({ passportFile: '/tmp/no-such-dir/no-passport.json' });
+    const result = await tools.aport_passport('id-2', { action: 'read' });
+    const parsed = JSON.parse(result.content[0].text);
+
+    assert.strictEqual(parsed.status, 'not_found');
+    assert.ok(parsed.hint.includes('generate'));
+  });
+
+  it('generate — creates passport file when missing', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'aport-passport-gen-'));
+    const passportPath = join(tmp, 'subdir', 'passport.json');
+
+    const tools = getTools({ passportFile: passportPath });
+    const result = await tools.aport_passport('id-3', { action: 'generate' });
+    const parsed = JSON.parse(result.content[0].text);
+
+    assert.strictEqual(parsed.status, 'created');
+    assert.ok(parsed.hint.includes('Edit'));
+
+    // Verify file was created with valid content
+    const fileContent = JSON.parse(await readFile(passportPath, 'utf8'));
+    assert.strictEqual(fileContent.spec_version, 'oap/1.0');
+    assert.strictEqual(fileContent.status, 'active');
+    assert.ok(fileContent.passport_id, 'should have passport_id (UUID)');
+    assert.ok(Array.isArray(fileContent.capabilities));
+    assert.ok(fileContent.capabilities.length >= 4);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('generate — returns exists when passport already present', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'aport-passport-exists-'));
+    const passportPath = join(tmp, 'passport.json');
+    const original = JSON.stringify({ spec_version: 'oap/1.0', passport_id: 'existing' });
+    await writeFile(passportPath, original);
+
+    const tools = getTools({ passportFile: passportPath });
+    const result = await tools.aport_passport('id-4', { action: 'generate' });
+    const parsed = JSON.parse(result.content[0].text);
+
+    assert.strictEqual(parsed.status, 'exists');
+    assert.ok(parsed.hint.includes('read'));
+
+    // Verify file was NOT overwritten
+    const fileContent = await readFile(passportPath, 'utf8');
+    assert.strictEqual(fileContent, original);
 
     await rm(tmp, { recursive: true, force: true });
   });

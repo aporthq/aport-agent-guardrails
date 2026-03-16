@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **openclaw-aport plugin: `aport_check` and `aport_passport` optional agent tools.** Agents can now query their own authorization state before executing sensitive operations, and read or scaffold their APort passport. Both tools are opt-in (`optional: true`). Reuses existing hook helpers (no duplication).
+
 ## [1.0.15] - 2026-03-12
 
 ### Added
