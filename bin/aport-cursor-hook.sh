@@ -87,28 +87,30 @@ elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -n "$TOOL_NAME" ] && echo "
 
 elif [ -n "$TOOL_NAME" ]; then
     # preToolUse: Cursor tool names — Shell, Read, Write, Grep, Delete, Task, MCP:<name>
-    case "$TOOL_NAME" in
-        Shell)
+    # Normalize: trim whitespace, lowercase (patterns must match TOOL_NORM)
+    TOOL_NORM="$(echo "$TOOL_NAME" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    case "$TOOL_NORM" in
+        shell)
             GUARDRAIL_TOOL="bash"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{command: (.tool_input.command // "")}')"
             ;;
-        Read | Grep)
-            # Read-family: allow without calling evaluator
+        read | grep | glob | semanticsearch)
+            # Read-family: allow without calling evaluator (matches Claude Code behavior)
             exit 0
             ;;
-        Write)
+        write | strreplace | editnotebook)
             GUARDRAIL_TOOL="write"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{file_path: (.tool_input.file_path // .tool_input.path // "")}')"
             ;;
-        Delete)
+        delete)
             GUARDRAIL_TOOL="write"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{file_path: (.tool_input.file_path // .tool_input.path // "")}')"
             ;;
-        Task)
+        task)
             GUARDRAIL_TOOL="session.create"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{description: (.tool_input.description // .tool_input.prompt // "")}')"
             ;;
-        MCP:*)
+        mcp:*)
             GUARDRAIL_TOOL="mcp.tool"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{tool_name: (.tool_name // ""), tool_input: (.tool_input // {})}')"
             ;;

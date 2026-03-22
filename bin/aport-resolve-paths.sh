@@ -24,6 +24,35 @@ resolve_aport_paths() {
         . "$_resolve_script_dir/../bin/lib/validation.sh" 2> /dev/null || true
     fi
 
+    # 0) AGENTS.md enforcement block (repo-scoped, highest priority after explicit env)
+    #    Only checked when no explicit env var is set — OPENCLAW_PASSPORT_FILE always wins.
+    if [ -z "${OPENCLAW_PASSPORT_FILE:-}" ]; then
+        local _agentsmd_lib="$_resolve_script_dir/lib/agentsmd.sh"
+        [ ! -f "$_agentsmd_lib" ] && _agentsmd_lib="$_resolve_script_dir/../bin/lib/agentsmd.sh"
+        if [ -f "$_agentsmd_lib" ]; then
+            # shellcheck source=lib/agentsmd.sh
+            . "$_agentsmd_lib"
+            if resolve_agentsmd_enforcement 2> /dev/null; then
+                if [ -n "$AGENTSMD_AGENT_ID" ]; then
+                    export APORT_AGENT_ID="$AGENTSMD_AGENT_ID"
+                fi
+                if [ -n "$AGENTSMD_PASSPORT" ] && [ -f "$AGENTSMD_PASSPORT" ]; then
+                    passport_path="$AGENTSMD_PASSPORT"
+                    data_dir="$(dirname "$AGENTSMD_PASSPORT")"
+                    export OPENCLAW_PASSPORT_FILE="$passport_path"
+                    if [ -z "${OPENCLAW_DECISION_FILE:-}" ]; then
+                        export OPENCLAW_DECISION_FILE="${data_dir}/decision.json"
+                    fi
+                    export OPENCLAW_AUDIT_LOG="${data_dir}/audit.log"
+                    PASSPORT_FILE="$passport_path"
+                    DECISION_FILE="${OPENCLAW_DECISION_FILE}"
+                    AUDIT_LOG="${data_dir}/audit.log"
+                    return 0
+                fi
+            fi
+        fi
+    fi
+
     # 1) Explicit path set and file exists → use it (plugin or wrapper)
     if [ -n "${OPENCLAW_PASSPORT_FILE:-}" ] && [ -f "$OPENCLAW_PASSPORT_FILE" ]; then
         # Validate env-provided path if validator is available
@@ -47,7 +76,7 @@ resolve_aport_paths() {
     # 3) No env → probe framework-specific default paths (where each framework stores data), then OpenClaw legacy
     else
         config_dir=""
-        for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.n8n"; do
+        for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.aport/deerflow" "$HOME/.n8n"; do
             if [ -f "${candidate}/aport/passport.json" ]; then
                 config_dir="$candidate"
                 break

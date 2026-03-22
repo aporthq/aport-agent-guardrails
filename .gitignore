@@ -50,3 +50,5 @@ coverage/
 
 # Optional local overrides (keep structure, ignore local edits if desired)
 # local-overrides/
+
+docs/launch/
