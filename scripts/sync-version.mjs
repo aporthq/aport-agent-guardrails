@@ -1,16 +1,8 @@
 #!/usr/bin/env node
-/**
- * Sync version from root package.json to all Python packages.
- * Run after `changeset version` so Node and Python share the same version.
- *
- * Updates:
- * - python/aport_guardrails/pyproject.toml [project].version
- * - python/aport_guardrails/__init__.py __version__
- * - python/langchain_adapter/pyproject.toml [project].version
- * - python/crewai_adapter/pyproject.toml [project].version
- */
+// Sync version from root package.json to ALL Node + Python sub-packages.
+// Run after `changeset version` so everything shares the same version.
 
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -23,6 +15,31 @@ if (!version) {
   process.exit(1);
 }
 
+console.log(`sync-version: syncing all packages to ${version}`);
+
+// --- Node workspace packages ---
+const packagesDir = join(root, "packages");
+try {
+  const entries = readdirSync(packagesDir);
+  for (const entry of entries) {
+    const pkgJsonPath = join(packagesDir, entry, "package.json");
+    try {
+      const stat = statSync(pkgJsonPath);
+      if (stat.isFile()) {
+        const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+        pkg.version = version;
+        writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
+        console.log(`Updated packages/${entry}/package.json -> ${version}`);
+      }
+    } catch (e) {
+      // No package.json in this dir, skip
+    }
+  }
+} catch (e) {
+  console.warn("sync-version: could not read packages/ directory:", e.message);
+}
+
+// --- Python packages ---
 const pyPackages = [
   { dir: "python/aport_guardrails", pyproject: "pyproject.toml", init: "__init__.py" },
   { dir: "python/langchain_adapter", pyproject: "pyproject.toml" },
