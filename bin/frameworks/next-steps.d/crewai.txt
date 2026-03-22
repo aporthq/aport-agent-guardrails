@@ -1,0 +1,13 @@
+  Next steps (CrewAI):
+  ───────────────────
+  1. Install the Python adapter (required for runtime enforcement):
+     pip install aport-agent-guardrails-crewai
+     aport-crewai setup
+  2. Config written to: $config_dir
+  3. Register the guardrail before running your crew:
+
+     from aport_guardrails_crewai import register_aport_guardrail
+     register_aport_guardrail()
+     crew.kickoff()
+
+  Or: @with_aport_guardrail on your entry point. See: docs/frameworks/crewai.md
