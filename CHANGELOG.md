@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.16] - 2026-03-21
+
+### Added
+- **Generic OAP guardrail provider** (`aport_guardrails.providers.generic:OAPGuardrailProvider`): Framework-agnostic provider that wraps the core `Evaluator`. Works with any framework that calls `evaluate(request)` / `aevaluate(request)`. No per-framework PyPI package needed.
+- **DeerFlow support:** Added `deerflow` as a supported framework in CLI dispatcher, config paths, tool-pack-mapping, and integration docs.
+- **Generic framework setup script** (`bin/frameworks/generic.sh`): Replaces 4 duplicated per-framework shell scripts (crewai, langchain, deerflow, n8n) with one generic handler + data files in `next-steps.d/`. Adding a new framework now requires only a text file.
+- **Python-native CLI setup:** `aport setup --framework deerflow` now calls the passport wizard directly via bash script instead of shelling out to npx. Python developers no longer need Node installed.
+
+### Changed
+- **CLI dispatcher refactor:** `bin/agent-guardrails` now falls through to `generic.sh` for frameworks without custom scripts (crewai, langchain, deerflow, n8n). Cursor and claude-code keep their own scripts.
+- **`cli.py` rewritten:** Now runs full setup (config dir, passport wizard, next steps) instead of printing "go run npx".
+- **`cli_common.py` rewritten:** `run_wizard()` calls `bin/aport-create-passport.sh` directly, falling back to npx only if bash script not found.
+
+### Removed
+- `bin/frameworks/crewai.sh` — replaced by `generic.sh` + `next-steps.d/crewai.txt`
+- `bin/frameworks/langchain.sh` — replaced by `generic.sh` + `next-steps.d/langchain.txt`
+- `bin/frameworks/n8n.sh` — replaced by `generic.sh` + `next-steps.d/n8n.txt`
+
 ## [1.0.15] - 2026-03-12
 
 ### Added
