@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aport-agent-guardrails"
-version = "1.0.15"
+version = "1.0.16"
 description = "APort Agent Guardrail — shared core for AI agent and LLM frameworks (pre-action authorization)"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -39,5 +39,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.setuptools]
-packages = ["aport_guardrails", "aport_guardrails.core", "aport_guardrails.frameworks"]
-package-dir = { aport_guardrails = ".", "aport_guardrails.core" = "core", "aport_guardrails.frameworks" = "frameworks" }
+packages = ["aport_guardrails", "aport_guardrails.core", "aport_guardrails.frameworks", "aport_guardrails.providers"]
+package-dir = { aport_guardrails = ".", "aport_guardrails.core" = "core", "aport_guardrails.frameworks" = "frameworks", "aport_guardrails.providers" = "providers" }

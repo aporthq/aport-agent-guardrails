@@ -13,7 +13,7 @@ export const langchainAdapter: BaseAdapter = {
   },
 
   async install() {
-    // Run bin/frameworks/langchain.sh
+    // Run bin/frameworks/generic.sh (via bin/agent-guardrails --framework=langchain)
   },
 
   async verify() {

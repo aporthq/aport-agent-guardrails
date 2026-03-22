@@ -1,0 +1,14 @@
+  Next steps (DeerFlow):
+  ──────────────────────
+  1. Install the guardrails package:
+     uv add aport-agent-guardrails
+
+  2. Add to your DeerFlow config.yaml:
+
+     guardrails:
+       enabled: true
+       passport: $config_dir/aport/passport.json
+       provider:
+         use: aport_guardrails.providers.generic:OAPGuardrailProvider
+
+  See: docs/frameworks/deerflow.md

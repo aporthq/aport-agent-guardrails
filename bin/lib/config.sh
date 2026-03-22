@@ -16,6 +16,7 @@ get_config_dir() {
         n8n) echo "${APORT_N8N_CONFIG_DIR:-$HOME/.n8n}" ;;
         cursor) echo "${APORT_CURSOR_CONFIG_DIR:-$HOME/.cursor}" ;;
         claude-code) echo "${APORT_CLAUDE_CODE_CONFIG_DIR:-$HOME/.claude}" ;;
+        deerflow) echo "${APORT_DEERFLOW_CONFIG_DIR:-$HOME/.aport/deerflow}" ;;
         *) echo "${APORT_CONFIG_DIR:-$HOME/.aport}" ;;
     esac
 }
