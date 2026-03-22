@@ -1,0 +1,12 @@
+  Next steps (LangChain):
+  ───────────────────────
+  1. Install the Python adapter (required for runtime enforcement):
+     pip install aport-agent-guardrails-langchain
+     aport-langchain setup
+  2. Config written to: $config_dir
+  3. Add to your agent:
+
+     from aport_guardrails_langchain import APortCallback
+     agent = initialize_agent(..., callbacks=[APortCallback()])
+
+  See: docs/frameworks/langchain.md

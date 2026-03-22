@@ -6,7 +6,7 @@
 #   agent-guardrails openclaw ap_xxx    # openclaw with agent_id (pass-through)
 #   agent-guardrails --framework=langchain
 #   agent-guardrails -f crewai
-# Supported: openclaw | langchain | crewai | cursor | claude-code (n8n coming soon)
+# Supported: openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n
 #
 # Backward compatibility: All arguments after the framework are passed through to
 # the framework script. For OpenClaw, bin/openclaw receives them (e.g. agent_id).
@@ -60,7 +60,7 @@ if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]]; then
   # Check if first arg looks like a framework name (lowercase alphanumeric + hyphen)
   if [[ "$first_arg" =~ ^[a-z0-9-]+$ ]]; then
     # Valid framework names
-    valid_frameworks=(openclaw langchain crewai cursor claude-code n8n)
+    valid_frameworks=(openclaw langchain crewai cursor claude-code n8n deerflow)
     for valid_fw in "${valid_frameworks[@]}"; do
       if [[ "$first_arg" == "$valid_fw" ]]; then
         framework="$first_arg"
@@ -90,14 +90,14 @@ if [[ -z "$framework" ]]; then
           noninteractive="${APORT_NONINTERACTIVE:-${CI:-}}"
           if [[ -n "$noninteractive" ]]; then
             echo "[aport] ERROR: Multiple frameworks detected: $detected_list" >&2
-            echo "  Set APORT_FRAMEWORK or use --framework=openclaw | langchain | crewai | cursor | claude-code" >&2
+            echo "  Set APORT_FRAMEWORK or use --framework=openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n" >&2
             exit 1
           fi
           echo ""
           echo "  APort Agent Guardrails — Framework setup"
           echo "  ─────────────────────────────────────────"
           echo "  Multiple frameworks detected: $detected_list"
-          echo "  Choose one: openclaw | langchain | crewai | cursor | claude-code"
+          echo "  Choose one: openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n"
           echo "  Example: npx @aporthq/agent-guardrails --framework=openclaw"
           echo ""
           read -p "  Framework [${framework:-openclaw}]: " choice
@@ -113,14 +113,14 @@ if [[ -z "$framework" ]]; then
   noninteractive="${APORT_NONINTERACTIVE:-${CI:-}}"
   if [[ -n "$noninteractive" ]]; then
     echo "[aport] ERROR: No framework detected in current directory." >&2
-    echo "  Set APORT_FRAMEWORK or use --framework=openclaw | langchain | crewai | cursor | claude-code" >&2
+    echo "  Set APORT_FRAMEWORK or use --framework=openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n" >&2
     exit 1
   fi
   echo ""
   echo "  APort Agent Guardrails — Framework setup"
   echo "  ─────────────────────────────────────────"
   echo "  No framework detected in current directory."
-  echo "  Choose: openclaw | langchain | crewai | cursor | claude-code"
+  echo "  Choose: openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n"
   echo "  Example: npx @aporthq/agent-guardrails openclaw"
   echo "           npx @aporthq/agent-guardrails --framework=langchain"
   echo ""
@@ -143,7 +143,7 @@ if [[ "$framework" == "n8n" ]]; then
   echo "[aport] Note: n8n custom node is not yet available. This setup only runs the passport wizard and writes config." >&2
 fi
 
-# Run framework script if it exists and is executable (safe with empty REST)
+# Run framework-specific script if it exists (cursor, claude-code have custom logic)
 if [[ -x "$script" ]]; then
   exec "$script" ${REST+"${REST[@]}"}
 fi
@@ -153,6 +153,14 @@ if [[ "$framework" == "openclaw" ]]; then
   exec "$SCRIPT_DIR/openclaw" ${REST+"${REST[@]}"}
 fi
 
+# Generic handler: works for any framework with a next-steps.d/<framework>.txt data file
+# (crewai, langchain, deerflow, n8n, and any future framework)
+generic_script="$FRAMEWORKS_DIR/generic.sh"
+if [[ -x "$generic_script" ]]; then
+  export APORT_FRAMEWORK="$framework"
+  exec "$generic_script" ${REST+"${REST[@]}"}
+fi
+
 echo "[aport] ERROR: Unknown or unsupported framework: $framework" >&2
-echo "  Supported: openclaw, langchain, crewai, cursor, claude-code (n8n coming soon)" >&2
+echo "  Supported: openclaw, langchain, crewai, cursor, claude-code, deerflow, n8n" >&2
 exit 1

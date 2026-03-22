@@ -617,7 +617,7 @@ def main():
     args = ap.parse_args()
 
     repo_root = REPO_ROOT
-    iterations = max(1, min(args.iterations, 500))
+    iterations = max(1, min(args.iterations, 2000))
     warmup = max(0, min(args.warmup, 50))
     api_url = (args.api_url or "https://api.aport.io").rstrip("/")
     agent_id = args.agent_id or "ap_dd86bb4458524d4db529de7de9e8dc8a"
