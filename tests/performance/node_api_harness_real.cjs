@@ -10,7 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const iterations = Math.min(parseInt(process.argv[2], 10) || 50, 200);
+const iterations = Math.min(parseInt(process.argv[2], 10) || 50, 2000);
 const apiUrl = process.argv[3] || "https://api.aport.io";
 const variant = process.argv[4] || "agent_path";
 const identity = process.argv[5] || process.env.APORT_AGENT_ID;

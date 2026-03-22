@@ -1,0 +1,9 @@
+  APort n8n support: coming soon. This setup only writes config; custom node not yet available.
+
+  Next steps (n8n):
+  ────────────────
+  1. Install custom node to ~/.n8n/custom/ (or use HTTP Request node to APort API).
+  2. In your workflow: add APort Guardrail node before action nodes; branch on allow/deny.
+  3. Store agent_id or passport in n8n credentials.
+
+  See: docs/frameworks/n8n.md

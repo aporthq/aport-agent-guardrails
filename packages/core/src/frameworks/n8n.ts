@@ -13,7 +13,7 @@ export const n8nAdapter: BaseAdapter = {
   },
 
   async install() {
-    // Run bin/frameworks/n8n.sh; install custom node to ~/.n8n/custom/
+    // Run bin/frameworks/generic.sh (via bin/agent-guardrails --framework=n8n)
   },
 
   async verify() {
