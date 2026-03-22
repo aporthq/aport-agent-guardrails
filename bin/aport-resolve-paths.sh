@@ -32,7 +32,7 @@ resolve_aport_paths() {
         if [ -f "$_agentsmd_lib" ]; then
             # shellcheck source=lib/agentsmd.sh
             . "$_agentsmd_lib"
-            if resolve_agentsmd_enforcement 2>/dev/null; then
+            if resolve_agentsmd_enforcement 2> /dev/null; then
                 if [ -n "$AGENTSMD_AGENT_ID" ]; then
                     export APORT_AGENT_ID="$AGENTSMD_AGENT_ID"
                 fi
