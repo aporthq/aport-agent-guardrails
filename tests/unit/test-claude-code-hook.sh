@@ -106,6 +106,17 @@ EXIT6=$?
 }
 echo "  ✅ Glob: exit 0"
 
+# 7. Shell alias (Cursor/tool-wrapper style) -> allow
+echo "  Test: Shell alias -> allow..."
+OUT7="$TEST_DIR/claude-allow-shell-alias.txt"
+echo '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT7" 2> /dev/null
+EXIT7=$?
+[[ "$EXIT7" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Shell alias, got $EXIT7" >&2
+    exit 1
+}
+echo "  ✅ Shell alias: exit 0"
+
 echo ""
 echo "  All Claude Code hook unit tests passed."
 echo ""

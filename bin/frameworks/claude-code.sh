@@ -10,26 +10,25 @@ source "$LIB/common.sh"
 source "$LIB/passport.sh"
 # shellcheck source=../lib/config.sh
 source "$LIB/config.sh"
+# shellcheck source=../lib/framework-setup.sh
+source "$LIB/framework-setup.sh"
 
 run_setup() {
     log_info "Setting up APort guardrails for Claude Code..."
-    config_dir="$(get_config_dir claude-code)"
-    config_dir="${config_dir/#\~/$HOME}"
-    mkdir -p "$config_dir/aport"
-    chmod 700 "$config_dir/aport"
+    config_dir="$(ensure_aport_dir_secure claude-code)"
 
     export APORT_FRAMEWORK=claude-code
-    run_passport_wizard "$@"
+
+    # Check AGENTS.md for enforcement config — skip wizard if already configured
+    # shellcheck source=../lib/agentsmd.sh
+    source "$LIB/agentsmd.sh"
+    setup_from_agentsmd_or_wizard "$@"
 
     # Harden permissions on passport (contains policy/capabilities)
     [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
 
     # Resolve absolute path to hook script (works from repo or npx package)
-    HOOK_SCRIPT="${APORT_CLAUDE_CODE_HOOK_SCRIPT:-}"
-    if [ -z "$HOOK_SCRIPT" ]; then
-        ROOT_FOR_HOOK="$(cd "$LIB/../.." && pwd)"
-        HOOK_SCRIPT="$ROOT_FOR_HOOK/bin/aport-claude-code-hook.sh"
-    fi
+    HOOK_SCRIPT="$(resolve_hook_script_path "${APORT_CLAUDE_CODE_HOOK_SCRIPT:-}" "aport-claude-code-hook.sh" "$LIB")"
     if [ ! -f "$HOOK_SCRIPT" ]; then
         log_warn "Hook script not found at $HOOK_SCRIPT; settings.json will reference it (create the file for hooks to work)."
     else
@@ -67,13 +66,13 @@ _write_claude_settings() {
 
     if [ -f "$file" ] && command -v jq &> /dev/null; then
         if jq -e '.hooks' "$file" &> /dev/null; then
-            # Merge: add APort to PreToolUse array, dedup by command
+            # Merge: replace stale APort hook entries (old npx paths), preserve non-APort hooks
             local tmpfile
             tmpfile="$(mktemp "${file}.XXXXXX")"
             jq -c --arg cmd "$cmd" '
                 (.hooks.PreToolUse // []) as $p |
                 .hooks.PreToolUse = ($p | map(select(
-                    (.hooks[0].command != $cmd)
+                    ((.hooks[0].command != $cmd) and (((.hooks[0].command // "") | test("aport-(cursor-hook|claude-code-hook)\\.sh$")) | not))
                 )) | . + [{"matcher":"*","hooks":[{"type":"command","command":$cmd}]}])
             ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
             return

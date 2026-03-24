@@ -17,26 +17,47 @@ if (!version) {
 
 console.log(`sync-version: syncing all packages to ${version}`);
 
-// --- Node workspace packages ---
-const packagesDir = join(root, "packages");
-try {
-  const entries = readdirSync(packagesDir);
-  for (const entry of entries) {
-    const pkgJsonPath = join(packagesDir, entry, "package.json");
-    try {
-      const stat = statSync(pkgJsonPath);
-      if (stat.isFile()) {
-        const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
-        pkg.version = version;
-        writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
-        console.log(`Updated packages/${entry}/package.json -> ${version}`);
+// --- Node workspace packages (packages/ + extensions/) ---
+for (const subDir of ["packages", "extensions"]) {
+  const workspaceDir = join(root, subDir);
+  try {
+    const entries = readdirSync(workspaceDir);
+    for (const entry of entries) {
+      const pkgJsonPath = join(workspaceDir, entry, "package.json");
+      try {
+        const stat = statSync(pkgJsonPath);
+        if (stat.isFile()) {
+          const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+          pkg.version = version;
+          writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
+          console.log(`Updated ${subDir}/${entry}/package.json -> ${version}`);
+        }
+      } catch (e) {
+        // No package.json in this dir, skip
       }
-    } catch (e) {
-      // No package.json in this dir, skip
     }
+  } catch (e) {
+    console.warn(`sync-version: could not read ${subDir}/ directory:`, e.message);
   }
+}
+
+// Keep OpenClaw plugin manifest version in sync with root/package versions.
+const openclawManifestPath = join(
+  root,
+  "extensions",
+  "openclaw-aport",
+  "openclaw.plugin.json",
+);
+try {
+  const manifest = JSON.parse(readFileSync(openclawManifestPath, "utf8"));
+  manifest.version = version;
+  writeFileSync(openclawManifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  console.log(`Updated extensions/openclaw-aport/openclaw.plugin.json -> ${version}`);
 } catch (e) {
-  console.warn("sync-version: could not read packages/ directory:", e.message);
+  console.warn(
+    "sync-version: could not update extensions/openclaw-aport/openclaw.plugin.json:",
+    e.message,
+  );
 }
 
 // --- Python packages ---

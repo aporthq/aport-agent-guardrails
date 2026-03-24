@@ -39,6 +39,7 @@ set -e
 if [ "$JQ_EXIT" -ne 0 ] || [ -z "$TOOL_NAME" ]; then
     TOOL_NAME="unknown"
 fi
+TOOL_NAME_NORM="$(printf '%s' "$TOOL_NAME" | tr -d '[:space:]' | sed 's/^functions\.//' | tr '[:upper:]' '[:lower:]')"
 set +e
 TOOL_INPUT="$(echo "$INPUT" | jq -c '.tool_input // {}' 2> /dev/null)"
 JQ_EXIT=$?
@@ -69,44 +70,44 @@ deny() {
 GUARDRAIL_TOOL=""
 CONTEXT_JSON="{}"
 
-case "$TOOL_NAME" in
-    Bash)
+case "$TOOL_NAME_NORM" in
+    bash | shell)
         GUARDRAIL_TOOL="bash"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{command: (.command // "")}')"
         ;;
-    Read | Glob | LS | Grep | TodoRead | ToolSearch | AskUserQuestion)
+    read | glob | ls | grep | todoread | toolsearch | askuserquestion | readfile | semanticsearch)
         # Read-family + user-interaction tools: allow without calling evaluator
         exit 0
         ;;
-    TaskGet | TaskList | TaskOutput | CronList)
+    taskget | tasklist | taskoutput | cronlist)
         # Read-only task/cron queries: allow without evaluator
         exit 0
         ;;
-    EnterPlanMode | ExitPlanMode)
+    enterplanmode | exitplanmode)
         # Internal state transitions: allow without evaluator
         exit 0
         ;;
-    Write | Edit | MultiEdit | NotebookEdit | TodoWrite)
+    write | edit | multiedit | notebookedit | todowrite | delete | strreplace | editnotebook)
         GUARDRAIL_TOOL="write"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{file_path: (.file_path // .path // "")}')"
         ;;
-    WebSearch | WebFetch)
+    websearch | webfetch)
         GUARDRAIL_TOOL="webfetch"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{url: (.url // .query // "")}')"
         ;;
-    Browser)
+    browser)
         GUARDRAIL_TOOL="browser"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{url: (.url // "")}')"
         ;;
-    Task | TaskCreate | TaskUpdate | TaskStop | Agent | Skill | EnterWorktree)
+    task | taskcreate | taskupdate | taskstop | agent | skill | enterworktree | subagent | subagentstart)
         GUARDRAIL_TOOL="session.create"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .prompt // "")}')"
         ;;
-    CronCreate | CronDelete)
+    croncreate | crondelete)
         GUARDRAIL_TOOL="cron"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .schedule // "")}')"
         ;;
-    mcp__*)
+    mcp__* | mcp:* | callmcptool)
         GUARDRAIL_TOOL="mcp.tool"
         CONTEXT_JSON="$TOOL_INPUT"
         ;;

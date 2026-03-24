@@ -109,6 +109,14 @@ written2=$(write_config_template n8n 2> /dev/null)
 }
 echo "  ✅ write_config_template n8n"
 
+# write_config_template should not overwrite existing config.yaml on updates
+existing_cfg="$written/config.yaml"
+echo "user-managed-config: true" > "$existing_cfg"
+write_config_template langchain 2> /dev/null > /dev/null
+current_cfg="$(cat "$existing_cfg" 2> /dev/null || true)"
+assert_eq "$current_cfg" "user-managed-config: true" "write_config_template must not overwrite existing config.yaml"
+echo "  ✅ write_config_template preserves existing config.yaml"
+
 echo ""
 echo "  All config.sh tests passed."
 echo ""

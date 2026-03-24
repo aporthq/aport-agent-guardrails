@@ -54,7 +54,7 @@ export default function (api) {
     config.apiUrl || process.env.APORT_API_URL || "https://api.aport.io";
   const apiKey = config.apiKey || process.env.APORT_API_KEY;
   const failClosed = config.failClosed !== false; // Default true
-  const allowUnmappedTools = config.allowUnmappedTools !== false; // Default true = allow unmapped (custom skills, ClawHub); set false for strict
+  const allowUnmappedTools = config.allowUnmappedTools !== false; // Default true; set false to block unmapped tools
   // When true (default), every before_tool_call runs a fresh APort verify; we never reuse a previous decision (passport/limits may have changed).
   const alwaysVerifyEachToolCall = config.alwaysVerifyEachToolCall !== false;
   // When true (default), exec is mapped to system.command.execute.v1 and checked against passport allowed_commands.
@@ -211,7 +211,7 @@ export default function (api) {
           : mapToolToPolicy(toolName);
 
       if (!policyName) {
-        // No policy mapping: allow by default so custom skills / ClawHub / built-in tools work; block only if allowUnmappedTools is false (strict)
+        // No policy mapping: allow by default for compatibility; block only when strict mode is enabled.
         if (allowUnmappedTools) {
           log(`[${name}] ALLOW: ${toolName} - (unmapped, no policy)`);
           return {};
@@ -437,6 +437,15 @@ export function mapToolToPolicy(toolName) {
   if (tool.startsWith("messaging.")) return "messaging.message.send.v1";
   if (tool.match(/sms|whatsapp|slack|email/))
     return "messaging.message.send.v1";
+
+  // File operations
+  if (tool === "read") return "data.file.read.v1";
+  if (tool.startsWith("file.read")) return "data.file.read.v1";
+  if (tool.startsWith("data.file.read")) return "data.file.read.v1";
+  if (tool === "write" || tool === "edit") return "data.file.write.v1";
+  if (tool.startsWith("file.write")) return "data.file.write.v1";
+  if (tool.startsWith("file.edit")) return "data.file.write.v1";
+  if (tool.startsWith("data.file.write")) return "data.file.write.v1";
 
   // MCP tools
   if (tool.startsWith("mcp.")) return "mcp.tool.execute.v1";

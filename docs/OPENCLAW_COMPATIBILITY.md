@@ -1,6 +1,6 @@
 # OpenClaw Compatibility
 
-**Last reviewed:** February 2026 (OpenClaw CHANGELOG 2026.2.15 / 2026.2.14, [docs.openclaw.ai](https://docs.openclaw.ai), [architecture](https://docs.openclaw.ai/concepts/architecture))
+**Last reviewed:** March 2026 (OpenClaw docs + npm 2026.3.x SDK exports, [docs.openclaw.ai](https://docs.openclaw.ai), [architecture](https://docs.openclaw.ai/concepts/architecture))
 
 ---
 

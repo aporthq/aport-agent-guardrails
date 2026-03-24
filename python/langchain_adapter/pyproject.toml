@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aport-agent-guardrails-langchain"
-version = "1.0.17"
+version = "1.0.18"
 description = "APort Agent Guardrail for LangChain/LangGraph — AsyncCallbackHandler for AI agent tool calls"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -32,8 +32,8 @@ aport-langchain = "aport_guardrails_langchain.cli:main"
 
 [project.urls]
 Homepage = "https://aport.io"
-Documentation = "https://github.com/aporthq/agent-guardrails#readme"
-Repository = "https://github.com/aporthq/agent-guardrails"
+Documentation = "https://github.com/aporthq/aport-agent-guardrails#readme"
+Repository = "https://github.com/aporthq/aport-agent-guardrails"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

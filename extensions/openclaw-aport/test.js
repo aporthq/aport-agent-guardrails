@@ -22,6 +22,9 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
 const GUARDRAIL_SCRIPT = join(REPO_ROOT, 'bin', 'aport-guardrail-bash.sh');
+const INDEX_TS_PATH = join(__dirname, 'index.ts');
+const PACKAGE_JSON_PATH = join(__dirname, 'package.json');
+const MANIFEST_JSON_PATH = join(__dirname, 'openclaw.plugin.json');
 
 describe('canonicalize', () => {
   it('sorts keys at top level', () => {
@@ -150,6 +153,52 @@ describe('mapToolToPolicy', () => {
   it('returns null for unmapped tools', () => {
     assert.strictEqual(mapToolToPolicy('unknown.tool'), null);
     assert.strictEqual(mapToolToPolicy('read_file'), null);
+  });
+});
+
+describe('entrypoint and manifest compliance', () => {
+  it('uses index.ts as plugin extension entrypoint', async () => {
+    const pkg = JSON.parse(await readFile(PACKAGE_JSON_PATH, 'utf8'));
+    assert.ok(pkg.openclaw, 'package.json must contain openclaw metadata');
+    assert.deepStrictEqual(
+      pkg.openclaw.extensions,
+      ['./index.ts'],
+      'openclaw.extensions must point to ./index.ts',
+    );
+  });
+
+  it('index.ts exports definePluginEntry default', async () => {
+    const src = await readFile(INDEX_TS_PATH, 'utf8');
+    assert.ok(
+      src.includes('import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";'),
+      'index.ts must import definePluginEntry from plugin-entry subpath',
+    );
+    assert.ok(
+      src.includes('export default definePluginEntry({'),
+      'index.ts must export definePluginEntry({...})',
+    );
+  });
+
+  it('manifest configSchema covers runtime config keys', async () => {
+    const manifest = JSON.parse(await readFile(MANIFEST_JSON_PATH, 'utf8'));
+    const props = manifest?.configSchema?.properties || {};
+    const requiredKeys = [
+      'mode',
+      'passportFile',
+      'guardrailScript',
+      'apiUrl',
+      'apiKey',
+      'failClosed',
+      'allowUnmappedTools',
+      'agentId',
+      'alwaysVerifyEachToolCall',
+      'mapExecToPolicy',
+    ];
+    for (const key of requiredKeys) {
+      assert.ok(Object.prototype.hasOwnProperty.call(props, key), `missing configSchema property: ${key}`);
+    }
+    assert.strictEqual(props.passportFile.default, '~/.openclaw/aport/passport.json');
+    assert.strictEqual(props.allowUnmappedTools.default, true);
   });
 });
 
