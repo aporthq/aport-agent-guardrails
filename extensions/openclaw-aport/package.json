@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/openclaw-aport",
-  "version": "1.0.10",
+  "version": "1.0.18",
   "description": "OpenClaw plugin for deterministic pre-action authorization via APort guardrails",
   "main": "index.js",
   "type": "module",
@@ -23,10 +23,10 @@
     "directory": "extensions/openclaw-aport"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.2.0"
+    "openclaw": ">=2026.3.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "openclaw": {
     "extensions": [
@@ -34,8 +34,8 @@
     ]
   },
   "devDependencies": {
-    "openclaw": ">=2026.2.0",
-    "@types/node": "^18.0.0",
+    "@types/node": "^22.0.0",
+    "openclaw": ">=2026.3.0",
     "typescript": "^5.0.0"
   }
 }
