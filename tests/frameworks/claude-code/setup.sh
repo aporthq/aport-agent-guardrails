@@ -12,6 +12,34 @@ CLAUDE_DIR="$TEST_DIR/.claude"
 rm -rf "$CLAUDE_DIR"
 mkdir -p "$CLAUDE_DIR"
 
+# Seed existing settings.json with stale APort hook path + a user custom hook.
+cat > "$CLAUDE_DIR/settings.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/uchi/.npm/_npx/stale/node_modules/@aporthq/aport-agent-guardrails/bin/aport-claude-code-hook.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/custom-claude-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+
 # Ensure framework script is executable (e.g. when running tests without make test)
 chmod +x "$REPO_ROOT/bin/frameworks/claude-code.sh" 2> /dev/null || true
 
@@ -41,15 +69,33 @@ if command -v jq &> /dev/null; then
         echo "FAIL: settings.json should have hooks.PreToolUse" >&2
         exit 1
     fi
-    HOOK_CMD=$(jq -r '.hooks.PreToolUse[0].hooks[0].command // empty' "$CLAUDE_DIR/settings.json")
+    HOOK_CMD=$(jq -r '.hooks.PreToolUse[]?.hooks[]?.command // empty' "$CLAUDE_DIR/settings.json" | grep "aport-claude-code-hook" | head -n 1)
     if [[ -z "$HOOK_CMD" ]]; then
-        HOOK_CMD=$(jq -r '.hooks.PreToolUse[0].command // empty' "$CLAUDE_DIR/settings.json")
+        HOOK_CMD=$(jq -r '.hooks.PreToolUse[]?.command // empty' "$CLAUDE_DIR/settings.json" | grep "aport-claude-code-hook" | head -n 1)
     fi
     if [[ "$HOOK_CMD" != *"aport-claude-code-hook"* ]]; then
         echo "FAIL: hook command should reference aport-claude-code-hook script, got: $HOOK_CMD" >&2
         exit 1
     fi
     echo "  ✅ settings.json references APort Claude Code hook script"
+
+    # Stale npx APort claude hook path should be replaced
+    STALE_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | .command // ""] | map(select(test("aport-claude-code-hook\\.sh$") and test("/\\.npm/_npx/"))) | length' "$CLAUDE_DIR/settings.json")
+    if [[ "$STALE_COUNT" -ne 0 ]]; then
+        echo "FAIL: stale npx APort Claude hook entries should be removed" >&2
+        jq -c '.hooks.PreToolUse' "$CLAUDE_DIR/settings.json" >&2
+        exit 1
+    fi
+    echo "  ✅ stale npx APort Claude hook entries removed"
+
+    # User custom hook must be preserved
+    CUSTOM_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.command == "/usr/local/bin/custom-claude-hook.sh")] | length' "$CLAUDE_DIR/settings.json")
+    if [[ "$CUSTOM_COUNT" -ne 1 ]]; then
+        echo "FAIL: custom Claude hooks should be preserved during merge" >&2
+        jq -c '.hooks.PreToolUse' "$CLAUDE_DIR/settings.json" >&2
+        exit 1
+    fi
+    echo "  ✅ custom Claude hooks preserved"
 fi
 
 echo ""

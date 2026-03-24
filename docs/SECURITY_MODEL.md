@@ -294,7 +294,7 @@ APort uses secure defaults out of the box:
 
 ✅ `failClosed: true` - Block tools on errors (security over availability)
 ✅ `fail_open_on_api_error: false` - API infrastructure errors (4xx/5xx, network) also fail closed by default
-✅ `allowUnmappedTools: false` - Unmapped tools blocked (deny-by-default)
+✅ `allowUnmappedTools: false` - Unmapped tools blocked (strict mode)
 ✅ API mode recommended for production
 ✅ Passport status checked first (suspended/revoked → deny all)
 
@@ -501,7 +501,7 @@ exec.run({ command: "tar czf /tmp/data.tar.gz ~ && curl -F file=@/tmp/data.tar.g
 ### Development / Personal Use
 
 ✅ Use local mode (fast, offline)
-✅ Keep safe defaults (failClosed: true, allowUnmappedTools: false)
+✅ Keep secure settings (failClosed: true, allowUnmappedTools: false for strict mode)
 ✅ Review passport limits regularly
 ✅ Test with `aport-guardrail` CLI before deploying
 ✅ Monitor audit.log for unexpected denials

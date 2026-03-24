@@ -153,19 +153,30 @@ validate_agent_id() {
     return 0
 }
 
-# Safe pattern matching using grep instead of bash globs
-# Returns 0 if pattern matches, 1 if no match
+# Safe pattern matching for blocked patterns.
+# Returns 0 if pattern matches, 1 if no match.
 # Usage: safe_pattern_match "string" "pattern"
+#
+# Matching strategy:
+# - Multi-word patterns (e.g. "rm -rf"): substring match (grep -F)
+#   because word boundary alone would miss "rm -rf /"
+# - Single-word patterns (e.g. "sudo"): word boundary match (grep -w)
+#   to avoid false positives like "test_sudo_check" or "pseudocode"
 safe_pattern_match() {
     local string="$1"
     local pattern="$2"
+    local pattern_escaped
 
-    # Use grep with fixed strings for safety
-    if echo "$string" | grep -qF "$pattern"; then
-        return 0
+    # Escape regex metacharacters for safe ERE matching.
+    pattern_escaped="$(printf '%s' "$pattern" | sed -E 's/[][(){}.^$*+?|\\-]/\\&/g')"
+
+    if [[ "$pattern" == *" "* ]]; then
+        # Multi-word: case-insensitive substring match (the space makes it specific enough)
+        echo "$string" | grep -qiF "$pattern"
+    else
+        # Single-word: case-insensitive boundary-aware regex (portable on GNU/BSD grep)
+        echo "$string" | grep -qiE "(^|[^[:alnum:]_])${pattern_escaped}([^[:alnum:]_]|$)"
     fi
-
-    return 1
 }
 
 # Safe prefix matching (for allowed commands)

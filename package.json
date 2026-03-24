@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Policy enforcement guardrails for OpenClaw-compatible agent frameworks",
   "workspaces": [
     "packages/*",
@@ -60,7 +60,6 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {},
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
     "@types/node": "^20.0.0",

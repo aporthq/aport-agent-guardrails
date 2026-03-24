@@ -54,6 +54,7 @@ jobs:
           npm publish -w @aporthq/aport-agent-guardrails-crewai --access public
           npm publish -w @aporthq/aport-agent-guardrails-cursor --access public
           npm publish -w @aporthq/aport-agent-guardrails-claude-code --access public
+          npm publish -w @aporthq/openclaw-aport --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -130,9 +131,9 @@ jobs:
       - name: Publish to PyPI (aport-agent-guardrails, aport-agent-guardrails-langchain, aport-agent-guardrails-crewai)
         if: env.SKIP_PUBLISH != 'true'
         run: |
-          python -m twine upload python/aport_guardrails/dist/*
-          python -m twine upload python/langchain_adapter/dist/*
-          python -m twine upload python/crewai_adapter/dist/*
+          python -m twine upload --skip-existing python/aport_guardrails/dist/*
+          python -m twine upload --skip-existing python/langchain_adapter/dist/*
+          python -m twine upload --skip-existing python/crewai_adapter/dist/*
 
       - name: Verify PyPI publication
         if: env.SKIP_PUBLISH != 'true'
@@ -185,7 +186,9 @@ jobs:
           npm install @aporthq/aport-agent-guardrails-crewai@$VERSION
           npm install @aporthq/aport-agent-guardrails-cursor@$VERSION
           npm install @aporthq/aport-agent-guardrails-claude-code@$VERSION
+          npm install @aporthq/openclaw-aport@$VERSION
           \`\`\`
+          OpenClaw plugin: \`openclaw plugins install @aporthq/openclaw-aport\`
           (n8n package not published yet — coming soon.)
 
           ### Python (PyPI)
