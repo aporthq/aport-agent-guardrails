@@ -12,7 +12,10 @@ indent_size = 2
 
 [*.{sh,bash}]
 indent_style = space
-indent_size = 2
+indent_size = 4
+binary_next_line = true
+switch_case_indent = true
+space_redirects = true
 
 [*.md]
 trim_trailing_whitespace = false

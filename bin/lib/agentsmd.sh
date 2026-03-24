@@ -32,7 +32,7 @@ resolve_agentsmd_enforcement() {
     while IFS= read -r line; do
         if [ "$in_frontmatter" -eq 0 ]; then
             [ "$line" = "---" ] && in_frontmatter=1 && continue
-            return 1  # first line isn't ---, no frontmatter
+            return 1 # first line isn't ---, no frontmatter
         fi
         [ "$line" = "---" ] && break
         frontmatter+="$line"$'\n'
@@ -61,7 +61,7 @@ resolve_agentsmd_enforcement() {
             key="$(echo "$line" | sed -n 's/^[[:space:]]*\([a-z_]*\):.*/\1/p')"
             val="$(echo "$line" | sed -n 's/^[[:space:]]*[a-z_]*:[[:space:]]*//p' | sed 's/[[:space:]]*#.*$//' | sed 's/^["'"'"']\(.*\)["'"'"']$/\1/')"
             case "$key" in
-                engine)   AGENTSMD_ENGINE="$val" ;;
+                engine) AGENTSMD_ENGINE="$val" ;;
                 passport)
                     # Resolve relative paths against AGENTS.md location
                     if [[ "$val" == ./* ]]; then
@@ -85,7 +85,7 @@ resolve_agentsmd_enforcement() {
 # Used by framework setup scripts (claude-code.sh, cursor.sh) to avoid duplicating logic.
 # Requires: log_info (from common.sh), run_passport_wizard (from passport.sh).
 setup_from_agentsmd_or_wizard() {
-    if resolve_agentsmd_enforcement 2>/dev/null; then
+    if resolve_agentsmd_enforcement 2> /dev/null; then
         if [ -n "$AGENTSMD_AGENT_ID" ]; then
             log_info "Found AGENTS.md enforcement block with agent_id: $AGENTSMD_AGENT_ID"
             log_info "Using hosted passport — skipping wizard."

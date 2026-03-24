@@ -26,7 +26,7 @@ assert_eq() {
 run_in_dir() {
     # Run resolve_agentsmd_enforcement in the given dir without subshell
     pushd "$1" > /dev/null
-    resolve_agentsmd_enforcement 2>/dev/null
+    resolve_agentsmd_enforcement 2> /dev/null
     local rc=$?
     popd > /dev/null
     return $rc
@@ -91,18 +91,22 @@ version: 1.0
 # Instructions
 EOF
 if run_in_dir "$t"; then
-    FAIL=$((FAIL + 1)); echo "  ✗ should return 1"
+    FAIL=$((FAIL + 1))
+    echo "  ✗ should return 1"
 else
-    PASS=$((PASS + 1)); echo "  ✓ returns 1"
+    PASS=$((PASS + 1))
+    echo "  ✓ returns 1"
 fi
 
 # --- Test 5: No AGENTS.md ---
 echo "Test 5: No AGENTS.md"
 t="$TMPDIR_BASE/t5" && mkdir -p "$t"
 if run_in_dir "$t"; then
-    FAIL=$((FAIL + 1)); echo "  ✗ should return 1"
+    FAIL=$((FAIL + 1))
+    echo "  ✗ should return 1"
 else
-    PASS=$((PASS + 1)); echo "  ✓ returns 1"
+    PASS=$((PASS + 1))
+    echo "  ✓ returns 1"
 fi
 
 # --- Test 6: No frontmatter ---
@@ -112,9 +116,11 @@ cat > "$t/AGENTS.md" << 'EOF'
 # Just instructions, no frontmatter.
 EOF
 if run_in_dir "$t"; then
-    FAIL=$((FAIL + 1)); echo "  ✗ should return 1"
+    FAIL=$((FAIL + 1))
+    echo "  ✗ should return 1"
 else
-    PASS=$((PASS + 1)); echo "  ✓ returns 1"
+    PASS=$((PASS + 1))
+    echo "  ✓ returns 1"
 fi
 
 # --- Test 7: .agents.md (dotfile variant) ---
