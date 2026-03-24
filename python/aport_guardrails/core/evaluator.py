@@ -26,7 +26,19 @@ from aport_guardrails.core.validation import (
 
 
 def _resolve_passport_path(config: dict[str, Any]) -> str | None:
-    """Resolve passport path: config, env, framework default, or first existing default path."""
+    """Resolve passport path: AGENTS.md, config, env, framework default, or first existing default path."""
+    # 0) AGENTS.md enforcement block (repo-scoped, checked before config/env)
+    #    Skip if explicit passport_path or OPENCLAW_PASSPORT_FILE is set — those always win.
+    if not config.get("passport_path") and not os.environ.get("OPENCLAW_PASSPORT_FILE"):
+        from aport_guardrails.core.agentsmd import resolve_agentsmd_enforcement
+        agentsmd = resolve_agentsmd_enforcement()
+        if agentsmd:
+            if agentsmd.get("agent_id"):
+                os.environ["APORT_AGENT_ID"] = agentsmd["agent_id"]
+            passport = agentsmd.get("passport")
+            if passport and Path(passport).exists():
+                return passport
+
     path = config.get("passport_path") or os.environ.get("OPENCLAW_PASSPORT_FILE")
     if path:
         path_obj = Path(path).expanduser()
@@ -310,7 +322,13 @@ def _call_api_sync(
     base = api_url.rstrip("/")
     path_id = IN_BODY_PACK_ID if policy_pack and _is_full_policy_pack(policy_pack) else pack_id
     url = f"{base}/api/verify/policy/{path_id}"
-    body_context = dict(context)
+    # Build API context: use params (tool-specific fields) if available,
+    # otherwise use the full context. The API expects just the tool parameters
+    # (e.g. {"command": "ls"}), not the wrapped format from build_tool_context().
+    if isinstance(context.get("params"), dict) and context["params"]:
+        body_context = dict(context["params"])
+    else:
+        body_context = {k: v for k, v in context.items() if k not in ("tool", "input", "params")}
     if agent_id:
         body_context["agent_id"] = agent_id
     body_context.setdefault("policy_id", path_id if path_id != IN_BODY_PACK_ID else (policy_pack or {}).get("id", ""))
@@ -327,6 +345,8 @@ def _call_api_sync(
     try:
         req = Request(url, data=json.dumps(body).encode(), method="POST")
         req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "application/json")
+        req.add_header("User-Agent", "aport-guardrails-python/1.0")
         if api_key:
             req.add_header("Authorization", f"Bearer {api_key}")
         # SECURITY: Use explicit SSL context for certificate verification
@@ -420,6 +440,9 @@ class Evaluator:
         if isinstance(policy, dict) and _is_full_policy_pack(policy):
             policy_pack = policy
 
+        # Resolve passport path once — used by both API and local modes
+        passport_path = _resolve_passport_path(config)
+
         if mode == "api":
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
             api_key = config.get("api_key") or os.environ.get("APORT_API_KEY")
@@ -428,7 +451,6 @@ class Evaluator:
             verify_ssl = config.get("verify_ssl", True)
             if os.environ.get("APORT_VERIFY_SSL") == "0":
                 verify_ssl = False
-            passport_path = _resolve_passport_path(config)
             passport_body: dict[str, Any] | None = None
             if passport_path:
                 try:
@@ -465,7 +487,6 @@ class Evaluator:
                 self._audit_log(config, tool_name, pack_id, decision, ctx)
                 return decision
         # Local mode or fallback
-        passport_path = _resolve_passport_path(config)
         guardrail_script = _get_guardrail_script_path(config)
         if not passport_path or not guardrail_script:
             decision: Decision
@@ -512,6 +533,9 @@ class Evaluator:
         if isinstance(policy, dict) and _is_full_policy_pack(policy):
             policy_pack = policy
 
+        # Resolve passport path once — used by both API and local modes
+        passport_path = _resolve_passport_path(config)
+
         if mode == "api":
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
             api_key = config.get("api_key") or os.environ.get("APORT_API_KEY")
@@ -520,7 +544,6 @@ class Evaluator:
             verify_ssl = config.get("verify_ssl", True)
             if os.environ.get("APORT_VERIFY_SSL") == "0":
                 verify_ssl = False
-            passport_path = _resolve_passport_path(config)
             passport_body: dict[str, Any] | None = None
             if passport_path:
                 try:
@@ -542,7 +565,6 @@ class Evaluator:
                 )
                 self._audit_log(config, tool_name, pack_id, decision, ctx)
                 return decision
-        passport_path = _resolve_passport_path(config)
         guardrail_script = _get_guardrail_script_path(config)
         if not passport_path or not guardrail_script:
             decision: Decision

@@ -104,15 +104,15 @@ get_identity_description() {
 DEFAULT_EMAIL=$(get_default_email) || true
 DEFAULT_EMAIL=${DEFAULT_EMAIL:-"user@example.com"}
 DEFAULT_OWNER_TYPE="user"
+# Agent name/description: try OpenClaw IDENTITY.md first; overridden per framework below
 DEFAULT_AGENT_NAME=$(get_identity_name) || true
-DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"OpenClaw Agent"}
 DEFAULT_AGENT_DESC=$(get_identity_description) || true
-DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
 
-# Framework-aware defaults: each framework needs different capabilities to function
+# Framework-aware defaults: capabilities and agent identity vary by framework
 case "${APORT_FRAMEWORK:-}" in
     claude-code)
-        # Claude Code: file ops, web, sub-agents, MCP tools are core functionality
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"Claude Code Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Claude Code AI agent with APort guardrails"}
         DEFAULT_FILE_READ=y
         DEFAULT_FILE_WRITE=y
         DEFAULT_WEB_FETCH=y
@@ -121,7 +121,8 @@ case "${APORT_FRAMEWORK:-}" in
         DEFAULT_MCP_TOOL=y
         ;;
     cursor)
-        # Cursor: IDE with shell, file ops, web search, agent mode
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"Cursor Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Cursor IDE AI agent with APort guardrails"}
         DEFAULT_FILE_READ=y
         DEFAULT_FILE_WRITE=y
         DEFAULT_WEB_FETCH=y
@@ -130,7 +131,8 @@ case "${APORT_FRAMEWORK:-}" in
         DEFAULT_MCP_TOOL=n
         ;;
     crewai)
-        # CrewAI: multi-agent framework — agents spawn sub-agents, use tools
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"CrewAI Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"CrewAI multi-agent system with APort guardrails"}
         DEFAULT_FILE_READ=y
         DEFAULT_FILE_WRITE=y
         DEFAULT_WEB_FETCH=y
@@ -139,7 +141,8 @@ case "${APORT_FRAMEWORK:-}" in
         DEFAULT_MCP_TOOL=y
         ;;
     langchain)
-        # LangChain/LangGraph: tool calling, web, files
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"LangChain Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"LangChain/LangGraph AI agent with APort guardrails"}
         DEFAULT_FILE_READ=y
         DEFAULT_FILE_WRITE=y
         DEFAULT_WEB_FETCH=y
@@ -148,7 +151,8 @@ case "${APORT_FRAMEWORK:-}" in
         DEFAULT_MCP_TOOL=n
         ;;
     n8n)
-        # n8n: workflow automation — HTTP, file, database, messaging
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"n8n Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"n8n workflow agent with APort guardrails"}
         DEFAULT_FILE_READ=y
         DEFAULT_FILE_WRITE=y
         DEFAULT_WEB_FETCH=y
@@ -156,8 +160,29 @@ case "${APORT_FRAMEWORK:-}" in
         DEFAULT_AGENT_SESSION=n
         DEFAULT_MCP_TOOL=n
         ;;
+    deerflow)
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"DeerFlow Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"DeerFlow LangGraph agent with APort guardrails"}
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=y
+        DEFAULT_MCP_TOOL=y
+        ;;
+    openclaw)
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"OpenClaw Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=y
+        DEFAULT_MCP_TOOL=n
+        ;;
     *)
-        # Generic / unknown framework: conservative defaults
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"APort Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"AI agent with APort guardrails"}
         DEFAULT_FILE_READ=n
         DEFAULT_FILE_WRITE=n
         DEFAULT_WEB_FETCH=n
@@ -255,11 +280,12 @@ else
     # Choose capabilities
     echo "  🔐 Capabilities"
     echo "  ───────────────"
-    if [ "${APORT_FRAMEWORK:-}" = "claude-code" ]; then
-        echo "  Choose what your agent can do (y/n). Claude Code defaults: most capabilities = yes."
-    else
-        echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes (matches README/docs); others = no."
-    fi
+    case "${APORT_FRAMEWORK:-}" in
+        claude-code) echo "  Choose what your agent can do (y/n). Claude Code defaults: most capabilities = yes." ;;
+        cursor) echo "  Choose what your agent can do (y/n). Cursor defaults: file ops, exec, web, sub-agents = yes." ;;
+        openclaw) echo "  Choose what your agent can do (y/n). OpenClaw defaults: PRs, exec, messaging, file ops = yes." ;;
+        *) echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes; others vary by framework." ;;
+    esac
     echo ""
     read -p "  • Create and merge pull requests? [Y/n]: " pr_cap
     pr_cap=${pr_cap:-y}

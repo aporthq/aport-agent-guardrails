@@ -8,7 +8,7 @@
 
 You have two options when using APort guardrails with OpenClaw:
 
-1. **Local Passport** (Default): Create passport with CLI wizard → stored at `~/.openclaw/passport.json`
+1. **Local Passport** (Default): Create passport with CLI wizard → stored at `~/.openclaw/aport/passport.json`
 2. **Hosted Passport** (This Guide): Create passport at aport.io → Use `agent_id` only, no download needed
 
 **Why Hosted?**
@@ -34,10 +34,10 @@ You have two options when using APort guardrails with OpenClaw:
 **Option A — One command (if you have your agent_id):**
 
 ```bash
-npx @aporthq/aport-agent-guardrails <agent_id>
+npx @aporthq/aport-agent-guardrails openclaw <agent_id>
 ```
 
-Example: `npx @aporthq/aport-agent-guardrails ap_fa2f6d53bb5b4c98b9af0124285b6e0f`. The CLI skips the passport wizard and configures the plugin to use your hosted passport.
+Example: `npx @aporthq/aport-agent-guardrails openclaw ap_fa2f6d53bb5b4c98b9af0124285b6e0f`. The CLI skips the passport wizard and configures the plugin to use your hosted passport.
 
 **Option B — Interactive:**
 

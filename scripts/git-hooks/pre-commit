@@ -1,0 +1,58 @@
+#!/bin/bash
+# Pre-commit hook: lint and format-check staged files before committing.
+# Install: make install-git-hooks  or  git config core.hooksPath scripts/git-hooks
+#
+# Checks (all sub-second):
+#   1. shfmt   — shell formatting (reads config from .editorconfig)
+#   2. shellcheck — shell bugs (severity=error only)
+#   3. node --check — JS/MJS syntax
+#   4. python3 ast.parse — Python syntax
+
+set -e
+
+STAGED_SH=$(git diff --cached --name-only --diff-filter=ACM -- '*.sh' | head -50)
+STAGED_JS=$(git diff --cached --name-only --diff-filter=ACM -- '*.js' '*.mjs' | head -50)
+STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM -- '*.py' | head -50)
+
+FAIL=0
+
+# 1. shfmt (shell formatting)
+if [ -n "$STAGED_SH" ] && command -v shfmt >/dev/null 2>&1; then
+	if ! echo "$STAGED_SH" | xargs shfmt -d 2>&1; then
+		echo ""
+		echo "Fix: shfmt -w <files>  (reads config from .editorconfig)"
+		FAIL=1
+	fi
+fi
+
+# 2. shellcheck (shell bugs)
+if [ -n "$STAGED_SH" ] && command -v shellcheck >/dev/null 2>&1; then
+	if ! echo "$STAGED_SH" | xargs shellcheck --severity=error 2>&1; then
+		FAIL=1
+	fi
+fi
+
+# 3. node --check (JS syntax)
+if [ -n "$STAGED_JS" ] && command -v node >/dev/null 2>&1; then
+	for f in $STAGED_JS; do
+		if ! node --check "$f" 2>&1; then
+			FAIL=1
+		fi
+	done
+fi
+
+# 4. python3 ast.parse (Python syntax)
+if [ -n "$STAGED_PY" ] && command -v python3 >/dev/null 2>&1; then
+	for f in $STAGED_PY; do
+		if ! python3 -c "import ast; ast.parse(open('$f').read(), '$f')" 2>&1; then
+			echo "Syntax error: $f"
+			FAIL=1
+		fi
+	done
+fi
+
+if [ "$FAIL" -ne 0 ]; then
+	echo ""
+	echo "Pre-commit checks failed. Fix the issues above or skip with --no-verify."
+	exit 1
+fi

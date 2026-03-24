@@ -8,7 +8,7 @@
 npx @aporthq/aport-agent-guardrails
 ```
 
-If you already have an agent_id from aport.io (e.g. after creating a passport there), run `npx @aporthq/aport-agent-guardrails <agent_id>` to use a hosted passport and skip the passport prompt. See [Hosted passport setup](HOSTED_PASSPORT_SETUP.md).
+If you already have an agent_id from aport.io (e.g. after creating a passport there), run `npx @aporthq/aport-agent-guardrails openclaw <agent_id>` to use a hosted passport and skip the passport prompt. See [Hosted passport setup](HOSTED_PASSPORT_SETUP.md).
 
 This uses the [npm package](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails): it downloads the package (policies + plugin), runs the setup wizard, installs the APort OpenClaw plugin, and runs a smoke test.
 
@@ -74,7 +74,7 @@ If you prefer manual installation:
 ### 2. Install Plugin
 
 ```bash
-openclaw plugins install /path/to/aport-agent-guardrails/extensions/openclaw-aport
+openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport
 ```
 
 ### 3. Configure Plugin
@@ -263,7 +263,7 @@ openclaw plugins list
 ```
 
 If not listed:
-1. Verify installation: `openclaw plugins install /path/to/extensions/openclaw-aport`
+1. Verify installation: `openclaw plugins install -l /path/to/extensions/openclaw-aport`
 2. Check config.yaml has `plugins.entries.openclaw-aport.enabled: true`
 3. Restart OpenClaw gateway
 

@@ -134,6 +134,10 @@ fi
 export OPENCLAW_CONFIG_DIR="$CONFIG_DIR"
 USE_HOSTED_PASSPORT=false
 
+run_local_passport_wizard() {
+    APORT_FRAMEWORK=openclaw "$REPO_ROOT/bin/aport-create-passport.sh" --output "$PASSPORT_FILE" --framework=openclaw
+}
+
 if [ -n "$HOSTED_AGENT_ID" ]; then
     # Agent ID provided via command line - use hosted passport
     echo "  📋 Passport: Hosted (agent_id: $HOSTED_AGENT_ID)"
@@ -146,7 +150,7 @@ elif [ -f "$PASSPORT_FILE" ]; then
     if [ "$again" != "y" ] && [ "$again" != "Y" ]; then
         echo "  Skipping passport creation."
     else
-        "$REPO_ROOT/bin/aport-create-passport.sh" --output "$PASSPORT_FILE"
+        run_local_passport_wizard
     fi
 else
     # No agent_id, no local passport - ask user
@@ -170,7 +174,7 @@ else
         echo ""
     else
         # Create local passport
-        "$REPO_ROOT/bin/aport-create-passport.sh" --output "$PASSPORT_FILE"
+        run_local_passport_wizard
     fi
 fi
 
@@ -280,7 +284,7 @@ if true; then
     fi
 
     echo ""
-    echo "  Strict mode: block tools with no policy mapping (custom skills/ClawHub allowed by default)."
+    echo "  Strict mode (optional): block tools with no policy mapping."
     read -p "  Enable strict mode? [y/N]: " strict_mode
     strict_mode=${strict_mode:-n}
     if [ "$strict_mode" = "y" ] || [ "$strict_mode" = "Y" ]; then
@@ -345,6 +349,31 @@ YAML
         # Config exists - check if plugin section already present
         if grep -q "openclaw-aport:" "$CONFIG_YAML" 2>/dev/null; then
             echo "  ✅ Plugin configuration already present in $CONFIG_YAML"
+        elif grep -qE '^[[:space:]]*plugins:[[:space:]]*$' "$CONFIG_YAML" 2>/dev/null; then
+            # Safety: avoid writing a duplicate top-level "plugins:" key in existing YAML.
+            # Without a YAML-aware merger (yq), provide a merge-ready snippet instead.
+            APORT_SNIPPET="$CONFIG_DIR/aport-plugin-config.snippet.yaml"
+            {
+                echo "  entries:"
+                echo "    openclaw-aport:"
+                echo "      enabled: true"
+                echo "      config:"
+                echo "        mode: $PLUGIN_MODE"
+                if [ "$USE_HOSTED_PASSPORT" = true ]; then
+                    echo "        agentId: $HOSTED_AGENT_ID"
+                else
+                    echo "        passportFile: $PASSPORT_FILE"
+                    echo "        guardrailScript: $CONFIG_DIR/.skills/aport-guardrail-bash.sh"
+                fi
+                if [ "$PLUGIN_MODE" = "api" ]; then
+                    echo "        apiUrl: $api_url"
+                fi
+                echo "        failClosed: true"
+                echo "        allowUnmappedTools: $ALLOW_UNMAPPED"
+            } > "$APORT_SNIPPET"
+            echo "  ⚠️  Existing plugins block detected in $CONFIG_YAML; skipped raw append to avoid duplicate YAML keys."
+            echo "     Merge this snippet under your existing plugins block:"
+            echo "     $APORT_SNIPPET"
         else
             echo "" >> "$CONFIG_YAML"
             echo "# APort Plugin Configuration" >> "$CONFIG_YAML"
