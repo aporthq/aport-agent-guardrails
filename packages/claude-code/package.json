@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-claude-code",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "APort guardrails for Claude Code — PreToolUse hook",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
