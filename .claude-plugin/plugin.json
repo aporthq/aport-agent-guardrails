@@ -1,0 +1,22 @@
+{
+  "name": "aport-guardrails",
+  "description": "APort Agent Guardrails — security policy enforcement for every tool call. Intercepts tool use, evaluates against your passport policy, and blocks unauthorized actions.",
+  "version": "1.0.18",
+  "author": {
+    "name": "APort Technologies Inc.",
+    "email": "hello@aport.io",
+    "url": "https://aport.io"
+  },
+  "homepage": "https://aport.io/frameworks/claude-code",
+  "repository": "https://github.com/aporthq/aport-agent-guardrails",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security",
+    "guardrails",
+    "policy-enforcement",
+    "open-agent-passport",
+    "pre-tool-use"
+  ],
+  "hooks": "./hooks/hooks.json",
+  "skills": "./skills"
+}
