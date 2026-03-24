@@ -32,10 +32,8 @@ detect_frameworks_list() {
         grep -qi 'crewai' "$dir/requirements.txt" 2> /dev/null && list+=(crewai)
     fi
 
-    # Claude Code: detect claude binary or ~/.claude directory
-    if command -v claude &> /dev/null || [[ -d "$HOME/.claude" ]]; then
-        list+=(claude-code)
-    fi
+    # Claude Code and Cursor are IDE/global integrations — not detectable from project
+    # files. Users choose them explicitly: npx @aporthq/aport-agent-guardrails claude-code
 
     # Dedupe preserving order
     local seen=() out=()

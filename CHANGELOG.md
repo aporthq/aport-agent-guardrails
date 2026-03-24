@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Claude Code hook tool-name compatibility:** `bin/aport-claude-code-hook.sh` now normalizes tool names (including `functions.*` prefixes and case variants) so runtime aliases like `Shell`/`functions.Shell` map correctly to `bash` policy checks instead of being denied as unknown tools.
+- **Release docs version drift:** `docs/RELEASE.md` current release marker updated to `1.0.18` to match package versions.
+- **Installer update behavior for stale hook paths:** Cursor/Claude installers now replace stale APort-managed hook command entries (old `~/.npm/_npx/...` paths) instead of only deduping exact command strings, while preserving user-defined non-APort hooks.
+- **OpenClaw config update safety:** `bin/openclaw` no longer appends a duplicate top-level `plugins:` block into existing `config.yaml`; it now writes a merge snippet when an existing plugins block is detected.
+- **Generic config update safety:** `write_config_template()` now seeds `config.yaml` only on first setup and no longer overwrites existing user-managed `config.yaml` on reruns.
+- **OpenClaw compatibility default:** `allowUnmappedTools` default is restored to `true` (manifest/runtime/tests/docs) to avoid an unintended breaking behavior change.
+- **Validation portability:** `safe_pattern_match()` no longer relies on `grep -w -F`; it now uses boundary-aware regex matching compatible with GNU/BSD grep.
+- **Test shim provenance:** Added vendoring provenance note to `_allowlist_shim.py` to reduce silent drift risk.
+
+### Added
+- **Hook regression coverage:** Added unit test coverage for the `Shell` alias path in `tests/unit/test-claude-code-hook.sh`.
+- **Installer regression coverage:** Framework setup integration tests now pre-seed stale APort hook entries and custom hooks, and assert "replace stale APort entries, preserve custom hooks" for both Cursor and Claude Code.
+- **Config regression coverage:** Added a unit test asserting `write_config_template()` preserves existing `config.yaml` on reruns.
+- **Shared setup helpers:** Added `bin/lib/framework-setup.sh` and reused it in Cursor/Claude installers for hook path resolution and secure framework config dir setup.
+- **Environment template:** Added `.env.example` documenting key runtime/config environment variables.
+
 ## [1.0.16] - 2026-03-21
 
 ### Added

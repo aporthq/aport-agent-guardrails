@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛡️ APort Agent Guardrails
+# <img src="https://aport.io/logo.svg" alt="APort logo" width="31" /> APort Agent Guardrails
 
 [![npm](https://img.shields.io/npm/v/@aporthq/aport-agent-guardrails.svg)](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails)
 [![PyPI](https://img.shields.io/pypi/v/aport-agent-guardrails.svg)](https://pypi.org/project/aport-agent-guardrails/)
@@ -8,7 +8,7 @@
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](package.json)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](python/aport_guardrails/pyproject.toml)
-[![OpenClaw](https://img.shields.io/badge/OpenClaw-%3E%3D2026.2.0-blue.svg)](extensions/openclaw-aport/package.json)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-%3E%3D2026.3.0-blue.svg)](extensions/openclaw-aport/package.json)
 
 <p>
   <a href="https://www.npmjs.com/package/@aporthq/aport-agent-guardrails">npm</a> •
@@ -24,69 +24,75 @@
 
 ---
 
-## The problem: OpenClaw skills can exfiltrate data without you knowing
+Deterministic pre-action authorization for AI agents. Guardrails run before tool execution, so prompt injection cannot bypass policy checks.
 
-[Cisco's AI security team](https://blogs.cisco.com/ai/personal-ai-agents-like-openclaw-are-a-security-nightmare) documented that **OpenClaw skills can perform silent data exfiltration and prompt-injection attacks**—third-party skills run with the same trust as the agent, so a malicious or compromised skill can read files, run commands, or call external APIs without user awareness. That finding has been amplified by [FourWeekMBA](https://fourweekmba.com/openclaws-security-nightmare-the-risk-openai-just-inherited/), [AuthMind](https://www.authmind.com/post/openclaw-malicious-skills-agentic-ai-supply-chain), [Bitsight](https://www.bitsight.com/blog), and others. Additional vulnerabilities (e.g. [CVE-2026-25253](https://www.securityweek.com/vulnerability-allows-hackers-to-hijack-openclaw-ai-assistant/) token exfiltration leading to gateway compromise) keep surfacing.
+### CTF Evidence
 
-**APort Agent Guardrails is the pre-action authorization layer that blocks this before it executes.** Every tool call is checked against a **passport** (identity + capabilities + limits) in the platform's `before_tool_call` hook. The model cannot skip it; malicious or injected commands are denied before they run. See [SECURITY.md](SECURITY.md) for how we address the Cisco findings, prompt injection, and related attack vectors.
+From the live APort Vault adversarial testbed:
 
----
+| Metric | Result |
+|---|---|
+| Total authorization decisions observed | 4,437 |
+| Total attack sessions observed | 1,151 |
+| Level 5 ("Vault") restrictive attempts | 879 |
+| Level 5 ("Vault") successful breaches | 0 |
+| **Level 5 restrictive success rate** | **0%** |
+| Permissive baseline success rate (for comparison) | 74.6% |
 
-## Why pre-action authorization?
+- [CTF Results](https://vault.aport.io/results)
+- [CTF Replay](https://vault.aport.io/replay)
+- [CTF Leaderboard](https://vault.aport.io/leaderboard/page)
 
-Your agent should **only do what you explicitly allow**. APort runs in the hook—not in the prompt—so enforcement is deterministic and cannot be bypassed by prompt injection. No “trust the prompt”. The guardrail runs in the hook; the model cannot skip it.
 
+## Start Here
 
-| | Without APort | With APort (plugin) |
-|---|----------------|---------------------|
-| **Enforcement** | Best-effort (prompts) | Deterministic (platform hook) |
-| **Bypass risk** | High (prompt injection) | None |
-| **Command control** | Agent can run anything | Allowlist + blocked patterns |
-| **Audit** | Optional / ad hoc | Every decision logged |
+### Install in 30 seconds
 
----
+```bash
+npx @aporthq/aport-agent-guardrails
+```
 
-## ✨ Features
+- Choose your framework: `openclaw`, `cursor`, `claude-code`, `langchain`, `crewai`, `deerflow`, `n8n`
+- OpenClaw direct: `npx @aporthq/aport-agent-guardrails openclaw`
+- Hosted passport: `npx @aporthq/aport-agent-guardrails openclaw <agent_id>`
 
-🛡️ **Pre-action checks** — Policy runs *before* the tool executes; deny = tool never runs  
-📋 **Passport-driven** — OAP v1.0 passports define capabilities and limits (allowed commands, message caps, etc.)  
-🔌 **OpenClaw plugin** — `before_tool_call` hook; 5-minute setup, no code changes  
-🌐 **API (default) or local** — APort API (recommended, full OAP) or bash evaluator (offline / no network). Both modes now have identical behavior (exec mapping fixed); messaging runs at assurance L0 by default.  
-🔴 **Kill switch** — Suspend the agent so all tool execution is denied: local file (local mode) or **Global Suspend** (hosted passport + API; see below).  
-⚡ **Sub-100ms (API)** — Python API verification is typically **~60–65 ms** (mean); local evaluation sub-300ms. [Benchmarks](tests/performance/README.md)  
-🔄 **Framework-agnostic** — OpenClaw, IronClaw, PicoClaw, or any runtime that can call a script or API  
+### Why Developers and teams trust APort
 
-**What’s protected (out of the box):**
+- **Deterministic enforcement:** runtime hook, not prompt instructions
+- **Fail-closed defaults:** verification failures block risky actions
+- **Auditable decisions:** each allow/deny is logged with context
+- **Open standard artifacts:** Open Agent Passport ([OAP](https://github.com/aporthq/aport-spec)) v1.0 passport and decision formats
+- **Research-backed outcomes:** in a live adversarial testbed, permissive-policy success was 74.6% vs 0% under restrictive OAP policy (879 top-tier attempts)
+- **Low latency at production scale:** cloud API verification p50 ~53ms at N=1,000
+- **Security docs:** [SECURITY.md](SECURITY.md), [SECURITY_MODEL.md](docs/SECURITY_MODEL.md)
+- **Backed by Peer-reviewed research:** [arXiv preprint (Mar 2026)](https://arxiv.org/html/2603.20953v1)
 
-| Policy | What it guards |
-|--------|----------------|
-| **system.command.execute.v1** | Shell commands — allowlist, 50+ blocked patterns (`rm -rf`, `sudo`, `nc`, `find -exec rm`, injection); passport `allowed_paths` override for path rules |
-| **mcp.tool.execute.v1** | MCP tool calls — server allowlist, rate limits |
-| **messaging.message.send.v1** | Message sends — rate caps, capability checks |
-| **agent.session.create.v1** / **agent.tool.register.v1** | Sessions and tool registration |
+### Fast path by persona
 
----
+- **I need OpenClaw now:** [docs/QUICKSTART_OPENCLAW_PLUGIN.md](docs/QUICKSTART_OPENCLAW_PLUGIN.md)
+- **I already have agent_id:** [docs/HOSTED_PASSPORT_SETUP.md](docs/HOSTED_PASSPORT_SETUP.md)
+- **I need framework setup docs:** [docs/frameworks](docs/frameworks)
 
-## 🔴 Kill switch (suspend agent) — core feature
+### Brand personality (optional)
 
-The **kill switch suspends the agent**: once active, every tool call is denied until the switch is cleared. No tool runs until you re-enable the agent. **Same standard across all frameworks** (OpenClaw, Cursor, LangChain, CrewAI, n8n): the **passport is the source of truth**; we do **not** create or read any separate file. Local = passport `status`; remote = status in registry.
+Security should feel rigorous, not intimidating. Meet Porter, the APort mascot used across the product experience: [Meet Porter](https://aport.io/brand-mascot-agent/).
 
-| Mode | How it works | Scope |
-|------|----------------|--------|
-| **Local** | The **passport is the source of truth**. Set passport `status` to `suspended` (e.g. edit `passport.json` or `jq '.status = "suspended"' passport.json`). The guardrail checks passport status first and denies with `oap.passport_suspended`. Set back to `active` to resume. No separate file. | Single machine / config dir only. |
-| **Global Suspend** | Use a **hosted passport** (agent_id) with API mode. **Log in** to [APort](https://aport.io) and suspend the passport. Per the [Open Agent Passport (OAP) spec](external/aport-spec/oap/oap-spec.md): when a passport is suspended or revoked, validators MUST treat cached decisions as invalid within **≤30 seconds** globally. | **All systems** using that passport deny within &lt;200ms. |
+<details>
+<summary><strong style="font-size:18pt">Deeper background (threat model, rationale, evidence)</strong></summary>
 
-**Remote passports and Global Suspend (pro):** When the same passport is used **across multiple systems** (e.g. team agents, many machines), a **hosted passport** plus API mode lets you **log in once** and suspend that passport in the registry. Every agent using that passport then stops authorizing tool calls within 200ms, per OAP suspend/revoke semantics. That's **Global Suspend** — a major advantage when one passport is shared. See [OAP spec: Suspend/Revoke Semantics](external/aport-spec/oap/oap-spec.md) and [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md).
+The security concern is that agent tools and skills can execute sensitive actions (files, commands, external calls). APort addresses this by verifying each tool call against a passport and policy limits before execution. This reduces prompt-injection and “agent decided wrong” risk from runtime behavior to policy configuration.
+
+</details>
 
 ---
 
 ## 🔌 Supported frameworks
 
-**APort Agent Guardrail** adapters are available per framework; the same passport and policies apply. **Node users:** `npx @aporthq/aport-agent-guardrails` (then choose framework) or `npx @aporthq/aport-agent-guardrails <framework>`. **Python users (LangChain/CrewAI):** run the same CLI for the wizard and config, then `pip install aport-agent-guardrails-langchain` or `aport-agent-guardrails-crewai` and `aport-langchain setup` / `aport-crewai setup`. **n8n:** coming soon.
+**APort Agent Guardrail** adapters are available per framework; the same passport and policies apply. **Node users:** `npx @aporthq/aport-agent-guardrails` (then choose framework) or `npx @aporthq/aport-agent-guardrails <framework>`. **Python users (LangChain/CrewAI/DeerFlow):** run the same CLI for the wizard and config, then install the framework adapter/provider package shown in the framework doc.
 
-**Two ways to use APort:** (1) **Guardrails (CLI/setup)** — run the installer to create your passport and config; (2) **Core (library)** — use the evaluator or framework callback in your app so each tool call is verified. Each framework doc ([LangChain](docs/frameworks/langchain.md), [CrewAI](docs/frameworks/crewai.md), [Cursor](docs/frameworks/cursor.md), [OpenClaw](docs/frameworks/openclaw.md)) describes both and how to use them for that framework (Python and Node where applicable).
+**Two ways to use APort:** (1) **Guardrails (CLI/setup)** — run the installer to create your passport and config; (2) **Core (library)** — use the evaluator or framework callback in your app so each tool call is verified. Framework docs: [OpenClaw](docs/frameworks/openclaw.md), [Cursor](docs/frameworks/cursor.md), [Claude Code](docs/frameworks/claude-code.md), [LangChain](docs/frameworks/langchain.md), [CrewAI](docs/frameworks/crewai.md), [DeerFlow](docs/frameworks/deerflow.md), [n8n](docs/frameworks/n8n.md).
 
-**Production-ready today:** OpenClaw (plugin + full installer), Cursor (hooks), **Claude Code** (PreToolUse hook), **Python** LangChain/CrewAI (`pip install aport-agent-guardrails-langchain` / `aport-agent-guardrails-crewai`), and **Node** (CLI + `@aporthq/aport-agent-guardrails-core`, `-langchain`, `-crewai`, `-cursor`, `-claude-code` published via CI). See [Deployment readiness](docs/DEPLOYMENT_READINESS.md).
+**CLI-supported frameworks:** `openclaw`, `langchain`, `crewai`, `cursor`, `claude-code`, `deerflow`, `n8n`. OpenClaw/Cursor/Claude Code include runtime-specific integration scripts; DeerFlow/LangChain/CrewAI use framework docs plus generic setup output from the CLI. See [Deployment readiness](docs/DEPLOYMENT_READINESS.md).
 
 | Framework | Doc | Integration | Install |
 |-----------|-----|--------------|--------|
@@ -95,13 +101,14 @@ The **kill switch suspends the agent**: once active, every tool call is denied u
 | **Claude Code** | [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md) | PreToolUse hook → writes `~/.claude/settings.json` (Claude Code format; not Cursor). | `npx @aporthq/aport-agent-guardrails claude-code` |
 | **LangChain / LangGraph** | [docs/frameworks/langchain.md](docs/frameworks/langchain.md) | **Python:** `APortCallback` (`on_tool_start`) | `npx @aporthq/aport-agent-guardrails langchain` then `pip install aport-agent-guardrails-langchain` + `aport-langchain setup` |
 | **CrewAI** | [docs/frameworks/crewai.md](docs/frameworks/crewai.md) | **Python:** `@before_tool_call` hook, `register_aport_guardrail` | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
+| **DeerFlow** | [docs/frameworks/deerflow.md](docs/frameworks/deerflow.md) | **Python:** generic OAP provider wiring in DeerFlow config | `npx @aporthq/aport-agent-guardrails deerflow` then follow printed `uv`/config steps |
 | **n8n** | [docs/frameworks/n8n.md](docs/frameworks/n8n.md) | *Coming soon* — custom node and runtime in progress | — |
 
 Install via `npx @aporthq/aport-agent-guardrails <framework>` (or choose when prompted). OpenClaw can also use the full installer flow. **For LangChain and CrewAI, the Node CLI only runs the wizard and writes config; you must then run the printed `pip install` and setup commands to install the runtime adapter.** **Python** adapters on PyPI; **Node** adapters on npm (same version as the CLI).
 
 **Passport path:** Each framework has its own **default** passport path (where that framework stores data): e.g. Cursor → `~/.cursor/aport/passport.json`, OpenClaw → `~/.openclaw/aport/passport.json`, LangChain → `~/.aport/langchain/aport/passport.json`. The passport wizard’s **first question** is “Passport file path [default]:” — press Enter for the framework default or type a different path. In non-interactive mode (e.g. CI) use **`--output /path/to/passport.json`** to choose the path. Roadmap: [docs/FRAMEWORK_ROADMAP.md](docs/FRAMEWORK_ROADMAP.md).
 
-**Using SDKs or middleware directly:** If you prefer to integrate with the APort API from your own app (no CLI/framework installer), use the official SDKs and middleware: **Node** — [@aporthq/sdk-node](https://www.npmjs.com/package/@aporthq/sdk-node), [@aporthq/middleware-express](https://www.npmjs.com/package/@aporthq/middleware-express); **Python** — [aporthq-sdk-python](https://pypi.org/project/aporthq-sdk-python/), [aporthq-middleware-fastapi](https://pypi.org/project/aporthq-middleware-fastapi/). See [User Stories (Story F)](docs/launch/USER_STORIES.md#story-f) for details.
+**Using SDKs or middleware directly:** If you prefer to integrate with the APort API from your own app (no CLI/framework installer), use the official SDKs and middleware: **Node** — [@aporthq/sdk-node](https://www.npmjs.com/package/@aporthq/sdk-node), [@aporthq/middleware-express](https://www.npmjs.com/package/@aporthq/middleware-express); **Python** — [aporthq-sdk-python](https://pypi.org/project/aporthq-sdk-python/), [aporthq-middleware-fastapi](https://pypi.org/project/aporthq-middleware-fastapi/).
 
 ---
 
@@ -114,7 +121,7 @@ Install via `npx @aporthq/aport-agent-guardrails <framework>` (or choose when pr
 **Node (Cursor, OpenClaw, or to create config for any framework):**
 ```bash
 npx @aporthq/aport-agent-guardrails
-# or: npx @aporthq/aport-agent-guardrails cursor | openclaw | langchain | crewai
+# or: npx @aporthq/aport-agent-guardrails openclaw | cursor | claude-code | langchain | crewai | deerflow | n8n
 ```
 
 **Python (LangChain or CrewAI only):** Run the wizard via the Node command above, then install the Python adapter and run the framework setup (see the printed next steps). Or use the Python CLI to see the exact commands:
@@ -151,7 +158,7 @@ aport-guardrail system.command.execute '{"command":"rm -rf /"}'  # DENY (blocked
 
 Your framework doc (Cursor, OpenClaw, LangChain, CrewAI) describes where the config dir is and any framework-specific status commands.
 
-📖 **Per-framework:** [OpenClaw](docs/frameworks/openclaw.md) · [Cursor](docs/frameworks/cursor.md) · [LangChain](docs/frameworks/langchain.md) · [CrewAI](docs/frameworks/crewai.md)  
+📖 **Per-framework:** [OpenClaw](docs/frameworks/openclaw.md) · [Cursor](docs/frameworks/cursor.md) · [Claude Code](docs/frameworks/claude-code.md) · [LangChain](docs/frameworks/langchain.md) · [CrewAI](docs/frameworks/crewai.md) · [DeerFlow](docs/frameworks/deerflow.md) · [n8n](docs/frameworks/n8n.md)  
 🌐 **Hosted passport:** [Use agent_id from aport.io](docs/HOSTED_PASSPORT_SETUP.md)
 
 ---
@@ -188,19 +195,22 @@ Deep dive (what each supports, comparison table): [Verification methods](docs/VE
 
 ## ⚡ Performance
 
-Guardrail verification latency (real API + local). Python is typically fastest for API mode. Below: **Python only** (n=30, warmup=10, real APort API).
+Guardrail verification latency from the latest preprint benchmark set (**N=1,000**).
 
-| Method | Identity | Policy | Mean (ms) | p50 | p95 | p99 | N |
-|--------|----------|--------|-----------|-----|-----|-----|---|
-| API | agent_id (cloud) | pack in path | 63.42 | 63.16 | 70.31 | 70.65 | 30 |
-| API | agent_id (cloud) | policy in body | 62.62 | 62.37 | 69.58 | 72.22 | 30 |
-| API | passport in body | pack in path | 63.03 | 63.12 | 67.48 | 71.45 | 30 |
-| API | passport in body | policy in body | 61.60 | 62.11 | 66.90 | 70.39 | 30 |
-| Local | passport file | pack in path | 120.27 | 117.85 | 131.62 | 145.38 | 30² |
+| Mode | p50 | p95 | p99 | N |
+|------|-----|-----|-----|---|
+| Cloud API (agent_id, pack in path) | 53ms | 63ms | 76ms | 1,000 |
+| Cloud API (agent_id, policy in body) | 53ms | 62ms | 77ms | 1,000 |
+| Cloud API (passport in body, pack in path) | 54ms | 63ms | 74ms | 1,000 |
+| Cloud API (passport in body, policy in body) | 53ms | 63ms | 71ms | 1,000 |
+| Local policy evaluation | 174ms | 243ms | 358ms | 1,000 |
 
-² Policy in body not yet for local evaluation.
+Source: [Before the Tool Call: Deterministic Pre-Action Authorization for Autonomous AI Agents](https://arxiv.org/html/2603.20953v1)
 
 ---
+
+<details>
+<summary><strong>📐 How It Works (expand)</strong></summary>
 
 ## 📐 How It Works
 
@@ -284,6 +294,11 @@ User → "Delete all log files"
 
 ---
 
+</details>
+
+<details>
+<summary><strong>🏛️ Security model (three layers) (expand)</strong></summary>
+
 ## 🏛️ Security model (three layers)
 
 APort enforces **identity → authorization → audit** before any tool runs. This repo implements the **plugin (Option 2)** integration: OpenClaw calls the APort extension in `before_tool_call`; the extension uses either local script or API to evaluate policy.
@@ -346,6 +361,8 @@ graph TB
 
 ---
 
+</details>
+
 ## 🌐 When to use API vs local
 
 | Use **local** when | Use **API** (default) when |
@@ -375,7 +392,7 @@ See [Verification methods](docs/VERIFICATION_METHODS.md) for a detailed comparis
 
 | Command | Purpose |
 |--------|---------|
-| `agent-guardrails` | Main entry — prompt for framework or pass one: `agent-guardrails cursor \| openclaw \| langchain \| crewai`. Args after the framework are passed through (e.g. `agent-guardrails openclaw <agent_id>`). |
+| `agent-guardrails` | Main entry — prompt for framework or pass one: `agent-guardrails openclaw \| cursor \| claude-code \| langchain \| crewai \| deerflow \| n8n`. Args after the framework are passed through (e.g. `agent-guardrails openclaw <agent_id>`). |
 | `aport` | OpenClaw one-command setup (passport + plugin + wrappers). Optional: `aport <agent_id>` for hosted passport. |
 | `aport-guardrail` | Run guardrail check from the CLI (e.g. `aport-guardrail system.command.execute '{"command":"ls"}'`). Uses passport from your framework config dir. |
 
@@ -399,7 +416,7 @@ Use the framework-specific doc for where config and passport live and for any ex
 | Doc | Description |
 |-----|-------------|
 | [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md) | 5-minute OpenClaw setup |
-| [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md) | Use passport from aport.io — `npx ... <agent_id>` or choose hosted in wizard |
+| [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md) | Use passport from aport.io — `npx ... openclaw <agent_id>` or choose hosted in wizard |
 | [Verification methods (local vs API)](docs/VERIFICATION_METHODS.md) | Deep dive: bash vs API evaluator |
 | [Quick Start Guide](docs/QUICKSTART.md) | Passport wizard, copy-paste option |
 | [OpenClaw Local Integration](docs/OPENCLAW_LOCAL_INTEGRATION.md) | API, Python example |
@@ -409,12 +426,17 @@ Use the framework-specific doc for where config and passport live and for any ex
 | **Frameworks** | Per-framework setup and how guardrails run |
 | → [OpenClaw](docs/frameworks/openclaw.md) | `before_tool_call` plugin |
 | → [Cursor](docs/frameworks/cursor.md) | beforeShellExecution / preToolUse hooks, `~/.cursor/hooks.json` |
+| → [Claude Code](docs/frameworks/claude-code.md) | PreToolUse hook, `~/.claude/settings.json` |
 | → [LangChain / LangGraph](docs/frameworks/langchain.md) | `APortCallback` handler |
 | → [CrewAI](docs/frameworks/crewai.md) | `@before_tool_call` hook, `register_aport_guardrail` |
+| → [DeerFlow](docs/frameworks/deerflow.md) | Generic provider wiring via DeerFlow `config.yaml` |
 | → [n8n](docs/frameworks/n8n.md) | Custom node, branch on allow/deny |
-| [Framework support plan](docs/launch/FRAMEWORK_SUPPORT_PLAN.md) | Strategy, rankings, roadmap |
+| [Framework roadmap](docs/FRAMEWORK_ROADMAP.md) | Support status and roadmap |
 
 ---
+
+<details>
+<summary><strong>🏗️ Architecture (expand)</strong></summary>
 
 ## 🏗️ Architecture
 
@@ -470,6 +492,8 @@ flowchart TB
 Defense in depth: policy *before* execution, runtime safety *during* execution.
 
 ---
+
+</details>
 
 ## 🤝 Contributing
 

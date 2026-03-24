@@ -12,6 +12,22 @@ CURSOR_DIR="$TEST_DIR/.cursor"
 rm -rf "$CURSOR_DIR"
 mkdir -p "$CURSOR_DIR"
 
+# Seed existing hooks.json with a stale APort path + a user custom hook.
+cat > "$CURSOR_DIR/hooks.json" << EOF
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {"command":"/Users/uchi/.npm/_npx/stale/node_modules/@aporthq/aport-agent-guardrails/bin/aport-cursor-hook.sh"},
+      {"command":"/usr/local/bin/custom-before-shell-hook.sh"}
+    ],
+    "preToolUse": [
+      {"command":"/Users/uchi/.npm/_npx/stale/node_modules/@aporthq/aport-agent-guardrails/bin/aport-cursor-hook.sh"}
+    ]
+  }
+}
+EOF
+
 echo ""
 echo "  Integration — Cursor setup (agent-guardrails --framework=cursor)"
 echo "  Hooks dir: $CURSOR_DIR"
@@ -32,9 +48,9 @@ echo "  ✅ hooks.json exists"
 
 # Assert it contains our hook command (path to aport-cursor-hook.sh)
 if command -v jq &> /dev/null; then
-    HOOK_CMD=$(jq -r '.hooks.beforeShellExecution[0].command // empty' "$CURSOR_DIR/hooks.json")
+    HOOK_CMD=$(jq -r '.hooks.beforeShellExecution[]?.command // empty' "$CURSOR_DIR/hooks.json" | grep "aport-cursor-hook" | head -n 1)
     if [[ -z "$HOOK_CMD" ]]; then
-        HOOK_CMD=$(jq -r '.hooks.preToolUse[0].command // empty' "$CURSOR_DIR/hooks.json")
+        HOOK_CMD=$(jq -r '.hooks.preToolUse[]?.command // empty' "$CURSOR_DIR/hooks.json" | grep "aport-cursor-hook" | head -n 1)
     fi
     if [[ -z "$HOOK_CMD" ]]; then
         echo "FAIL: hooks.json should have beforeShellExecution or preToolUse with command" >&2
@@ -45,6 +61,24 @@ if command -v jq &> /dev/null; then
         exit 1
     fi
     echo "  ✅ hooks.json references APort hook script"
+
+    # Stale npx APort cursor hook path should be replaced
+    STALE_COUNT=$(jq -r '[.hooks.beforeShellExecution[]?, .hooks.preToolUse[]?, .hooks.beforeMCPExecution[]?, .hooks.subagentStart[]?] | map(.command // "") | map(select(test("aport-cursor-hook\\.sh$") and test("/\\.npm/_npx/"))) | length' "$CURSOR_DIR/hooks.json")
+    if [[ "$STALE_COUNT" -ne 0 ]]; then
+        echo "FAIL: stale npx APort cursor hook entries should be removed" >&2
+        jq -c '.hooks' "$CURSOR_DIR/hooks.json" >&2
+        exit 1
+    fi
+    echo "  ✅ stale npx APort cursor hook entries removed"
+
+    # User custom hooks must be preserved
+    CUSTOM_COUNT=$(jq -r '[.hooks.beforeShellExecution[]? | select(.command == "/usr/local/bin/custom-before-shell-hook.sh")] | length' "$CURSOR_DIR/hooks.json")
+    if [[ "$CUSTOM_COUNT" -ne 1 ]]; then
+        echo "FAIL: custom hooks should be preserved during merge" >&2
+        jq -c '.hooks.beforeShellExecution' "$CURSOR_DIR/hooks.json" >&2
+        exit 1
+    fi
+    echo "  ✅ custom hooks preserved"
 fi
 
 echo ""

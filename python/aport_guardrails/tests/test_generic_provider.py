@@ -77,7 +77,9 @@ class TestOAPGuardrailProvider:
 
     @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)
     @patch("aport_guardrails.providers.generic.Evaluator")
-    def test_evaluate_passes_agent_id(self, mock_evaluator_cls, mock_find):
+    def test_evaluate_does_not_pass_agent_id(self, mock_evaluator_cls, mock_find):
+        """Provider does NOT pass agent_id to evaluator -- the evaluator reads
+        agent_id and passport_path from its own config file."""
         mock_evaluator = MagicMock()
         mock_evaluator.verify_sync.return_value = {"allow": True, "reasons": []}
         mock_evaluator_cls.return_value = mock_evaluator
@@ -90,7 +92,8 @@ class TestOAPGuardrailProvider:
 
         provider.evaluate(request)
         call_args = mock_evaluator.verify_sync.call_args
-        assert call_args[0][0] == {"agent_id": "ap_abc123"}
+        # First arg (passport) should be empty -- evaluator uses its own config
+        assert call_args[0][0] == {}
 
     @pytest.mark.asyncio
     @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)

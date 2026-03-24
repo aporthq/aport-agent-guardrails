@@ -9,7 +9,7 @@
 npx @aporthq/aport-agent-guardrails
 ```
 
-If you have an agent_id from aport.io, run `npx @aporthq/aport-agent-guardrails <agent_id>` to use a hosted passport (no local file). See [HOSTED_PASSPORT_SETUP.md](HOSTED_PASSPORT_SETUP.md).
+If you have an agent_id from aport.io, run `npx @aporthq/aport-agent-guardrails openclaw <agent_id>` to use a hosted passport (no local file). See [HOSTED_PASSPORT_SETUP.md](HOSTED_PASSPORT_SETUP.md).
 
 This uses the [npm package](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails): downloads the package, runs the setup wizard, installs the plugin and wrappers, and runs a smoke test.
 
@@ -94,11 +94,11 @@ This copies scripts to `~/.openclaw/.skills/`. For a **configurable path** and w
    - Max PRs per day: `10`
    - Allowed repos: `*` (all repos)
 
-**Result:** Passport created at `~/.openclaw/passport.json`
+**Result:** Passport created at `~/.openclaw/aport/passport.json`
 
 **Verify:**
 ```bash
-cat ~/.openclaw/passport.json | jq '.passport_id, .status, .expires_at'
+cat ~/.openclaw/aport/passport.json | jq '.passport_id, .status, .expires_at'
 ```
 
 You should see:
@@ -156,7 +156,7 @@ You should see:
 
 ## Step 4: Test Policy Evaluation (1 minute)
 
-Scripts exit **0** = allow, **1** = deny. The decision is written to `~/.openclaw/decision.json` (not printed to stdout).
+Scripts exit **0** = allow, **1** = deny. The decision is written to `~/.openclaw/aport/decision.json` (not printed to stdout).
 
 ### Test 1: Allow a small PR (should PASS)
 
@@ -172,12 +172,12 @@ echo "Exit: $? (0 = ALLOW)"
 
 **Check decision:**
 ```bash
-cat ~/.openclaw/decision.json | jq .
+cat ~/.openclaw/aport/decision.json | jq .
 ```
 
 **Check audit log:**
 ```bash
-tail -1 ~/.openclaw/audit.log
+tail -1 ~/.openclaw/aport/audit.log
 ```
 
 ---
@@ -191,7 +191,7 @@ tail -1 ~/.openclaw/audit.log
   "files_changed": 1000
 }'
 echo "Exit: $? (1 = DENY)"
-cat ~/.openclaw/decision.json | jq '.allow, .reasons'
+cat ~/.openclaw/aport/decision.json | jq '.allow, .reasons'
 ```
 
 You should see `"allow": false` and a deny reason.
@@ -203,7 +203,7 @@ You should see `"allow": false` and a deny reason.
 ```bash
 ~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"rm -rf /tmp/test"}'
 echo "Exit: $? (1 = DENY)"
-cat ~/.openclaw/decision.json | jq '.allow, .reasons[0].message'
+cat ~/.openclaw/aport/decision.json | jq '.allow, .reasons[0].message'
 ```
 
 ---
@@ -221,7 +221,7 @@ jq '.status = "suspended"' ~/.openclaw/aport/passport.json > /tmp/passport.tmp &
 ### Try any action (should be blocked):
 ```bash
 ~/.openclaw/.skills/aport-guardrail.sh git.create_pr '{"repo": "test", "files_changed": 1}'
-cat ~/.openclaw/decision.json | jq '.allow, .reasons[0].code'
+cat ~/.openclaw/aport/decision.json | jq '.allow, .reasons[0].code'
 ```
 You should see `allow: false` and `oap.passport_suspended`.
 
@@ -312,7 +312,7 @@ def execute_tool(tool_name, params):
     ], capture_output=True, text=True)
 
     # 2. Read decision
-    with open(os.path.expanduser('~/.openclaw/decision.json')) as f:
+    with open(os.path.expanduser('~/.openclaw/aport/decision.json')) as f:
         decision = json.load(f)
 
     # 3. Check if allowed
@@ -329,7 +329,7 @@ def execute_tool(tool_name, params):
 
 ### Edit passport directly:
 ```bash
-vim ~/.openclaw/passport.json
+vim ~/.openclaw/aport/passport.json
 ```
 
 ### Common customizations:
@@ -369,7 +369,7 @@ vim ~/.openclaw/passport.json
 
 **After editing, verify:**
 ```bash
-jq . ~/.openclaw/passport.json > /dev/null && echo "✅ Valid JSON" || echo "❌ Invalid JSON"
+jq . ~/.openclaw/aport/passport.json > /dev/null && echo "✅ Valid JSON" || echo "❌ Invalid JSON"
 ```
 
 ---
@@ -404,7 +404,7 @@ If you see `oap.unknown_capability: Missing required capabilities: messaging.sen
 - In `capabilities`, use `"id": "messaging.send"` (not `messaging.message.send`).
 - In `limits`, use the key `"messaging"` (not `messaging.message.send`) for `msgs_per_min`, `msgs_per_day`, etc.
 
-Re-run the passport wizard to create a new passport, or edit `~/.openclaw/passport.json` and fix those two places.
+Re-run the passport wizard to create a new passport, or edit `~/.openclaw/aport/passport.json` and fix those two places.
 
 ### Problem: "All actions denied"
 ```bash
@@ -413,7 +413,7 @@ jq '.status' ~/.openclaw/aport/passport.json
 # Should be "active"; if "suspended" or "revoked", set back to "active" to resume
 
 # Check expiration
-jq '.expires_at' ~/.openclaw/passport.json
+jq '.expires_at' ~/.openclaw/aport/passport.json
 # If expired, update it
 ```
 
