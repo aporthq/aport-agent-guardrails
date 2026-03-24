@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Cursor (and optional Copilot/Claude Code) framework installer/setup.
+# Cursor framework installer/setup.
 # Runs passport wizard and writes ~/.cursor/hooks.json pointing at the APort hook script.
-# Same hook script works for Cursor, VS Code + Copilot, and Claude Code.
+# Same hook script works for Cursor and VS Code/Copilot-style hook payloads.
 
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -10,26 +10,26 @@ source "$LIB/common.sh"
 source "$LIB/passport.sh"
 # shellcheck source=../lib/config.sh
 source "$LIB/config.sh"
+# shellcheck source=../lib/framework-setup.sh
+source "$LIB/framework-setup.sh"
 
 run_setup() {
     log_info "Setting up APort guardrails for Cursor..."
     # Passport and data live under Cursor's config dir (~/.cursor/aport/ by default).
-    config_dir="$(get_config_dir cursor)"
-    mkdir -p "$config_dir/aport"
-    chmod 700 "$config_dir/aport"
+    config_dir="$(ensure_aport_dir_secure cursor)"
 
     export APORT_FRAMEWORK=cursor
-    run_passport_wizard "$@"
+
+    # Check AGENTS.md for enforcement config — skip wizard if already configured
+    # shellcheck source=../lib/agentsmd.sh
+    source "$LIB/agentsmd.sh"
+    setup_from_agentsmd_or_wizard "$@"
 
     # Harden permissions on passport (contains policy/capabilities)
     [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
 
     # Resolve absolute path to hook script (works from repo or npx package)
-    HOOK_SCRIPT="${APORT_CURSOR_HOOK_SCRIPT:-}"
-    if [ -z "$HOOK_SCRIPT" ]; then
-        ROOT_FOR_HOOK="$(cd "$LIB/../.." && pwd)"
-        HOOK_SCRIPT="$ROOT_FOR_HOOK/bin/aport-cursor-hook.sh"
-    fi
+    HOOK_SCRIPT="$(resolve_hook_script_path "${APORT_CURSOR_HOOK_SCRIPT:-}" "aport-cursor-hook.sh" "$LIB")"
     if [ ! -f "$HOOK_SCRIPT" ]; then
         log_warn "Hook script not found at $HOOK_SCRIPT; hooks.json will reference it (create the file for hooks to work)."
     else
@@ -45,9 +45,13 @@ run_setup() {
     if [ -f "$CURSOR_HOOKS_FILE" ] && command -v jq &> /dev/null; then
         EXISTING=$(cat "$CURSOR_HOOKS_FILE")
         if echo "$EXISTING" | jq -e '.hooks' &> /dev/null; then
-            # Add APort hook to all supported lifecycle events (avoid duplicate)
+            # Add APort hook to all supported lifecycle events.
+            # Replace stale APort entries (old npx paths), preserve non-APort hooks.
             NEW_HOOKS=$(echo "$EXISTING" | jq -c --arg cmd "$HOOK_SCRIPT" '
-        def upsert_hook: map(select(.command != $cmd)) | . + [{ "command": $cmd }];
+        def is_aport_cmd:
+          (.command? // "") | test("aport-(cursor-hook|claude-code-hook)\\.sh$");
+        def upsert_hook:
+          map(select((.command != $cmd) and (is_aport_cmd | not))) | . + [{ "command": $cmd }];
         .hooks.beforeShellExecution = ((.hooks.beforeShellExecution // []) | upsert_hook) |
         .hooks.preToolUse = ((.hooks.preToolUse // []) | upsert_hook) |
         .hooks.beforeMCPExecution = ((.hooks.beforeMCPExecution // []) | upsert_hook) |

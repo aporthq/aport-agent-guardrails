@@ -2,20 +2,23 @@
   "id": "openclaw-aport",
   "name": "APort Guardrails",
   "description": "Deterministic pre-action authorization via APort policy enforcement. Registers before_tool_call to block disallowed tools.",
-  "version": "1.0.0",
+  "version": "1.0.18",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "mode": {
         "type": "string",
-        "enum": ["local", "api"],
+        "enum": [
+          "local",
+          "api"
+        ],
         "default": "local",
         "description": "local = guardrail script, api = APort API"
       },
       "passportFile": {
         "type": "string",
-        "default": "~/.openclaw/passport.json",
+        "default": "~/.openclaw/aport/passport.json",
         "description": "Path to passport JSON"
       },
       "guardrailScript": {
@@ -39,7 +42,21 @@
       "allowUnmappedTools": {
         "type": "boolean",
         "default": true,
-        "description": "If true (default), allow tools with no policy mapping (custom skills, ClawHub, etc.). If false, block unmapped tools (strict mode)."
+        "description": "If true (default), allow tools with no policy mapping (custom skills, ClawHub, etc.). Set to false to block unmapped tools for stricter security."
+      },
+      "agentId": {
+        "type": "string",
+        "description": "Optional hosted passport ID from aport.io (API fetches passport)"
+      },
+      "alwaysVerifyEachToolCall": {
+        "type": "boolean",
+        "default": true,
+        "description": "Run fresh APort verify for each tool call"
+      },
+      "mapExecToPolicy": {
+        "type": "boolean",
+        "default": true,
+        "description": "Map exec tool to system.command.execute policy"
       }
     }
   }

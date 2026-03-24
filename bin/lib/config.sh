@@ -39,7 +39,7 @@ write_config_template() {
     local lib_dir templates_dir
     lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
     templates_dir="$lib_dir/templates"
-    if [[ -f "$templates_dir/config.yaml" ]]; then
+    if [[ -f "$templates_dir/config.yaml" ]] && [[ ! -f "$dest_dir/config.yaml" ]]; then
         cp "$templates_dir/config.yaml" "$dest_dir/config.yaml" 2> /dev/null || true
     fi
     echo "$dest_dir"

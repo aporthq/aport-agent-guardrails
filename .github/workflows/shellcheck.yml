@@ -58,8 +58,8 @@ jobs:
 
       - name: Check shell script formatting
         run: |
-          # Check formatting (don't modify files, just report issues)
-          find bin tests -name "*.sh" -type f -print0 | xargs -0 shfmt -d -i 4 -bn -ci -sr
+          # Check formatting (reads config from .editorconfig)
+          find bin tests -name "*.sh" -type f -print0 | xargs -0 shfmt -d
 
       - name: Comment on PR (if formatting issues found)
         if: failure() && github.event_name == 'pull_request'
@@ -70,5 +70,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '⚠️ **Shell formatting issues detected!**\n\nRun `shfmt -w -i 4 -bn -ci -sr bin/**/*.sh tests/**/*.sh` to auto-format.\n\nSee the workflow run for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+              body: '⚠️ **Shell formatting issues detected!**\n\nRun `shfmt -w bin/**/*.sh tests/**/*.sh` to auto-format (reads config from .editorconfig).\n\nSee the workflow run for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
             })

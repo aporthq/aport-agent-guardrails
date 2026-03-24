@@ -3,7 +3,7 @@
 **How guardrails work:** OpenClaw’s plugin API provides a `before_tool_call` hook that runs **before every tool execution**. The APort plugin registers this hook and calls the shared evaluator (API or local script); the platform blocks the tool if the evaluator returns deny. The model cannot skip it.
 
 - **Integration:** `before_tool_call` plugin (`extensions/openclaw-aport`)
-- **Config:** `~/.openclaw/aport-config.yaml`
+- **Config:** `~/.openclaw/config.yaml`
 
 ## Two ways to use APort
 

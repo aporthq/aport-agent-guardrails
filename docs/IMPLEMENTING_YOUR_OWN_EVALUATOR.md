@@ -99,6 +99,70 @@ Each policy pack defines the expected context format in `required_context`:
 }
 ```
 
+## Creating a Passport Without APort
+
+You don't need APort tools to create an OAP passport. A passport is a JSON file conforming to the OAP v1.0 schema. You can create one manually or with your own tooling.
+
+**Minimal valid passport:**
+
+```json
+{
+  "passport_id": "550e8400-e29b-41d4-a716-446655440000",
+  "kind": "template",
+  "spec_version": "oap/1.0",
+  "owner_id": "your-org-id",
+  "owner_type": "org",
+  "assurance_level": "L0",
+  "status": "active",
+  "capabilities": [
+    { "id": "system.command.execute" }
+  ],
+  "limits": {
+    "system.command.execute": {
+      "allowed_commands": ["git", "npm", "python", "node"],
+      "max_execution_time": 30
+    }
+  },
+  "regions": ["US"],
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-01-01T00:00:00Z",
+  "version": "1.0.0"
+}
+```
+
+**Resources for creating passports:**
+
+- **JSON Schema:** [`passport-schema.json`](https://github.com/aporthq/aport-spec/blob/main/oap/passport-schema.json) -- validate your passport against this
+- **Full spec:** [`oap-spec.md`](https://github.com/aporthq/aport-spec/blob/main/oap/oap-spec.md) -- all fields, assurance levels, capability IDs
+- **Examples:** [`examples/passport.template.v1.json`](https://github.com/aporthq/aport-spec/blob/main/oap/examples/passport.template.v1.json) -- a complete template passport
+- **Capability registry:** [`capability-registry.md`](https://github.com/aporthq/aport-spec/blob/main/oap/capability-registry.md) -- standard capability IDs
+
+You can validate your passport with any JSON Schema validator:
+
+```bash
+# Using ajv-cli
+npx ajv validate -s passport-schema.json -d my-passport.json
+
+# Using Python jsonschema
+python -c "
+import json, jsonschema
+schema = json.load(open('passport-schema.json'))
+passport = json.load(open('my-passport.json'))
+jsonschema.validate(passport, schema)
+print('Valid OAP passport')
+"
+```
+
+You can also fetch the full list of standard capabilities and their limits schema from the live API:
+
+```bash
+curl -s https://aport.io/api/schema/capabilities-limits | jq .
+```
+
+You can also create and manage passports via the APort web dashboard at [aport.io/builder/create](https://aport.io/builder/create) -- this gives you a hosted passport with a web UI, dashboard, and global kill switch. Or use the CLI: `pip install aport-agent-guardrails && aport setup --framework deerflow`.
+
+A CLI tool for creating passports directly from the spec repo (without APort) is planned. For now, use the schema, examples, and the capabilities API as your guide.
+
 ## Implementation Guide
 
 ### Option 1: Expression-Based Evaluator (Simple)

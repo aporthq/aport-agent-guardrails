@@ -1,6 +1,6 @@
 # APort OpenClaw Plugin
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](package.json) — **APort Node SDK:** [npm](https://www.npmjs.com/package/@aporthq/sdk-node)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)](package.json) — **APort Node SDK:** [npm](https://www.npmjs.com/package/@aporthq/sdk-node)
 
 **Deterministic pre-action authorization for OpenClaw agents.**
 
@@ -8,7 +8,7 @@
 
 This plugin registers `before_tool_call` hooks to enforce APort policies **before every tool execution**. No more relying on prompts or hoping the AI follows instructions - the platform enforces policy.
 
-> **📢 OpenClaw 2026.2 Update:** This plugin has been updated to use the new OpenClaw 2026.2 plugin architecture (object-based with TypeScript). If you're upgrading from an older version, see [MIGRATION.md](./MIGRATION.md) for complete upgrade steps including removal of old installations.
+> **📢 OpenClaw 2026.3+ SDK Update:** This plugin now uses `definePluginEntry` with focused SDK subpath imports (`openclaw/plugin-sdk/plugin-entry`) and is aligned with current OpenClaw plugin docs. If you're upgrading from an older version, see [MIGRATION.md](./MIGRATION.md).
 
 ---
 
@@ -46,7 +46,7 @@ The setup script will:
 
 ```bash
 # From your OpenClaw config directory
-openclaw plugins install /path/to/aport-agent-guardrails/extensions/openclaw-aport
+openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport
 ```
 
 ---
@@ -93,7 +93,7 @@ plugins:
 - **exec** is OpenClaw’s main “run something” tool: it can run the guardrail script (we delegate to the inner tool) or a real shell command (e.g. `mkdir`, `npm install`). By default we map **exec** → **system.command.execute.v1** and check the **command** against your passport’s **limits.system.command.execute.allowed_commands**. If `mkdir` (or another command) is not in that list, the policy denies with `oap.command_not_allowed`.
 - **Fix:** Add every command you need to **allowed_commands** in your passport (e.g. `mkdir`, `cp`, `ls`, `cat`, `echo`, `pwd`, `mv`, `touch`, `npx`, `open`). Re-run the passport wizard to get an expanded default list, or edit `~/.openclaw/aport/passport.json` (or `~/.openclaw/passport.json` for legacy) and add to `limits.system.command.execute.allowed_commands`. If the guardrail is ever run via **exec** (e.g. a skill runs `bash ~/.openclaw/.skills/aport-guardrail.sh ...`), include **`bash`** (or the full script path) in **allowed_commands** so that invocation is allowed; the wizard default includes `bash` and `sh`.
 - **Optional:** Set **mapExecToPolicy: false** in plugin config so **exec** is not mapped; then exec is treated as an unmapped tool and allowed (no command allowlist). Use only if you rely on other controls; this disables guardrail protection for shell commands.
-- **read, write** are now mapped to `data.file.read.v1` and `data.file.write.v1` policies, enforcing path allowlists and blocked patterns. The LangChain/CrewAI middlewares automatically spread tool input parameters (e.g. `file_path`) into the verification context for proper API validation. **edit, browser, cron, etc.** remain unmapped and allowed by default when `allowUnmappedTools` is true. Tool→policy mapping and passport limits are documented in [TOOL_POLICY_MAPPING.md](../../docs/TOOL_POLICY_MAPPING.md) and [OPENCLAW_TOOLS_AND_POLICIES.md](../../docs/OPENCLAW_TOOLS_AND_POLICIES.md).
+- **read, write** are now mapped to `data.file.read.v1` and `data.file.write.v1` policies, enforcing path allowlists and blocked patterns. The LangChain/CrewAI middlewares automatically spread tool input parameters (e.g. `file_path`) into the verification context for proper API validation. **edit, browser, cron, etc.** remain unmapped and are allowed by default (`allowUnmappedTools: true`) for backward compatibility. Set `allowUnmappedTools: false` if you want strict blocking for unmapped tools. Tool→policy mapping and passport limits are documented in [TOOL_POLICY_MAPPING.md](../../docs/TOOL_POLICY_MAPPING.md) and [OPENCLAW_TOOLS_AND_POLICIES.md](../../docs/OPENCLAW_TOOLS_AND_POLICIES.md).
 
 ---
 
@@ -160,20 +160,20 @@ sequenceDiagram
 | `payment.charge` | `finance.payment.charge.v1` |
 | `data.export` | `data.export.create.v1` |
 
-Unmapped tools are **allowed** by default so [custom skills](https://clawhub.ai/skills), [ClawHub](https://clawhub.ai/skills?sort=downloads), and built-in tools (e.g. browser, memory) work without APort blocking them. Only tools we map (exec, git, message, mcp, payment, data.export, etc.) are checked against the passport. Set `allowUnmappedTools: false` for strict environments that want to block any unmapped tool.
+Unmapped tools are **allowed by default** (`allowUnmappedTools: true`) for backward compatibility. Set `allowUnmappedTools: false` for stricter security.
 
 ---
 
 ## Modes
 
-### Local Mode (Default)
+### Local Mode
 
 **Best for:** Privacy, offline use, no network dependency
 
 ```yaml
 config:
   mode: local
-  passportFile: ~/.openclaw/passport.json
+  passportFile: ~/.openclaw/aport/passport.json
   guardrailScript: ~/.openclaw/.skills/aport-guardrail-bash.sh
 ```
 
@@ -191,7 +191,7 @@ config:
 ```yaml
 config:
   mode: api
-  passportFile: ~/.openclaw/passport.json
+  passportFile: ~/.openclaw/aport/passport.json
   apiUrl: https://api.aport.io  # or your self-hosted API URL
 # Set APORT_API_KEY in the environment if your API requires auth
 ```
@@ -212,7 +212,7 @@ config:
 
 ```bash
 # 1. Install plugin (via setup or manually)
-openclaw plugins install /path/to/extensions/openclaw-aport
+openclaw plugins install -l /path/to/extensions/openclaw-aport
 
 # 2. Configure in config.yaml (see above)
 
@@ -235,7 +235,7 @@ openclaw agent start
 openclaw logs | grep "APort Guardrails"
 
 # Should see:
-# [APort Guardrails] Loaded: mode=local, passportFile=~/.openclaw/passport.json
+# [APort Guardrails] Loaded: mode=local, passportFile=~/.openclaw/aport/passport.json
 # [APort Guardrails] Checking tool: exec.run → policy: system.command.execute.v1
 # [APort Guardrails] ALLOW: system.command.execute - mkdir test
 ```
@@ -255,7 +255,7 @@ openclaw plugins list
 ```
 
 If not listed:
-1. Verify installation: `openclaw plugins install /path/to/extensions/openclaw-aport`
+1. Verify installation: `openclaw plugins install -l /path/to/extensions/openclaw-aport`
 2. Check config.yaml has `plugins.entries.openclaw-aport.enabled: true`
 3. Restart OpenClaw gateway
 
@@ -263,8 +263,8 @@ If not listed:
 
 Check:
 1. **Plugin enabled?** `openclaw plugins list` should show `openclaw-aport (enabled)`
-2. **Tool mapped?** See "Tool-to-Policy Mapping" above. Unmapped tools are allowed by default (so skills work); set `allowUnmappedTools: false` to block them (strict).
-3. **Passport allows it?** Check passport limits in `~/.openclaw/passport.json`
+2. **Tool mapped?** See "Tool-to-Policy Mapping" above. Unmapped tools are allowed by default (`allowUnmappedTools: true`). Set `allowUnmappedTools: false` if you want strict blocking for unmapped tools.
+3. **Passport allows it?** Check passport limits in `~/.openclaw/aport/passport.json`
 4. **Script working?** Test directly: `~/.openclaw/.skills/aport-guardrail-bash.sh system.command.execute '{"command":"ls"}'`
 
 ### Error: "Failed to run guardrail script"

@@ -95,15 +95,16 @@ echo "  ✅ conflict (langchain + crewai in pyproject) -> list has both"
 assert_eq "$(PATH="/usr/bin:/bin" HOME="$TEST_DIR/detect_home" detect_framework "$TEST_DIR/nonexistent")" "" "nonexistent"
 echo "  ✅ nonexistent dir -> ''"
 
-# 7. Claude Code: $HOME/.claude directory -> claude-code in list
+# 7. Claude Code is IDE/global — NOT detected from $HOME/.claude (would auto-select without
+#    prompting). User must choose explicitly: npx @aporthq/aport-agent-guardrails claude-code
 dir_claude_home="$TEST_DIR/claude_home"
 mkdir -p "$dir_claude_home/.claude"
 old_home="$HOME"
 export HOME="$dir_claude_home"
 list_claude="$(detect_frameworks_list "$dir_claude_home")"
 export HOME="$old_home"
-assert_list_contains "$list_claude" "claude-code"
-echo "  ✅ \$HOME/.claude exists -> claude-code in list"
+assert_eq "$list_claude" "" "\$HOME/.claude alone does not add claude-code (prompt instead)"
+echo "  ✅ \$HOME/.claude alone -> empty (user chooses framework)"
 
 export HOME="$SAVED_HOME"
 echo ""
