@@ -24,6 +24,25 @@ npx @aporthq/aport-agent-guardrails --framework=claude-code
 
 This runs the **passport wizard** and writes **`~/.claude/settings.json`** with the APort hook registered for **all tools** via `"matcher": "*"`. Default passport path: **`~/.claude/aport/passport.json`**. Restart Claude Code after setup so the PreToolUse hook is picked up.
 
+### Marketplace install (Claude plugins)
+
+APort now includes a Claude plugin marketplace catalog at `.claude-plugin/marketplace.json`.
+
+Use Claude commands:
+
+```text
+/plugin marketplace add https://github.com/aporthq/aport-agent-guardrails.git
+/plugin install aport-guardrails-claude-code@aport-plugins
+```
+
+Then run:
+
+```text
+/aport-setup
+```
+
+This command intentionally runs the same supported installer flow (`npx @aporthq/aport-agent-guardrails claude-code`) so runtime hook wiring remains centralized in the main installer.
+
 ---
 
 ## What's protected (tool → policy)
