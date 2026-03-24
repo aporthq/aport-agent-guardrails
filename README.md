@@ -72,6 +72,7 @@ npx @aporthq/aport-agent-guardrails
 - **I need OpenClaw now:** [docs/QUICKSTART_OPENCLAW_PLUGIN.md](docs/QUICKSTART_OPENCLAW_PLUGIN.md)
 - **I already have agent_id:** [docs/HOSTED_PASSPORT_SETUP.md](docs/HOSTED_PASSPORT_SETUP.md)
 - **I need framework setup docs:** [docs/frameworks](docs/frameworks)
+- **I want Claude marketplace install:** [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md#marketplace-install-claude-plugins)
 
 ### Brand personality (optional)
 
