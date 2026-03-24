@@ -1,0 +1,26 @@
+{
+  "name": "aport-plugins",
+  "owner": {
+    "name": "APort Technologies Inc.",
+    "email": "hello@aport.io"
+  },
+  "metadata": {
+    "description": "Official APort plugins — security guardrails for AI coding agents",
+    "version": "1.0.18",
+    "license": "Apache-2.0",
+    "homepage": "https://aport.io"
+  },
+  "plugins": [
+    {
+      "name": "aport-guardrails",
+      "description": "Security guardrails for Claude Code — intercepts every tool call and enforces passport-based policies before execution.",
+      "source": {
+        "source": "github",
+        "repo": "aporthq/aport-agent-guardrails",
+        "ref": "v1.0.18"
+      },
+      "keywords": ["security", "guardrails", "pre-tool-use", "policy-enforcement", "open-agent-passport"],
+      "category": "security"
+    }
+  ]
+}

@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Config regression coverage:** Added a unit test asserting `write_config_template()` preserves existing `config.yaml` on reruns.
 - **Shared setup helpers:** Added `bin/lib/framework-setup.sh` and reused it in Cursor/Claude installers for hook path resolution and secure framework config dir setup.
 - **Environment template:** Added `.env.example` documenting key runtime/config environment variables.
+- **Claude marketplace artifacts:** Added `.claude-plugin/marketplace.json` and `packages/claude-code/.claude-plugin/plugin.json` with `/aport-setup` command so Claude Code users can install via plugin marketplace flow.
 
 ## [1.0.16] - 2026-03-21
 
