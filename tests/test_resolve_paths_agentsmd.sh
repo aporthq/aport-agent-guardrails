@@ -38,12 +38,15 @@ enforcement:
 EOF
 
 # Clear env to ensure clean state
-unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG 2>/dev/null || true
-unset PASSPORT_FILE DECISION_FILE AUDIT_LOG 2>/dev/null || true
+unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG 2> /dev/null || true
+unset PASSPORT_FILE DECISION_FILE AUDIT_LOG 2> /dev/null || true
 (
     cd "$t"
     source "$SCRIPT_DIR/bin/aport-resolve-paths.sh"
-    [ "$PASSPORT_FILE" = "$t/.aport/passport.json" ] || { echo "  ✗ PASSPORT_FILE=$PASSPORT_FILE"; exit 1; }
+    [ "$PASSPORT_FILE" = "$t/.aport/passport.json" ] || {
+        echo "  ✗ PASSPORT_FILE=$PASSPORT_FILE"
+        exit 1
+    }
     echo "  ✓ PASSPORT_FILE resolved from AGENTS.md"
 )
 PASS=$((PASS + 1))
@@ -66,9 +69,12 @@ EOF
 (
     cd "$t"
     export OPENCLAW_PASSPORT_FILE="$t/override/passport.json"
-    unset OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG 2>/dev/null || true
+    unset OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG 2> /dev/null || true
     source "$SCRIPT_DIR/bin/aport-resolve-paths.sh"
-    [ "$PASSPORT_FILE" = "$t/override/passport.json" ] || { echo "  ✗ Override failed: PASSPORT_FILE=$PASSPORT_FILE"; exit 1; }
+    [ "$PASSPORT_FILE" = "$t/override/passport.json" ] || {
+        echo "  ✗ Override failed: PASSPORT_FILE=$PASSPORT_FILE"
+        exit 1
+    }
     echo "  ✓ Explicit env var takes precedence over AGENTS.md"
 )
 PASS=$((PASS + 1))
@@ -87,9 +93,12 @@ EOF
 
 (
     cd "$t"
-    unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG APORT_AGENT_ID 2>/dev/null || true
+    unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG APORT_AGENT_ID 2> /dev/null || true
     source "$SCRIPT_DIR/bin/aport-resolve-paths.sh"
-    [ "$APORT_AGENT_ID" = "ap_test1234" ] || { echo "  ✗ APORT_AGENT_ID=$APORT_AGENT_ID"; exit 1; }
+    [ "$APORT_AGENT_ID" = "ap_test1234" ] || {
+        echo "  ✗ APORT_AGENT_ID=$APORT_AGENT_ID"
+        exit 1
+    }
     echo "  ✓ APORT_AGENT_ID set from AGENTS.md"
 )
 PASS=$((PASS + 1))
@@ -100,7 +109,7 @@ t="$TMPDIR_BASE/t4"
 mkdir -p "$t"
 (
     cd "$t"
-    unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG APORT_AGENT_ID 2>/dev/null || true
+    unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG APORT_AGENT_ID 2> /dev/null || true
     source "$SCRIPT_DIR/bin/aport-resolve-paths.sh"
     # Should fall through to default path probe — no AGENTS.md, no error
     echo "  ✓ No AGENTS.md — fell through to default resolution"
