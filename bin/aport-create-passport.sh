@@ -282,9 +282,9 @@ else
     echo "  ───────────────"
     case "${APORT_FRAMEWORK:-}" in
         claude-code) echo "  Choose what your agent can do (y/n). Claude Code defaults: most capabilities = yes." ;;
-        cursor)      echo "  Choose what your agent can do (y/n). Cursor defaults: file ops, exec, web, sub-agents = yes." ;;
-        openclaw)    echo "  Choose what your agent can do (y/n). OpenClaw defaults: PRs, exec, messaging, file ops = yes." ;;
-        *)           echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes; others vary by framework." ;;
+        cursor) echo "  Choose what your agent can do (y/n). Cursor defaults: file ops, exec, web, sub-agents = yes." ;;
+        openclaw) echo "  Choose what your agent can do (y/n). OpenClaw defaults: PRs, exec, messaging, file ops = yes." ;;
+        *) echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes; others vary by framework." ;;
     esac
     echo ""
     read -p "  • Create and merge pull requests? [Y/n]: " pr_cap
