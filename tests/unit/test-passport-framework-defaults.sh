@@ -20,7 +20,7 @@ assert_eq() {
 run_noninteractive_for_framework() {
     local framework="$1"
     local out_file="$2"
-    APORT_FRAMEWORK="$framework" "$PASSPORT_SCRIPT" --framework="$framework" --non-interactive --output "$out_file" >/dev/null
+    APORT_FRAMEWORK="$framework" "$PASSPORT_SCRIPT" --framework="$framework" --non-interactive --output "$out_file" > /dev/null
 }
 
 echo ""
