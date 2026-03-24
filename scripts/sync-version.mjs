@@ -60,6 +60,32 @@ try {
   );
 }
 
+// --- Claude Code plugin manifest + marketplace ---
+const pluginJsonPath = join(root, ".claude-plugin", "plugin.json");
+try {
+  const pluginJson = JSON.parse(readFileSync(pluginJsonPath, "utf8"));
+  pluginJson.version = version;
+  writeFileSync(pluginJsonPath, JSON.stringify(pluginJson, null, 2) + "\n");
+  console.log(`Updated .claude-plugin/plugin.json -> ${version}`);
+} catch (e) {
+  // No plugin.json, skip
+}
+
+const marketplacePath = join(root, ".claude-plugin", "marketplace.json");
+try {
+  const marketplace = JSON.parse(readFileSync(marketplacePath, "utf8"));
+  if (marketplace.metadata) marketplace.metadata.version = version;
+  for (const plugin of marketplace.plugins || []) {
+    if (plugin.source && plugin.source.ref) {
+      plugin.source.ref = `v${version}`;
+    }
+  }
+  writeFileSync(marketplacePath, JSON.stringify(marketplace, null, 2) + "\n");
+  console.log(`Updated .claude-plugin/marketplace.json -> ${version}`);
+} catch (e) {
+  // No marketplace.json, skip
+}
+
 // --- Python packages ---
 const pyPackages = [
   { dir: "python/aport_guardrails", pyproject: "pyproject.toml", init: "__init__.py" },
