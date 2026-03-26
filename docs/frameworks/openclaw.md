@@ -1,40 +1,69 @@
 # APort Guardrails — OpenClaw
 
-**How guardrails work:** OpenClaw’s plugin API provides a `before_tool_call` hook that runs **before every tool execution**. The APort plugin registers this hook and calls the shared evaluator (API or local script); the platform blocks the tool if the evaluator returns deny. The model cannot skip it.
+OpenClaw is an open-source AI agent platform with a plugin system and built-in `before_tool_call` hooks. APort integrates via two paths:
 
-- **Integration:** `before_tool_call` plugin (`extensions/openclaw-aport`)
-- **Config:** `~/.openclaw/config.yaml`
+- **Native `guardrails:` config** (recommended) — OpenClaw's built-in `GuardrailProvider` interface loads `OAPGuardrailProvider` directly. No plugin needed.
+- **Plugin** (legacy, still works) — The `openclaw-aport` plugin registers a `before_tool_call` hook.
 
-## Two ways to use APort
+Both paths use the same evaluator, passport, and policies.
 
-| Use case | What it is | When to use it |
-|----------|------------|----------------|
-| **Guardrails (CLI/setup)** | Full installer: runs the **passport wizard**, writes config, installs the **OpenClaw plugin** so every tool call goes through the evaluator. | Getting started: one command sets up config, passport, and the plugin. |
-| **Core (runtime)** | The **evaluator** (bash script or API) that the plugin calls before each tool run. Same policy + passport as other frameworks. For **programmatic** use (e.g. custom scripts), you can use the **Python** (`aport_guardrails`) or **Node** (`@aporthq/aport-agent-guardrails-core`) library. | Guardrails = the plugin uses the evaluator automatically. Use the library only if you're building custom tooling. |
-
-For OpenClaw, you use **Guardrails (CLI)** once to install the plugin; the **Core** (evaluator) then runs automatically on every tool call.
-
----
-
-## Setup
+## Quick start
 
 ```bash
+npm install @aporthq/aport-agent-guardrails-core
 npx @aporthq/aport-agent-guardrails openclaw
-# or
-npx @aporthq/aport-agent-guardrails
-# then choose openclaw
 ```
 
-## Config
+The first command installs the provider. The second runs the passport wizard.
 
-- **Config dir:** `~/.openclaw` (or `OPENCLAW_HOME`)
-- **Passport:** Created by wizard or use hosted `agent_id`
-- **Plugin:** `extensions/openclaw-aport`
+## Config (native — recommended)
+
+Add to your OpenClaw `config.yaml`:
+
+```yaml
+guardrails:
+  enabled: true
+  provider:
+    use: "@aporthq/aport-agent-guardrails-core"
+    config:
+      framework: "openclaw"
+```
+
+This loads `OAPGuardrailProvider` as a core guardrail service — runs before plugin hooks, cannot be bypassed by disabling a plugin.
+
+## Config (plugin — legacy)
+
+The setup wizard (`npx @aporthq/aport-agent-guardrails openclaw`) installs the `openclaw-aport` plugin automatically. This registers a `before_tool_call` hook that calls the same evaluator.
+
+Both approaches are supported. The native config is recommended for new deployments.
+
+## How it works
+
+```
+Agent decides to use a tool
+        │
+        ▼
+  GuardrailService (native)     or     Plugin hook (legacy)
+        │                                      │
+        ▼                                      ▼
+  OAPGuardrailProvider ──────────────── same Evaluator
+        │
+  ┌─────┴─────┐
+  │           │
+ALLOW       DENY
+  │           │
+Tool runs   Agent sees denial reason
+```
+
+- **Provider class:** `OAPGuardrailProvider` from `@aporthq/aport-agent-guardrails-core`
+- **Passport:** `~/.openclaw/aport/passport.json` (created by wizard)
+- **Config:** `~/.openclaw/aport/config.yaml`
+- **Audit log:** `~/.openclaw/aport/audit.log`
 
 ## Suspend (kill switch)
 
-Same standard as all frameworks: **passport is the source of truth**—no separate file. Local: set passport `status` to `suspended` (or `active` to resume). Remote: use API mode and suspend in [APort](https://aport.io); all agents using that passport deny within ≤30s.
+Local: set passport `status` to `suspended`. Remote: use API mode and suspend at [aport.io](https://aport.io).
 
 ## Status
 
-Shipped; in production.
+Shipped; in production. Native `guardrails:` config available when [OpenClaw #46441](https://github.com/openclaw/openclaw/issues/46441) merges.
