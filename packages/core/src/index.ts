@@ -12,3 +12,5 @@ export type { Config } from './core/config.js';
 export { logDecision, resolveAuditLogPath, extractContextSummary } from './core/auditLogger.js';
 export type { AuditEntry } from './core/auditLogger.js';
 export { BaseAdapter } from './frameworks/base.js';
+export { OAPGuardrailProvider } from './providers/oap-guardrail-provider.js';
+export type { OAPGuardrailProviderConfig, GuardrailRequest, GuardrailReason, GuardrailDecision } from './providers/oap-guardrail-provider.js';
