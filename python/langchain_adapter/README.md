@@ -59,5 +59,5 @@ pytest tests/ -v
 
 ## Links
 
-- [Framework doc](https://github.com/aporthq/agent-guardrails/blob/main/docs/frameworks/langchain.md)
+- [Framework doc](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/frameworks/langchain.md)
 - [APort](https://aport.io)

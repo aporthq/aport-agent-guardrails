@@ -9,7 +9,7 @@ Public developer view of supported frameworks and roadmap. Details per framework
 | **OpenClaw** | Shipped | Full: plugin, wizard, local/API | [openclaw.md](frameworks/openclaw.md) | `npx @aporthq/aport-agent-guardrails openclaw` |
 | **Cursor**   | Shipped | Full: hooks installer + script | [cursor.md](frameworks/cursor.md) | `npx @aporthq/aport-agent-guardrails cursor` |
 | **LangChain / LangGraph** | Shipped | **Python only:** callback, `aport-langchain setup` | [langchain.md](frameworks/langchain.md) | `npx @aporthq/aport-agent-guardrails langchain` then `pip install aport-agent-guardrails-langchain` + `aport-langchain setup` |
-| **CrewAI**   | Shipped | **Python only:** hook, decorator, `aport-crewai setup` | [crewai.md](frameworks/crewai.md) | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
+| **CrewAI**   | Shipped | **Python:** released hook adapter by default; native provider mode when available | [crewai.md](frameworks/crewai.md) | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
 
 **Coming soon:** n8n — custom node and runtime in progress ([n8n.md](frameworks/n8n.md)). Not listed in CLI options until shipped.
 

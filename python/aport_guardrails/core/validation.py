@@ -129,79 +129,45 @@ def validate_context_structure(context: dict[str, Any], max_bytes: int = 102400)
     return ValidationResult(valid=True)
 
 
-def validate_passport_path(path: Path, allowed_bases: Optional[list[Path]] = None) -> ValidationResult:
-    """
-    Validate passport path is within allowed directories.
+def _default_passport_base_dirs() -> list[Path]:
+    """Allowed base directories for auto-discovered/default passport paths."""
+    return [
+        Path.home() / ".openclaw",
+        Path.home() / ".aport",
+        Path.home() / ".claude",
+        Path.home() / ".cursor",
+        Path.home() / ".n8n",
+        Path("/tmp"),  # Will check for aport- prefix separately
+    ]
 
-    Args:
-        path: Path to validate
-        allowed_bases: List of allowed base directories (default: ~/.openclaw, ~/.aport, /tmp/aport-*)
 
-    Returns:
-        ValidationResult with valid=True if safe, False otherwise
+def validate_explicit_passport_path(path: Path) -> ValidationResult:
     """
-    if allowed_bases is None:
-        allowed_bases = [
-            Path.home() / ".openclaw",
-            Path.home() / ".aport",
-            Path("/tmp"),  # Will check for aport- prefix separately
-        ]
+    Validate an explicit operator-supplied passport path.
+
+    Explicit paths from config/env are authoritative, so we only enforce path
+    hygiene here. Trust-boundary allowlists are handled separately for
+    auto-discovered/default paths.
+    """
+    path_str = str(path)
+
+    if "\x00" in path_str:
+        return ValidationResult(
+            valid=False,
+            error_code="oap.path_invalid_characters",
+            error_message="Path contains null bytes",
+        )
+
+    if "../" in path_str or "/.." in path_str:
+        return ValidationResult(
+            valid=False,
+            error_code="oap.path_traversal_attempt",
+            error_message="Path contains traversal sequences",
+            details={"path": path_str},
+        )
 
     try:
-        # Resolve to absolute path
         resolved = path.expanduser().resolve()
-
-        # Check if within allowed bases
-        is_allowed = False
-        for base in allowed_bases:
-            base_resolved = base.expanduser().resolve()
-
-            # Special handling for /tmp - must be /tmp/aport-*
-            if base_resolved == Path("/tmp"):
-                if resolved.parts[:2] == ("/", "tmp") and len(resolved.parts) > 2:
-                    if resolved.parts[2].startswith("aport-"):
-                        is_allowed = True
-                        break
-            else:
-                # Check if path is relative to base
-                try:
-                    resolved.relative_to(base_resolved)
-                    is_allowed = True
-                    break
-                except ValueError:
-                    continue
-
-        if not is_allowed:
-            return ValidationResult(
-                valid=False,
-                error_code="oap.path_not_allowed",
-                error_message="Path is not within allowed directories",
-                details={
-                    "path": str(resolved),
-                    "allowed_bases": [str(b) for b in allowed_bases],
-                },
-            )
-
-        # Check for path traversal attempts in original path string
-        path_str = str(path)
-        if "../" in path_str or "/.." in path_str:
-            return ValidationResult(
-                valid=False,
-                error_code="oap.path_traversal_attempt",
-                error_message="Path contains traversal sequences",
-                details={"path": path_str},
-            )
-
-        # Check for null bytes
-        if "\x00" in path_str:
-            return ValidationResult(
-                valid=False,
-                error_code="oap.path_invalid_characters",
-                error_message="Path contains null bytes",
-            )
-
-        return ValidationResult(valid=True)
-
     except (OSError, ValueError) as e:
         return ValidationResult(
             valid=False,
@@ -209,6 +175,58 @@ def validate_passport_path(path: Path, allowed_bases: Optional[list[Path]] = Non
             error_message="Failed to resolve path",
             details={"error": str(e)},
         )
+
+    return ValidationResult(valid=True, details={"resolved_path": str(resolved)})
+
+
+def validate_passport_path(path: Path, allowed_bases: Optional[list[Path]] = None) -> ValidationResult:
+    """
+    Validate an auto-discovered/default passport path.
+
+    Discovered paths must pass both path hygiene checks and the framework base
+    directory allowlist so we never auto-select an unexpected passport file.
+    """
+    if allowed_bases is None:
+        allowed_bases = _default_passport_base_dirs()
+
+    path_validation = validate_explicit_passport_path(path)
+    if not path_validation.valid:
+        return path_validation
+
+    resolved = Path(path_validation.details["resolved_path"])  # type: ignore[index]
+
+    is_allowed = False
+    for base in allowed_bases:
+        base_path = base.expanduser()
+        base_resolved = base_path.resolve()
+
+        # Special handling for /tmp - only /tmp/aport-* (or the macOS-resolved
+        # /private/tmp/aport-*) is trusted for auto-discovery.
+        if base_path == Path("/tmp"):
+            resolved_str = str(resolved)
+            if resolved_str.startswith("/tmp/aport-") or resolved_str.startswith("/private/tmp/aport-"):
+                is_allowed = True
+                break
+        else:
+            try:
+                resolved.relative_to(base_resolved)
+                is_allowed = True
+                break
+            except ValueError:
+                continue
+
+    if not is_allowed:
+        return ValidationResult(
+            valid=False,
+            error_code="oap.path_not_allowed",
+            error_message="Path is not within allowed directories",
+            details={
+                "path": str(resolved),
+                "allowed_bases": [str(b) for b in allowed_bases],
+            },
+        )
+
+    return ValidationResult(valid=True, details={"resolved_path": str(resolved)})
 
 
 def validate_policy_pack_id(pack_id: str) -> ValidationResult:

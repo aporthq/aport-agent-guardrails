@@ -56,8 +56,8 @@ resolve_aport_paths() {
     # 1) Explicit path set and file exists → use it (plugin or wrapper)
     if [ -n "${OPENCLAW_PASSPORT_FILE:-}" ] && [ -f "$OPENCLAW_PASSPORT_FILE" ]; then
         # Validate env-provided path if validator is available
-        if type validate_passport_path &> /dev/null; then
-            if ! validate_passport_path "$OPENCLAW_PASSPORT_FILE"; then
+        if type validate_explicit_passport_path &> /dev/null; then
+            if ! validate_explicit_passport_path "$OPENCLAW_PASSPORT_FILE"; then
                 echo "[aport] WARN: OPENCLAW_PASSPORT_FILE path failed validation: $OPENCLAW_PASSPORT_FILE" >&2
             fi
         fi

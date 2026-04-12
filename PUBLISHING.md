@@ -34,7 +34,7 @@ So after `npm install @aporthq/aport-agent-guardrails` or `npx @aporthq/aport-ag
 
 The canonical process (single version for all packages, Changesets, Python sync) is in **[docs/RELEASE.md](docs/RELEASE.md)**. Summary:
 
-1. **Bump version** using `npm run version` (runs Changesets then syncs version to Python packages). Commit the version bump and changelog updates.
+1. **Bump version** using `npm run version` (runs Changesets for the fixed workspace group, then syncs the root CLI package, Python packages, lockfiles, manifests, and release docs). Commit the version bump and changelog updates.
 2. **Publish** Node packages (e.g. `npx changeset publish`) and Python packages to PyPI as needed.
 4. **Tag and push** (from your local `main`, or from the merge commit):
    ```bash

@@ -1,6 +1,8 @@
   Next steps (CrewAI):
   ───────────────────
-  1. Install the Python adapter (required for runtime enforcement):
+  Default mode targets released CrewAI without native guardrail provider support.
+
+  1. Install the CrewAI adapter package:
      pip install aport-agent-guardrails-crewai
      aport-crewai setup
   2. Config written to: $config_dir
@@ -10,4 +12,7 @@
      register_aport_guardrail()
      crew.kickoff()
 
-  Or: @with_aport_guardrail on your entry point. See: docs/frameworks/crewai.md
+  Optional native mode:
+     rerun with --integration-mode=native
+
+  See: docs/frameworks/crewai.md

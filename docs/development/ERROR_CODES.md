@@ -516,10 +516,10 @@ sudo yum install jq
 **Resolution**:
 ```bash
 # Check passport exists
-ls -la ~/.openclaw/passport.json
+ls -la ~/.openclaw/aport/passport.json
 
-# Check guardrail script exists
-ls -la ~/.openclaw/.skills/aport-guardrail.sh
+# Check local runtime exists
+ls -la ~/.openclaw/aport/runtime/bin/aport-guardrail.sh
 
 # Run setup if missing
 npx @aporthq/aport-agent-guardrails openclaw

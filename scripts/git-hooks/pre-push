@@ -13,4 +13,14 @@ if [ ! -f "$REPO_ROOT/.gitmodules" ]; then
 fi
 
 "$REPO_ROOT/scripts/ensure-submodules-updated.sh" --update-remote
+status=$?
+if [ "$status" -ne 0 ]; then
+	exit "$status"
+fi
+
+if [ "${APORT_SKIP_PRE_PUSH_CHECKS:-0}" = "1" ]; then
+	exit 0
+fi
+
+"$REPO_ROOT/scripts/pre-push-check.sh"
 exit $?

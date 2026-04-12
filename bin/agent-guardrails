@@ -28,9 +28,22 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRAMEWORKS_DIR="$SCRIPT_DIR/frameworks"
 LIB_DIR="$SCRIPT_DIR/lib"
+SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code deerflow n8n)
+
+framework_supported() {
+  local candidate="${1:-}"
+  local supported
+  for supported in "${SUPPORTED_FRAMEWORKS[@]}"; do
+    if [[ "$candidate" == "$supported" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 # Parse --framework= and -f (skip detection when set)
 framework=""
+integration_mode=""
 REST=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +60,19 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       ;;
+    --integration-mode=*)
+      integration_mode="${1#--integration-mode=}"
+      shift
+      ;;
+    --integration-mode)
+      if [[ $# -gt 1 ]]; then
+        integration_mode="$2"
+        shift 2
+      else
+        echo "[aport] ERROR: --integration-mode requires a value (compat or native)" >&2
+        exit 1
+      fi
+      ;;
     *)
       REST+=("$1")
       shift
@@ -59,16 +85,11 @@ if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]]; then
   first_arg="${REST[0]}"
   # Check if first arg looks like a framework name (lowercase alphanumeric + hyphen)
   if [[ "$first_arg" =~ ^[a-z0-9-]+$ ]]; then
-    # Valid framework names
-    valid_frameworks=(openclaw langchain crewai cursor claude-code n8n deerflow)
-    for valid_fw in "${valid_frameworks[@]}"; do
-      if [[ "$first_arg" == "$valid_fw" ]]; then
-        framework="$first_arg"
-        # Remove framework from REST so remaining args are pass-through
-        REST=("${REST[@]:1}")
-        break
-      fi
-    done
+    if framework_supported "$first_arg"; then
+      framework="$first_arg"
+      # Remove framework from REST so remaining args are pass-through
+      REST=("${REST[@]:1}")
+    fi
   fi
 fi
 
@@ -98,7 +119,7 @@ if [[ -z "$framework" ]]; then
           echo "  ─────────────────────────────────────────"
           echo "  Multiple frameworks detected: $detected_list"
           echo "  Choose one: openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n"
-          echo "  Example: npx @aporthq/agent-guardrails --framework=openclaw"
+          echo "  Example: npx @aporthq/aport-agent-guardrails --framework=openclaw"
           echo ""
           read -p "  Framework [${framework:-openclaw}]: " choice
           framework="${choice:-${framework:-openclaw}}"
@@ -121,8 +142,8 @@ if [[ -z "$framework" ]]; then
   echo "  ─────────────────────────────────────────"
   echo "  No framework detected in current directory."
   echo "  Choose: openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n"
-  echo "  Example: npx @aporthq/agent-guardrails openclaw"
-  echo "           npx @aporthq/agent-guardrails --framework=langchain"
+  echo "  Example: npx @aporthq/aport-agent-guardrails openclaw"
+  echo "           npx @aporthq/aport-agent-guardrails --framework=langchain"
   echo ""
   read -p "  Framework [openclaw]: " framework
   framework="${framework:-openclaw}"
@@ -134,6 +155,29 @@ framework="$(echo "$framework" | tr '[:upper:]' '[:lower:]')"
 if [[ ! "$framework" =~ ^[a-z0-9-]+$ ]]; then
   echo "[aport] ERROR: Invalid framework name: $framework (alphanumeric and hyphens only)" >&2
   exit 1
+fi
+
+if ! framework_supported "$framework"; then
+  echo "[aport] ERROR: Unknown or unsupported framework: $framework" >&2
+  echo "  Supported: ${SUPPORTED_FRAMEWORKS[*]}" >&2
+  exit 1
+fi
+
+echo "[aport] Selected framework: $framework" >&2
+
+if [[ -n "$integration_mode" ]]; then
+  case "$integration_mode" in
+    compat|native) ;;
+    *)
+      echo "[aport] ERROR: Unsupported integration mode: $integration_mode (expected compat or native)" >&2
+      exit 1
+      ;;
+  esac
+  if [[ "$framework" != "crewai" ]]; then
+    echo "[aport] ERROR: --integration-mode is only supported for CrewAI" >&2
+    exit 1
+  fi
+  REST+=("--integration-mode=$integration_mode")
 fi
 
 script="$FRAMEWORKS_DIR/${framework}.sh"
@@ -160,7 +204,3 @@ if [[ -x "$generic_script" ]]; then
   export APORT_FRAMEWORK="$framework"
   exec "$generic_script" ${REST+"${REST[@]}"}
 fi
-
-echo "[aport] ERROR: Unknown or unsupported framework: $framework" >&2
-echo "  Supported: openclaw, langchain, crewai, cursor, claude-code, deerflow, n8n" >&2
-exit 1

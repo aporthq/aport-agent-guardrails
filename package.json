@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "Policy enforcement guardrails for OpenClaw-compatible agent frameworks",
   "workspaces": [
     "packages/*",
@@ -20,8 +20,9 @@
     "sync-submodules": "git submodule update --init --recursive",
     "sync-submodules:latest": "git submodule update --init --remote --recursive",
     "changeset": "changeset",
-    "version": "changeset version && node scripts/sync-version.mjs",
+    "version": "CI=1 changeset version && node scripts/sync-version.mjs",
     "sync-version": "node scripts/sync-version.mjs",
+    "prepush:check": "bash scripts/pre-push-check.sh",
     "build": "npm run build:core && npm run build --workspaces --if-present",
     "build:core": "npm run build -w @aporthq/aport-agent-guardrails-core",
     "release:version": "npm run version",
