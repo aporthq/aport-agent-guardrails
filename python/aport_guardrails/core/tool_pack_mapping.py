@@ -1,7 +1,6 @@
-"""
-Tool name → OAP policy pack ID. Single source: tool-pack-mapping.json.
-Canonical file: packages/core/src/core/tool-pack-mapping.json (sync this copy when updating).
-"""
+"""Tool name → OAP policy pack ID loaded from the packaged JSON source of truth."""
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -9,12 +8,13 @@ from pathlib import Path
 _MAPPING_DIR = Path(__file__).resolve().parent
 _CACHED: dict | None = None
 
-
 def _load_mapping() -> dict:
     global _CACHED
     if _CACHED is not None:
         return _CACHED
     p = _MAPPING_DIR / "tool-pack-mapping.json"
+    if not p.is_file():
+        raise RuntimeError(f"Missing tool-pack mapping: {p}")
     _CACHED = json.loads(p.read_text())
     return _CACHED
 

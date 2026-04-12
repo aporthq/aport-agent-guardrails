@@ -26,7 +26,7 @@ result = provider.evaluate(request)   # sync
 result = await provider.aevaluate(request)  # async
 ```
 
-**Supported frameworks:** DeerFlow, any Python framework with a `GuardrailProvider` protocol.
+**Supported frameworks:** DeerFlow, CrewAI builds with native provider support, and any Python framework with a `GuardrailProvider` protocol.
 
 **Config:** `~/.aport/<framework>/config.yaml` (created by `aport setup --framework <name>`)
 

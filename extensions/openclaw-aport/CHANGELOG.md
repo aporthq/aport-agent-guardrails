@@ -1,8 +1,10 @@
 # Changelog - APort OpenClaw Plugin
 
+## 1.0.21
+
 All notable changes to the APort OpenClaw plugin will be documented in this file.
 
-## [1.1.0] - 2026-02-19
+## [1.0.21] - 2026-02-19
 
 ### Changed - OpenClaw 2026.2 Compatibility
 
@@ -24,6 +26,7 @@ All notable changes to the APort OpenClaw plugin will be documented in this file
 ### Technical Details
 
 **Old Architecture (< 2026.2):**
+
 ```javascript
 export default function (api) {
   api.on("before_tool_call", async (event, ctx) => { ... });
@@ -31,6 +34,7 @@ export default function (api) {
 ```
 
 **New Architecture (>= 2026.2):**
+
 ```typescript
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 

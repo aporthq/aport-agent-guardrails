@@ -35,7 +35,7 @@ def main() -> None:
             "         crew.kickoff()",
             "     main()",
             "",
-            "  3. See: https://github.com/aporthq/agent-guardrails/blob/main/docs/frameworks/crewai.md",
+            "  3. See: https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/frameworks/crewai.md",
         ],
     )
     sys.exit(0)

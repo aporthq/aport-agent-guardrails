@@ -89,7 +89,7 @@ The security concern is that agent tools and skills can execute sensitive action
 
 ## 🔌 Supported frameworks
 
-**APort Agent Guardrail** adapters are available per framework; the same passport and policies apply. **Node users:** `npx @aporthq/aport-agent-guardrails` (then choose framework) or `npx @aporthq/aport-agent-guardrails <framework>`. **Python users (LangChain/CrewAI/DeerFlow):** run the same CLI for the wizard and config, then install the framework adapter/provider package shown in the framework doc.
+**APort Agent Guardrail** adapters and providers are available per framework; the same passport and policies apply. **Node users:** `npx @aporthq/aport-agent-guardrails` (then choose framework) or `npx @aporthq/aport-agent-guardrails <framework>`. **Python users (LangChain/CrewAI/DeerFlow):** run the same CLI for the wizard and config, then install the Python package shown in the framework doc.
 
 **Two ways to use APort:** (1) **Guardrails (CLI/setup)** — run the installer to create your passport and config; (2) **Core (library)** — use the `OAPGuardrailProvider` ([docs/PROVIDER.md](docs/PROVIDER.md)) in your app so each tool call is verified. One provider per language (Python + TypeScript), works with any framework. Framework docs: [OpenClaw](docs/frameworks/openclaw.md), [Cursor](docs/frameworks/cursor.md), [Claude Code](docs/frameworks/claude-code.md), [LangChain](docs/frameworks/langchain.md), [CrewAI](docs/frameworks/crewai.md), [DeerFlow](docs/frameworks/deerflow.md), [n8n](docs/frameworks/n8n.md).
 
@@ -101,11 +101,12 @@ The security concern is that agent tools and skills can execute sensitive action
 | **Cursor** | [docs/frameworks/cursor.md](docs/frameworks/cursor.md) | `beforeShellExecution` / `preToolUse` hooks → writes `~/.cursor/hooks.json`. **Runtime enforcement is the bash hook;** the Node package `@aporthq/aport-agent-guardrails-cursor` is a helper only (Evaluator, `getHookPath()`). | `npx @aporthq/aport-agent-guardrails cursor` |
 | **Claude Code** | [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md) | PreToolUse hook → writes `~/.claude/settings.json` (Claude Code format; not Cursor). | `npx @aporthq/aport-agent-guardrails claude-code` |
 | **LangChain / LangGraph** | [docs/frameworks/langchain.md](docs/frameworks/langchain.md) | **Python:** `APortCallback` (`on_tool_start`) | `npx @aporthq/aport-agent-guardrails langchain` then `pip install aport-agent-guardrails-langchain` + `aport-langchain setup` |
-| **CrewAI** | [docs/frameworks/crewai.md](docs/frameworks/crewai.md) | **Python:** `@before_tool_call` hook, `register_aport_guardrail` | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
+| **CrewAI** | [docs/frameworks/crewai.md](docs/frameworks/crewai.md) | **Python:** released hook adapter by default; native `GuardrailProvider` mode for CrewAI builds with native provider support | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
 | **DeerFlow** | [docs/frameworks/deerflow.md](docs/frameworks/deerflow.md) | **Python:** generic OAP provider wiring in DeerFlow config | `npx @aporthq/aport-agent-guardrails deerflow` then follow printed `uv`/config steps |
 | **n8n** | [docs/frameworks/n8n.md](docs/frameworks/n8n.md) | *Coming soon* — custom node and runtime in progress | — |
+| **VoltAgent** | [VoltAgent PR #1171](https://github.com/VoltAgent/voltagent/pull/1171) | *In progress* — pluggable `GuardrailProvider` interface landing upstream in `@voltagent/core` | — |
 
-Install via `npx @aporthq/aport-agent-guardrails <framework>` (or choose when prompted). OpenClaw can also use the full installer flow. **For LangChain and CrewAI, the Node CLI only runs the wizard and writes config; you must then run the printed `pip install` and setup commands to install the runtime adapter.** **Python** adapters on PyPI; **Node** adapters on npm (same version as the CLI).
+Install via `npx @aporthq/aport-agent-guardrails <framework>` (or choose when prompted). OpenClaw can also use the full installer flow. **For LangChain, CrewAI, and DeerFlow, the CLI writes config and installs the local runtime into the framework config directory; then install the Python package and wire the provider/callback shown in the framework doc.** **Python** packages are on PyPI; **Node** packages are on npm (same version as the CLI).
 
 **Passport path:** Each framework has its own **default** passport path (where that framework stores data): e.g. Cursor → `~/.cursor/aport/passport.json`, OpenClaw → `~/.openclaw/aport/passport.json`, LangChain → `~/.aport/langchain/aport/passport.json`. The passport wizard’s **first question** is “Passport file path [default]:” — press Enter for the framework default or type a different path. In non-interactive mode (e.g. CI) use **`--output /path/to/passport.json`** to choose the path. Roadmap: [docs/FRAMEWORK_ROADMAP.md](docs/FRAMEWORK_ROADMAP.md).
 
@@ -125,15 +126,15 @@ npx @aporthq/aport-agent-guardrails
 # or: npx @aporthq/aport-agent-guardrails openclaw | cursor | claude-code | langchain | crewai | deerflow | n8n
 ```
 
-**Python (LangChain or CrewAI only):** Run the wizard via the Node command above, then install the Python adapter and run the framework setup (see the printed next steps). Or use the Python CLI to see the exact commands:
+**Python (LangChain, CrewAI, or DeerFlow):** Run the wizard via the Node command above, then install the Python package and follow the printed next steps. Or use the Python CLI to see the exact commands:
 ```bash
 pip install aport-agent-guardrails
-aport setup --framework=langchain   # prints: npx ... langchain, then pip install aport-agent-guardrails-langchain, aport-langchain setup
-# or --framework=crewai for CrewAI
+aport setup --framework=langchain
+# or --framework=crewai / deerflow
 ```
-Then run the printed `npx` command to create passport and config, and the printed `pip` / `aport-<framework> setup` to install the adapter.
+Then run the printed `npx` command to create passport and config, and the printed Python integration step for your framework.
 
-This runs the **passport wizard** and writes config for your framework. Follow the **next steps** printed at the end (e.g. restart Cursor; or for LangChain/CrewAI: `pip install aport-agent-guardrails-langchain` + `aport-langchain setup`).
+This runs the **passport wizard** and writes config for your framework. Follow the **next steps** printed at the end (e.g. restart Cursor; or for CrewAI: by default install `aport-agent-guardrails-crewai` for released CrewAI, or opt into native-provider mode if your CrewAI build supports it).
 
 **2. Hosted passport (optional)** — If you already have an agent_id from [aport.io](https://aport.io), use it to skip the wizard: `npx @aporthq/aport-agent-guardrails openclaw <agent_id>`. See [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md).
 
@@ -147,7 +148,7 @@ aport-guardrail system.command.execute '{"command":"rm -rf /"}'  # DENY (blocked
 ```
 *(If you use `npx` without `-g`, run `npx aport-guardrail ...`.)*
 
-**Python:** Use the guardrail in your app (e.g. add `APortCallback()` to your LangChain agent, or `register_aport_guardrail()` for CrewAI). The guardrail runs on every tool call. To test allow/deny from the shell without Node, use `npx aport-guardrail ...` as above, or see your framework doc for in-app testing.
+**Python:** Use the guardrail in your app (e.g. add `APortCallback()` to your LangChain agent, use `register_aport_guardrail()` for released CrewAI, or `enable_guardrail(OAPGuardrailProvider(...))` for CrewAI builds with native provider support). The guardrail runs on every tool call. To test allow/deny from the shell without Node, use `npx aport-guardrail ...` as above, or see your framework doc for in-app testing.
 
 **Check passport status and audit:**
 
@@ -397,14 +398,14 @@ See [Verification methods](docs/VERIFICATION_METHODS.md) for a detailed comparis
 | `aport` | OpenClaw one-command setup (passport + plugin + wrappers). Optional: `aport <agent_id>` for hosted passport. |
 | `aport-guardrail` | Run guardrail check from the CLI (e.g. `aport-guardrail system.command.execute '{"command":"ls"}'`). Uses passport from your framework config dir. |
 
-**Python:** After `pip install aport-agent-guardrails` you get `aport` (setup helper). For LangChain or CrewAI, install the adapter and framework setup:
+**Python:** After `pip install aport-agent-guardrails` you get `aport` (setup helper). For LangChain or CrewAI, install the framework package and setup:
 
 | Command | Purpose |
 |--------|---------|
 | `aport setup --framework=langchain` | Print next-step commands (npx wizard, then `pip install aport-agent-guardrails-langchain`, `aport-langchain setup`). |
-| `aport setup --framework=crewai` | Same for CrewAI: npx wizard, then `pip install aport-agent-guardrails-crewai`, `aport-crewai setup`. |
+| `aport setup --framework=crewai` | Default released CrewAI path: bootstrap config/runtime, then use `pip install aport-agent-guardrails-crewai` and `aport-crewai setup`. |
+| `aport setup --framework=crewai --integration-mode=native` | Native CrewAI path: bootstrap config/runtime, then use `uv add aport-agent-guardrails` and `OAPGuardrailProvider`. |
 | `aport-langchain setup` | LangChain config and wizard (after installing `aport-agent-guardrails-langchain`). |
-| `aport-crewai setup` | CrewAI config and wizard (after installing `aport-agent-guardrails-crewai`). |
 
 Use the framework-specific doc for where config and passport live and for any extra steps (e.g. Cursor: restart IDE; LangChain/CrewAI: add callback/hook in code).
 
@@ -429,7 +430,7 @@ Use the framework-specific doc for where config and passport live and for any ex
 | → [Cursor](docs/frameworks/cursor.md) | beforeShellExecution / preToolUse hooks, `~/.cursor/hooks.json` |
 | → [Claude Code](docs/frameworks/claude-code.md) | PreToolUse hook, `~/.claude/settings.json` |
 | → [LangChain / LangGraph](docs/frameworks/langchain.md) | `APortCallback` handler |
-| → [CrewAI](docs/frameworks/crewai.md) | `@before_tool_call` hook, `register_aport_guardrail` |
+| → [CrewAI](docs/frameworks/crewai.md) | Released hook adapter by default; native provider mode when available |
 | → [DeerFlow](docs/frameworks/deerflow.md) | Generic provider wiring via DeerFlow `config.yaml` |
 | → [n8n](docs/frameworks/n8n.md) | Custom node, branch on allow/deny |
 | [Framework roadmap](docs/FRAMEWORK_ROADMAP.md) | Support status and roadmap |

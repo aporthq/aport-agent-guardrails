@@ -14,6 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Resolve paths: config_dir/aport/ (new) or config_dir (legacy); same as bash guardrail
 # shellcheck source=bin/aport-resolve-paths.sh
 . "${SCRIPT_DIR}/bin/aport-resolve-paths.sh"
+# shellcheck source=bin/lib/tool-mapping.sh
+. "${SCRIPT_DIR}/bin/lib/tool-mapping.sh"
 
 NODE_EVALUATOR="$SCRIPT_DIR/src/evaluator.js"
 
@@ -48,41 +50,12 @@ if [ -z "$APORT_AGENT_ID" ] && [ ! -f "$PASSPORT_FILE" ]; then
     exit 1
 fi
 
-# Map tool to policy pack ID
-POLICY_ID=""
-case "$TOOL_NAME" in
-    git.create_pr | git.merge | git.push | git.*)
-        POLICY_ID="code.repository.merge.v1"
-        ;;
-    exec.run | exec.* | system.command.* | system.*)
-        POLICY_ID="system.command.execute.v1"
-        ;;
-    message.send | message.* | messaging.*)
-        POLICY_ID="messaging.message.send.v1"
-        ;;
-    mcp.tool.* | mcp.*)
-        POLICY_ID="mcp.tool.execute.v1"
-        ;;
-    agent.session.* | session.create | session.*)
-        POLICY_ID="agent.session.create.v1"
-        ;;
-    agent.tool.* | tool.register | tool.*)
-        POLICY_ID="agent.tool.register.v1"
-        ;;
-    payment.refund | payment.* | finance.payment.refund)
-        POLICY_ID="finance.payment.refund.v1"
-        ;;
-    payment.charge | finance.payment.charge)
-        POLICY_ID="finance.payment.charge.v1"
-        ;;
-    database.write | database.* | data.export)
-        POLICY_ID="data.export.create.v1"
-        ;;
-    *)
-        echo "Error: Tool '$TOOL_NAME' is not mapped to a policy pack" >&2
-        exit 1
-        ;;
-esac
+# Map tool to policy pack ID from the shared JSON source of truth.
+POLICY_ID="$(resolve_policy_id_from_tool_name "$TOOL_NAME" || true)"
+if [[ -z "$POLICY_ID" ]]; then
+    echo "Error: Tool '$TOOL_NAME' is not mapped to a policy pack" >&2
+    exit 1
+fi
 
 # Call Node.js evaluator with API
 if [ -n "$DEBUG_APORT" ]; then

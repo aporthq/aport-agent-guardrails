@@ -1,10 +1,4 @@
-"""
-Shared CLI logic for framework setup.
-Single source of truth for config dir, wizard, and config write.
-
-Works for Python and Node entry points. The passport wizard
-(bin/aport-create-passport.sh) is pure bash+jq — no Node dependency.
-"""
+"""Shared CLI logic for framework setup."""
 
 import os
 import subprocess
@@ -12,6 +6,7 @@ import sys
 from pathlib import Path
 
 from aport_guardrails.core.config import load_config, write_config
+from aport_guardrails.core.runtime_assets import install_runtime_tree, resolve_runtime_script
 
 DEFAULT_CONFIG = {"mode": "local"}
 
@@ -42,32 +37,29 @@ def get_default_passport_path(framework: str) -> Path:
     return get_config_dir(framework) / "aport" / "passport.json"
 
 
-def _find_repo_root() -> Path | None:
-    """Find the repo root by looking for bin/aport-create-passport.sh relative to this file."""
-    # From python/aport_guardrails/core/cli_common.py -> repo root is ../../..
-    here = Path(__file__).resolve().parent
-    for ancestor in [here.parent.parent.parent, here.parent.parent.parent.parent]:
-        candidate = ancestor / "bin" / "aport-create-passport.sh"
-        if candidate.exists():
-            return ancestor
-    return None
-
-
-def run_wizard(framework: str, agent_id: str | None = None) -> bool:
+def run_wizard(
+    framework: str,
+    agent_id: str | None = None,
+    *,
+    extra_args: list[str] | None = None,
+) -> bool:
     """Run the passport creation wizard.
 
     Tries in order:
-    1. bin/aport-create-passport.sh (pure bash+jq, no Node needed)
-    2. npx @aporthq/aport-agent-guardrails (fallback if bash script not found)
+    1. bundled aport-create-passport.sh from the repo checkout or installed wheel
+    2. npx @aporthq/aport-agent-guardrails (last-resort fallback)
     """
-    repo_root = _find_repo_root()
-    wizard_script = repo_root / "bin" / "aport-create-passport.sh" if repo_root else None
+    wizard_script = resolve_runtime_script("aport-create-passport.sh")
+    non_interactive = bool(os.environ.get("APORT_NONINTERACTIVE") or os.environ.get("CI"))
 
     if wizard_script and wizard_script.exists():
-        # Direct call — no Node/npx dependency
         cmd = [str(wizard_script), f"--framework={framework}"]
+        if extra_args:
+            cmd.extend(extra_args)
         if agent_id:
             cmd.append(f"--output={get_default_passport_path(framework)}")
+        if non_interactive:
+            cmd.append("--non-interactive")
         env = {**os.environ, "APORT_FRAMEWORK": framework}
         try:
             r = subprocess.run(cmd, check=False, timeout=120, env=env)
@@ -75,12 +67,21 @@ def run_wizard(framework: str, agent_id: str | None = None) -> bool:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-    # Fallback: npx (for when installed via npm, not pip from source)
+    # Last-resort fallback: npx, used only when runtime assets are unavailable.
     try:
         cmd = ["npx", "--yes", "@aporthq/aport-agent-guardrails", f"--framework={framework}"]
+        if extra_args:
+            cmd.extend(extra_args)
         if agent_id:
             cmd.append(agent_id)
-        r = subprocess.run(cmd, check=False, timeout=120, capture_output=True)
+        if non_interactive:
+            cmd.append("--non-interactive")
+        r = subprocess.run(
+            cmd,
+            check=False,
+            timeout=120,
+            capture_output=not sys.stdin.isatty(),
+        )
         return r.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
@@ -93,10 +94,11 @@ def run_setup(
     no_wizard: bool = False,
     agent_id: str | None = None,
     next_steps_lines: list[str] | None = None,
+    wizard_args: list[str] | None = None,
 ) -> None:
     """
     Full setup: create config dir, write config, run passport wizard, print next steps.
-    This is the Python-native entry point — no npx required when run from source.
+    This is the Python-native entry point. Installed wheels carry the same setup runtime.
     """
     config_dir = get_config_dir(framework)
     passport_dir = config_dir / "aport"
@@ -107,6 +109,7 @@ def run_setup(
     config_dir.mkdir(parents=True, exist_ok=True)
     passport_dir.mkdir(parents=True, exist_ok=True)
     passport_dir.chmod(0o700)
+    runtime_dir = install_runtime_tree(config_dir)
 
     # Write default config if missing
     if not config_path.exists() or not load_config(config_path):
@@ -117,7 +120,7 @@ def run_setup(
 
     # Run passport wizard (unless CI or --no-wizard)
     if not ci and not no_wizard:
-        if run_wizard(framework, agent_id=agent_id):
+        if run_wizard(framework, agent_id=agent_id, extra_args=wizard_args):
             print("[aport] Passport wizard completed.")
             # Harden passport permissions
             if passport_path.exists():
@@ -129,6 +132,9 @@ def run_setup(
     # Print next steps
     if next_steps_lines:
         print("")
+        if runtime_dir is not None:
+            print(f"[aport] Local runtime installed at: {runtime_dir}")
+            print("")
         for line in next_steps_lines:
             # Substitute $config_dir
             print(line.replace("$config_dir", str(config_dir)))

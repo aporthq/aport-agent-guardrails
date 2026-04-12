@@ -25,7 +25,7 @@ def main() -> None:
             "     from aport_guardrails_langchain import APortCallback",
             "     agent = initialize_agent(..., callbacks=[APortCallback()])",
             "",
-            "  2. See: https://github.com/aporthq/agent-guardrails/tree/main/docs/frameworks/langchain.md",
+            "  2. See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs/frameworks/langchain.md",
         ],
     )
 
