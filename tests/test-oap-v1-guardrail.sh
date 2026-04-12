@@ -44,7 +44,10 @@ assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.limit_exceeded" 
 echo "  Guardrail: decision has OAP v1 required fields..."
 "$GUARDRAIL" git.push '{"repo":"a/b","files_changed":1}' || true
 assert_json_has "$OPENCLAW_DECISION_FILE" "issued_at" "decision.issued_at"
+assert_json_has "$OPENCLAW_DECISION_FILE" "created_at" "decision.created_at"
 assert_json_has "$OPENCLAW_DECISION_FILE" "expires_at" "decision.expires_at"
+assert_json_has "$OPENCLAW_DECISION_FILE" "expires_in" "decision.expires_in"
+assert_json_has "$OPENCLAW_DECISION_FILE" "agent_id" "decision.agent_id"
 assert_json_has "$OPENCLAW_DECISION_FILE" "signature" "decision.signature"
 assert_json_has "$OPENCLAW_DECISION_FILE" "kid" "decision.kid"
 # reasons must be array with at least one object with code

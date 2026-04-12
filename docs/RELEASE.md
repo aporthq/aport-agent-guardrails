@@ -1,6 +1,6 @@
 # Release process and version policy
 
-**Current release:** 1.0.18 (see [CHANGELOG.md](../CHANGELOG.md)).
+**Current release:** 1.0.21 (see [CHANGELOG.md](../CHANGELOG.md)).
 
 We keep **one version number** across all published packages (Node core, Python core, and every framework adapter). That avoids “core is 1.2 but CLI is 0.9” and keeps the story simple for users and support.
 
@@ -32,7 +32,7 @@ So: **root = CLI/setup**; **core = library**. We publish core so that (1) the ad
 ## 2. Tooling
 
 - **Changesets** (Node): fixed mode so all workspace packages are in one “fixed” group and get the same version on release.
-- **sync-version script**: after `changeset version`, copies the new version from root `package.json` into all Python `pyproject.toml` and `aport_guardrails/__init__.py`.
+- **sync-version script**: after `changeset version`, reads the canonical version from the fixed workspace group and propagates it to the root CLI package, Python packages, manifests, lockfiles, and release docs.
 
 ---
 
@@ -43,7 +43,7 @@ So: **root = CLI/setup**; **core = library**. We publish core so that (1) the ad
    ```bash
    npm run version
    ```  
-   This runs `changeset version` (updates all Node `package.json` and CHANGELOGs) then `node scripts/sync-version.mjs` (updates Python packages to the same version).
+   This runs `changeset version` for the fixed workspace group, then `node scripts/sync-version.mjs` to align the root CLI package, Python packages, lockfiles, manifests, and release docs to that same version.
 3. **Commit** the version bump and changelog updates (e.g. “chore(release): 1.3.0”).
 4. **Tag and push** — this triggers the release workflow and publishes both npm and PyPI:
    ```bash

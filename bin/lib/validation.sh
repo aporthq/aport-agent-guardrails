@@ -58,9 +58,9 @@ validate_tool_name() {
     return 0
 }
 
-# Validate passport path is within allowed directories
-# Returns 0 if safe, 1 if potentially dangerous
-validate_passport_path() {
+# Validate explicit operator-provided passport paths.
+# Returns 0 if the path is hygienic, 1 if it contains dangerous constructs.
+validate_explicit_passport_path() {
     local path="$1"
 
     # Check for empty
@@ -68,11 +68,28 @@ validate_passport_path() {
         return 1
     fi
 
+    # Check for path traversal attempts
+    if echo "$path" | grep -qE '\.\./|/\.\./|/\.\.$'; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate auto-discovered/default passport paths against trusted framework dirs.
+# Returns 0 if safe, 1 if potentially dangerous.
+validate_passport_path() {
+    local path="$1"
+
+    if ! validate_explicit_passport_path "$path"; then
+        return 1
+    fi
+
     # Expand to absolute path
     local abs_path
     abs_path=$(readlink -f "$path" 2> /dev/null || realpath "$path" 2> /dev/null || echo "$path")
 
-    # Allowed base directories for passport storage
+    # Allowed base directories for auto-discovery
     local allowed_bases=(
         "$HOME/.openclaw"
         "$HOME/.aport"
@@ -82,7 +99,6 @@ validate_passport_path() {
         "/tmp/aport-"
     )
 
-    # Check if path starts with any allowed base
     local is_allowed=false
     for base in "${allowed_bases[@]}"; do
         case "$abs_path" in
@@ -90,20 +106,14 @@ validate_passport_path() {
                 is_allowed=true
                 break
                 ;;
+            "/private$base"*)
+                is_allowed=true
+                break
+                ;;
         esac
     done
 
     if [ "$is_allowed" = false ]; then
-        return 1
-    fi
-
-    # Check for path traversal attempts
-    if echo "$path" | grep -qE '\.\./|/\.\./|/\.\.$'; then
-        return 1
-    fi
-
-    # Check for null bytes
-    if echo "$path" | grep -qF $'\0'; then
         return 1
     fi
 

@@ -182,13 +182,13 @@ get_resolution() {
             echo "Reduce context data size by removing unnecessary fields or summarizing large data. Default limit: 100KB."
             ;;
         "$ERROR_PATH_NOT_ALLOWED")
-            echo "Use standard APort directories: ~/.openclaw/, ~/.aport/, or /tmp/aport-*. Contact administrator to add custom allowed directories."
+            echo "Use standard framework config directories such as ~/.openclaw/, ~/.aport/, ~/.cursor/, ~/.claude/, ~/.n8n/, or /tmp/aport-*. Contact administrator to add custom allowed directories."
             ;;
         "$ERROR_PATH_TRAVERSAL")
             echo "Use absolute paths without parent directory references (../ or /..). This is a security feature to prevent path traversal attacks."
             ;;
         "$ERROR_PASSPORT_NOT_FOUND")
-            echo "Create a passport by running: npx @aporthq/aport-agent-guardrails openclaw. See: https://github.com/aporthq/agent-guardrails#passport-setup"
+            echo "Create a passport by running: npx @aporthq/aport-agent-guardrails <framework>. See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs/frameworks"
             ;;
         "$ERROR_PASSPORT_MISSING_CAP")
             echo "Request capability be added to passport or generate new passport with required capabilities."
@@ -206,7 +206,7 @@ get_resolution() {
             echo "Wait for rate limit to reset, reduce request frequency, or use local evaluation mode instead of API mode."
             ;;
         "$ERROR_MISCONFIGURED")
-            echo "Run setup: npx @aporthq/aport-agent-guardrails <framework>. Check passport exists at ~/.openclaw/passport.json"
+            echo "Run setup: npx @aporthq/aport-agent-guardrails <framework>. Check your framework config directory for aport/passport.json and aport/runtime/bin/aport-guardrail.sh."
             ;;
         *)
             echo ""

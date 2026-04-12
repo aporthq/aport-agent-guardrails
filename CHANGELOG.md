@@ -5,27 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.20] - 2026-03-24
-
-### Added
-- **OAPGuardrailProvider:** universal implementation to make APort a Guardrail in frameworks like Openclaw, Deerflow etc
-
-
-## [1.0.19] - 2026-03-24
-
-### Added
-- **Claude Code plugin:** Plugin manifest at repo root for official Anthropic marketplace submission
-- **PreToolUse hook:** Plugin-native hook via hooks/hooks.json using ${CLAUDE_PLUGIN_ROOT}
-- **Skills:** /aport-guardrails:claude-code, /aport-guardrails:openclaw, /aport-guardrails:status
-- **Marketplace manifest:** .claude-plugin/marketplace.json with pinned GitHub source
-- **Skills naming convention:** docs/SKILLS.md documents pattern
-- **Version sync:** sync-version.mjs now updates plugin.json and marketplace.json
-
 ## [Unreleased]
+
+## [1.0.21] - 2026-04-11
 
 ### Fixed
 - **Claude Code hook tool-name compatibility:** `bin/aport-claude-code-hook.sh` now normalizes tool names (including `functions.*` prefixes and case variants) so runtime aliases like `Shell`/`functions.Shell` map correctly to `bash` policy checks instead of being denied as unknown tools.
-- **Release docs version drift:** `docs/RELEASE.md` current release marker updated to `1.0.18` to match package versions.
+- **Release docs version drift:** `docs/RELEASE.md` current release marker updated to `1.0.21` to match package versions.
 - **Installer update behavior for stale hook paths:** Cursor/Claude installers now replace stale APort-managed hook command entries (old `~/.npm/_npx/...` paths) instead of only deduping exact command strings, while preserving user-defined non-APort hooks.
 - **OpenClaw config update safety:** `bin/openclaw` no longer appends a duplicate top-level `plugins:` block into existing `config.yaml`; it now writes a merge snippet when an existing plugins block is detected.
 - **Generic config update safety:** `write_config_template()` now seeds `config.yaml` only on first setup and no longer overwrites existing user-managed `config.yaml` on reruns.
@@ -40,6 +26,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shared setup helpers:** Added `bin/lib/framework-setup.sh` and reused it in Cursor/Claude installers for hook path resolution and secure framework config dir setup.
 - **Environment template:** Added `.env.example` documenting key runtime/config environment variables.
 - **Claude marketplace artifacts:** Added `.claude-plugin/marketplace.json` and `packages/claude-code/.claude-plugin/plugin.json` with `/aport-setup` command so Claude Code users can install via plugin marketplace flow.
+
+## [1.0.20] - 2026-03-24
+
+### Added
+- **OAPGuardrailProvider:** universal implementation to make APort a Guardrail in frameworks like Openclaw, Deerflow etc
+
+## [1.0.19] - 2026-03-24
+
+### Added
+- **Claude Code plugin:** Plugin manifest at repo root for official Anthropic marketplace submission
+- **PreToolUse hook:** Plugin-native hook via hooks/hooks.json using ${CLAUDE_PLUGIN_ROOT}
+- **Skills:** /aport-guardrails:claude-code, /aport-guardrails:openclaw, /aport-guardrails:status
+- **Marketplace manifest:** .claude-plugin/marketplace.json with pinned GitHub source
+- **Skills naming convention:** docs/SKILLS.md documents pattern
+- **Version sync:** sync-version.mjs now updates plugin.json and marketplace.json
 
 ## [1.0.16] - 2026-03-21
 

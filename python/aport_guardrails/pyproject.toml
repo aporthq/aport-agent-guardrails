@@ -4,16 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aport-agent-guardrails"
-version = "1.0.20"
+version = "1.0.21"
 description = "APort Agent Guardrail — shared core for AI agent and LLM frameworks (pre-action authorization)"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "APort Technologies Inc." }]
 keywords = ["aport", "agent guardrail", "LLM guardrail", "AI agent", "guardrails", "authorization", "policy", "agent security"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -41,3 +40,7 @@ testpaths = ["tests"]
 [tool.setuptools]
 packages = ["aport_guardrails", "aport_guardrails.core", "aport_guardrails.frameworks", "aport_guardrails.providers"]
 package-dir = { aport_guardrails = ".", "aport_guardrails.core" = "core", "aport_guardrails.frameworks" = "frameworks", "aport_guardrails.providers" = "providers" }
+
+[tool.setuptools.package-data]
+"aport_guardrails" = ["runtime-bundle/manifest.txt", "runtime-bundle/**/*.json", "runtime-bundle/**/*.sh", "runtime-bundle/**/*.js"]
+"aport_guardrails.core" = ["*.json"]

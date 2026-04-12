@@ -1,14 +1,61 @@
 """
 Main CLI entry point: aport setup --framework=deerflow [--agent-id=ap_xxx]
 
-Python-native setup — creates config dir, runs passport wizard, prints next steps.
-No Node/npx dependency when run from source (uses bin/aport-create-passport.sh directly).
+Python-native setup — creates config dir, runs the bundled passport wizard, and
+prints next steps. Installed wheels carry the same bootstrap runtime.
 """
 
 import argparse
 import sys
 
 SUPPORTED_FRAMEWORKS = ["openclaw", "cursor", "langchain", "crewai", "deerflow", "n8n", "claude-code"]
+
+
+def _crewai_next_steps(integration_mode: str) -> list[str]:
+    if integration_mode == "native":
+        return [
+            "  Next steps (CrewAI native provider mode):",
+            "  ───────────────────────────────────────",
+            "  Requires a CrewAI build with native guardrail provider support.",
+            "",
+            "  1. Install the Python runtime package:",
+            "     uv add aport-agent-guardrails",
+            "  2. Enable the native provider before running your crew:",
+            "",
+            "     from crewai.hooks import enable_guardrail",
+            "     from aport_guardrails.providers import OAPGuardrailProvider",
+            "",
+            "     enable_guardrail(",
+            '         OAPGuardrailProvider(framework="crewai", config_path="$config_dir/config.yaml"),',
+            "         fail_closed=True,",
+            "     )",
+            "     crew.kickoff()",
+            "",
+            "  Released CrewAI compatibility mode:",
+            "     rerun without --integration-mode=native",
+            "",
+            "  See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs",
+        ]
+
+    return [
+        "  Next steps (CrewAI):",
+        "  ───────────────────",
+        "  Default mode targets released CrewAI without native guardrail provider support.",
+        "",
+        "  1. Install the CrewAI adapter package:",
+        "     pip install aport-agent-guardrails-crewai",
+        "     aport-crewai setup",
+        "  2. Register the guardrail before running your crew:",
+        "",
+        "     from aport_guardrails_crewai import register_aport_guardrail",
+        "     register_aport_guardrail()",
+        "     crew.kickoff()",
+        "",
+        "  Optional native mode:",
+        "     rerun with --integration-mode=native",
+        "",
+        "  See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs",
+    ]
 
 # Framework-specific next steps (data, not code)
 _NEXT_STEPS = {
@@ -37,19 +84,6 @@ _NEXT_STEPS = {
         "",
         "     from aport_guardrails_langchain import APortCallback",
         "     agent = initialize_agent(..., callbacks=[APortCallback()])",
-        "",
-        "  See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs",
-    ],
-    "crewai": [
-        "  Next steps (CrewAI):",
-        "  ───────────────────",
-        "  1. Install the Python adapter:",
-        "     pip install aport-agent-guardrails-crewai",
-        "  2. Register the guardrail before running your crew:",
-        "",
-        "     from aport_guardrails_crewai import register_aport_guardrail",
-        "     register_aport_guardrail()",
-        "     crew.kickoff()",
         "",
         "  See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs",
     ],
@@ -105,9 +139,18 @@ def main() -> None:
         default=None,
         help="Hosted passport agent ID (e.g. ap_fa2f6d53...)",
     )
+    parser.add_argument(
+        "--integration-mode",
+        choices=["compat", "native"],
+        default="compat",
+        help="CrewAI only: choose released compatibility mode or native provider mode",
+    )
     parser.add_argument("--ci", action="store_true", help="Non-interactive mode")
     parser.add_argument("--no-wizard", action="store_true", help="Skip passport wizard")
     args = parser.parse_args()
+
+    if args.framework != "crewai" and args.integration_mode != "compat":
+        parser.error("--integration-mode is only supported with --framework=crewai")
 
     if args.command == "setup":
         if not args.framework:
@@ -122,12 +165,14 @@ def main() -> None:
             sys.exit(0)
 
         from aport_guardrails.core.cli_common import run_setup
+        next_steps = _crewai_next_steps(args.integration_mode) if args.framework == "crewai" else _NEXT_STEPS.get(args.framework)
         run_setup(
             args.framework,
             ci=args.ci,
             no_wizard=args.no_wizard,
             agent_id=args.agent_id,
-            next_steps_lines=_NEXT_STEPS.get(args.framework),
+            next_steps_lines=next_steps,
+            wizard_args=[f"--integration-mode={args.integration_mode}"] if args.framework == "crewai" else None,
         )
 
     elif args.command == "status":
