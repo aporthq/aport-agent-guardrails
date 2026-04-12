@@ -8,6 +8,12 @@ set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_PASSPORT="$REPO_ROOT/tests/fixtures/passport.oap-v1.json"
 TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2> /dev/null || echo "$REPO_ROOT/tests/output")}"
+
+if [[ "${APORT_TEST_PUBLISHED_NPM:-}" != "1" ]]; then
+    echo "  SKIP: published npm package smoke test is opt-in (set APORT_TEST_PUBLISHED_NPM=1)"
+    exit 0
+fi
+
 mkdir -p "$TEST_DIR"
 cd "$TEST_DIR"
 
