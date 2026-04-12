@@ -1,6 +1,8 @@
 # APort Agent Guardrail for CrewAI
 
-**APort Agent Guardrail for CrewAI** — pre-action authorization for [CrewAI](https://github.com/crewAIInc/crewAI) via the **before_tool_call** hook. Tool execution is verified against your passport and policy; deny → execution is blocked. Built for AI agent and multi-agent crews.
+**APort Agent Guardrail for CrewAI** — released CrewAI compatibility mode via the
+existing **before_tool_call** hook. Tool execution is verified against your passport
+and policy; deny blocks execution. Built for AI agent and multi-agent crews.
 
 ## Install
 
@@ -18,7 +20,8 @@ register_aport_guardrail()
 crew.kickoff()
 ```
 
-Or use the `with_aport_guardrail` decorator on your entry point. See [docs/frameworks/crewai.md](https://github.com/aporthq/agent-guardrails/blob/main/docs/frameworks/crewai.md).
+Or use the `with_aport_guardrail` decorator on your entry point. See
+[docs/frameworks/crewai.md](https://github.com/aporthq/aport-agent-guardrails/blob/main/docs/frameworks/crewai.md).
 
 ## API
 

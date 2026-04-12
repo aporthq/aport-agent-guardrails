@@ -182,6 +182,20 @@ if grep -q "Unknown or unsupported framework" "$out9"; then
 fi
 echo "  ✅ --framework=claude-code -> runs claude-code (not unknown)"
 
+# 10. --integration-mode is CrewAI-only -> reject for other frameworks before forwarding
+out10="$TEST_DIR/dispatcher-10.txt"
+run_dispatcher "$out10" "" --framework=openclaw --integration-mode=native
+[[ "$DISPATCHER_EXIT" -ne 0 ]] || {
+    echo "FAIL: expected non-zero for non-CrewAI integration mode" >&2
+    exit 1
+}
+grep -q "only supported for CrewAI" "$out10" || {
+    echo "FAIL: expected CrewAI-only integration mode error" >&2
+    cat "$out10" >&2
+    exit 1
+}
+echo "  ✅ --integration-mode rejected for non-CrewAI frameworks"
+
 echo ""
 echo "  All dispatcher tests passed."
 echo ""

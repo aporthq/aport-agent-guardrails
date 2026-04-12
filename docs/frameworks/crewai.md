@@ -1,51 +1,55 @@
-# APort Agent Guardrail — CrewAI
+# APort Agent Guardrails — CrewAI
 
-CrewAI supports **tool call hooks** that run before (and after) every tool execution. The **APort Agent Guardrail for CrewAI** plugs into the **before tool call** hook: we verify the tool and parameters against your passport and policy; if the decision is deny, we return `False` and CrewAI blocks execution. This matches CrewAI’s [Tool Call Hooks](https://docs.crewai.com/en/learn/tool-hooks) model.
+APort supports CrewAI in two ways:
 
-## How CrewAI agent guardrails work
+1. **Released CrewAI compatibility mode** via the existing `before_tool_call` adapter
+2. **Native provider mode** for CrewAI builds that expose a native guardrail provider seam
 
-- **Hooks:** CrewAI runs **before_tool_call** hooks before every tool execution. The hook receives a `ToolCallHookContext` (tool name, tool input, agent, task, crew). Returning `False` blocks execution; `True` or `None` allows it.
-- **Registration:** You can register a hook **globally** with `register_before_tool_call_hook()`, or use the `@before_tool_call` decorator, or use **crew-scoped** `@before_tool_call_crew` on a `@CrewBase` class.
-- **Multi-task crews:** The same hook runs for every tool call across all tasks and agents, so multi-task crews are supported by default.
+The default bootstrap path targets released CrewAI so it works today without waiting
+for upstream provider support.
 
-Our adapter provides a function that fits this API: it calls the APort evaluator (sync) and returns `False` on deny, `None` on allow. You register it once before running your crew.
+## Option 1: Released CrewAI Compatibility Mode
 
-- **Integration:** CrewAI `before_tool_call` hook (global or crew-scoped)
-- **Config:** `~/.aport/crewai/config.yaml` or `.aport/config.yaml` (see [Verification methods](../VERIFICATION_METHODS.md))
+This is the default mode.
 
-## Two ways to use APort
-
-| Use case | What it is | When to use it |
-|----------|------------|----------------|
-| **Guardrails (CLI/setup)** | One-line installer: runs the **passport wizard**, writes config, prints next steps. Does not run your app. | Getting started: create passport and config so the library can find them. |
-| **Core (library)** | The **evaluator** and **before-tool-call hook** in your code. Calls policy + passport to allow/deny each tool call. | Integrating into your app: register the hook so CrewAI blocks tool runs when policy denies. |
-
-You typically use **both**: run the CLI once to create passport and config, then use the library in your CrewAI app so every tool call is verified.
-
----
-
-## Setup (Guardrails — create passport and config)
-
-**Python**
+Bootstrap config, passport, and local runtime with the Python-native CLI:
 
 ```bash
-npx @aporthq/aport-agent-guardrails crewai   # wizard + config (optional)
+uvx --from aport-agent-guardrails aport setup --framework=crewai
+```
+
+Or use the Node bootstrap if you prefer:
+
+```bash
+npx -y @aporthq/aport-agent-guardrails crewai
+```
+
+For CI or other non-interactive environments with the Python-native CLI:
+
+```bash
+APORT_CREWAI_CONFIG_DIR=.aport/crewai \
+uvx --from aport-agent-guardrails aport setup \
+  --framework=crewai \
+  --ci
+```
+
+The equivalent Node bootstrap is:
+
+```bash
+APORT_CREWAI_CONFIG_DIR=.aport/crewai \
+npx -y @aporthq/aport-agent-guardrails crewai \
+  --output .aport/crewai/aport/passport.json \
+  --non-interactive
+```
+
+Install the released CrewAI adapter:
+
+```bash
 pip install aport-agent-guardrails-crewai
 aport-crewai setup
 ```
 
-**Node**
-
-```bash
-npx @aporthq/aport-agent-guardrails crewai   # wizard + config
-npm install @aporthq/aport-agent-guardrails-crewai   # beforeToolCall, withAPortGuardrail (depends on -core)
-```
-
-`aport-crewai setup` (Python) writes config to `~/.aport/crewai/`, runs the passport wizard (or use `--ci` / `--no-wizard` for non-interactive), and prints next steps.
-
-## Using the library (Core) in your app
-
-**Python — Option 1: Register the hook before kickoff**
+Register the hook before your crew runs:
 
 ```python
 from aport_guardrails_crewai import register_aport_guardrail
@@ -54,66 +58,96 @@ register_aport_guardrail()
 crew.kickoff()
 ```
 
-**Python — Option 2: Decorator on your entry point**
+This path works with released CrewAI because it plugs directly into CrewAI's existing
+`before_tool_call` hook behavior.
+
+## Option 2: Native Provider Mode
+
+Use this only with a CrewAI build that exposes the native guardrail provider API.
+
+Bootstrap with native-mode instructions using the Python-native CLI:
+
+```bash
+uvx --from aport-agent-guardrails aport setup \
+  --framework=crewai \
+  --integration-mode=native
+```
+
+The equivalent Node bootstrap is:
+
+```bash
+npx -y @aporthq/aport-agent-guardrails crewai --integration-mode=native
+```
+
+Install the Python runtime package:
+
+```bash
+uv add aport-agent-guardrails
+```
+
+Enable the provider before your crew runs:
 
 ```python
-from aport_guardrails_crewai import with_aport_guardrail
+from crewai.hooks import enable_guardrail
+from aport_guardrails.providers import OAPGuardrailProvider
 
-@with_aport_guardrail
-def main():
-    crew.kickoff()
+enable_guardrail(
+    OAPGuardrailProvider(
+        framework="crewai",
+        config_path="~/.aport/crewai/config.yaml",
+    ),
+    fail_closed=True,
+)
 
-main()
+crew.kickoff()
 ```
 
-**Python — Option 3: Use the hook with `@before_tool_call`**
+If you bootstrap into a project-local config directory, point `config_path` at that
+file instead.
 
-```python
-from crewai.hooks import before_tool_call
-from aport_guardrails_crewai import aport_guardrail_before_tool_call
+## What The Bootstrap Installs
 
-@before_tool_call
-def my_guardrail(context):
-    return aport_guardrail_before_tool_call(context)
+Both modes write:
+
+- `~/.aport/crewai/config.yaml`
+- `~/.aport/crewai/aport/passport.json`
+- `~/.aport/crewai/aport/runtime/...`
+
+The compatibility and native modes share the same APort config and local runtime.
+Only the CrewAI integration layer changes.
+
+## How APort Fits
+
+- **Compatibility mode:** APort adapts to CrewAI's existing hook surface.
+- **Native mode:** CrewAI defines the seam, and APort plugs in as an external
+  `OAPGuardrailProvider`.
+
+That keeps CrewAI vendor-neutral while letting Open Agent Passport remain the
+portable policy/passport format across frameworks.
+
+## Configuration
+
+The provider and adapter read the standard APort config:
+
+- `mode: local` for the local shell evaluator
+- `mode: api` for hosted evaluation
+- `agent_id` for hosted passports
+- `passport_path` for explicit local passport paths
+- `guardrail_script` to override the local evaluator script path
+- `audit_log` to enable or disable audit logging
+
+With the default bootstrap, you usually do not need to set `guardrail_script`
+manually because the local runtime is installed under the framework config
+directory.
+
+## Validation
+
+After bootstrap, you can smoke-test the local evaluator directly:
+
+```bash
+~/.aport/crewai/aport/runtime/bin/aport-guardrail.sh \
+  system.command.execute \
+  '{"command":"git status"}'
 ```
 
-**Node:** Call `beforeToolCall` in your flow before each tool run (CrewAI Node SDK does not expose a global hook). Return `false` to block, `null` to allow. Or wrap your entry point with `withAPortGuardrail(fn)`.
-
-```ts
-import { beforeToolCall, withAPortGuardrail } from '@aporthq/aport-agent-guardrails-crewai';
-
-// In your tool-call flow, before executing a tool:
-const result = beforeToolCall({ tool_name: 'run_command', tool_input: { command: 'ls' } });
-if (result === false) {
-  // Block this tool call
-  return;
-}
-
-// Or wrap your crew kickoff so guardrail is in scope:
-withAPortGuardrail(() => {
-  crew.kickoff();
-});
-```
-
-### How tool parameters are handled
-
-The Node middleware automatically spreads object tool inputs into the verification context. For example, `{ tool_input: { file_path: "/tmp/data.txt" } }` will pass `file_path` at the top level of the context, ensuring policies like `data.file.read.v1` receive required fields for validation.
-
-## Config
-
-- **Config path:** `~/.aport/crewai/config.yaml`, or `.aport/config.yaml` in the project root.
-- **Mode:** `api` (default for production) or `local` (bash evaluator, no network). Same options as [LangChain](langchain.md) and OpenClaw.
-- **`fail_open_on_api_error`**: Set to `true` in config to allow tool execution when the APort API is unreachable (genuine policy denials are never overridden). Default: `false` (fail-closed).
-
-## Suspend (kill switch)
-
-Same as all frameworks: **passport is the source of truth**. Local: set passport `status` to `suspended` (or `active` to resume). API: suspend the passport in [APort](https://aport.io); all agents using that passport deny within ≤30s.
-
-## Example and tests
-
-- **Example:** [examples/crewai/run_with_guardrail.py](../../examples/crewai/run_with_guardrail.py) — temp config, ALLOW then DENY, `register_aport_guardrail()`.
-- **Unit tests:** [python/crewai_adapter/tests/test_hook.py](../../python/crewai_adapter/tests/test_hook.py) — hook return value and context with mocked evaluator.
-
-## Status
-
-Implemented (Story D). **APort Agent Guardrail for CrewAI.** Package: `aport-agent-guardrails-crewai`; CLI: `aport-crewai setup`; hook: `aport_guardrail_before_tool_call` / `register_aport_guardrail` / `with_aport_guardrail`.
+Exit code `0` means allow. Exit code `1` means deny.

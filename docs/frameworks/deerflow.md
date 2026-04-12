@@ -107,7 +107,7 @@ guardrails:
 | `bash`, `write_file`, `str_replace` | `system.command.execute.v1` |
 | `web_search`, `web_fetch`, `image_search` | `web.fetch.v1` |
 | `read_file`, `ls` | `data.file.read.v1` |
-| `present_file`, `view_image` | `data.export.create.v1` |
+| `present_file`, `view_image` | `data.file.read.v1` |
 | `ask_clarification`, `task` | `agent.session.create.v1` |
 | MCP tools (dynamic) | `mcp.tool.execute.v1` |
 

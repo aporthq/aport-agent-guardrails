@@ -13,10 +13,11 @@ class TestCallbackWithConfig:
     """Callback auto-loads config; with no passport/script and fail_open set, we get allow (no-op)."""
 
     @pytest.mark.asyncio
-    async def test_callback_auto_loads_config_path(self):
+    async def test_callback_auto_loads_config_path(self, monkeypatch: pytest.MonkeyPatch):
         """APortCallback(None) uses Evaluator(None) which finds or uses empty config."""
         # Create temp config with fail_open for testing without passport
         with tempfile.TemporaryDirectory() as tmp:
+            monkeypatch.setenv("HOME", tmp)
             config_path = Path(tmp) / "config.yaml"
             write_config(config_path, {"mode": "local", "fail_open_when_missing_config": True})
             callback = APortCallback(config_path=str(config_path))
@@ -27,9 +28,10 @@ class TestCallbackWithConfig:
             assert decision.get("allow", True) is True
 
     @pytest.mark.asyncio
-    async def test_callback_with_explicit_config_file(self):
+    async def test_callback_with_explicit_config_file(self, monkeypatch: pytest.MonkeyPatch):
         """With explicit config path pointing to minimal config with fail_open, verify runs."""
         with tempfile.TemporaryDirectory() as tmp:
+            monkeypatch.setenv("HOME", tmp)
             config_path = Path(tmp) / "config.yaml"
             write_config(config_path, {"mode": "local", "fail_open_when_missing_config": True})
             callback = APortCallback(config_path=str(config_path))

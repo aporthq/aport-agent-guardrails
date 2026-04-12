@@ -17,15 +17,21 @@ from urllib.error import URLError
 
 from aport_guardrails.core.config import find_config_path, load_config
 from aport_guardrails.core.default_passport_paths import get_default_passport_paths
+from aport_guardrails.core.runtime_assets import resolve_runtime_script
 from aport_guardrails.core.tool_pack_mapping import tool_to_pack_id as _tool_to_pack_id
 from aport_guardrails.core.validation import (
     validate_tool_name,
     validate_context_structure,
+    validate_explicit_passport_path,
     validate_passport_path,
 )
 
 
-def _resolve_passport_path(config: dict[str, Any]) -> str | None:
+def _resolve_passport_path(
+    config: dict[str, Any],
+    *,
+    config_path: Path | None = None,
+) -> str | None:
     """Resolve passport path: AGENTS.md, config, env, framework default, or first existing default path."""
     # 0) AGENTS.md enforcement block (repo-scoped, checked before config/env)
     #    Skip if explicit passport_path or OPENCLAW_PASSPORT_FILE is set — those always win.
@@ -42,17 +48,22 @@ def _resolve_passport_path(config: dict[str, Any]) -> str | None:
     path = config.get("passport_path") or os.environ.get("OPENCLAW_PASSPORT_FILE")
     if path:
         path_obj = Path(path).expanduser()
-        # SECURITY: Validate passport path to prevent path traversal
-        path_validation = validate_passport_path(path_obj)
+        path_validation = validate_explicit_passport_path(path_obj)
         if not path_validation.valid:
-            # Log warning but don't fail - continue to try default paths
-            import sys
-            print(f"WARNING: Invalid passport path: {path_validation.error_message}", file=sys.stderr)
-        elif path_obj.exists():
+            return None
+        if path_obj.exists():
             return str(path_obj)
-        # Path specified but doesn't exist - still validate and return
-        elif path_validation.valid:
-            return str(path_obj)
+        return str(path_obj)
+
+    if config_path is not None:
+        config_dir = config_path.parent
+        for candidate in (
+            config_dir / "aport" / "passport.json",
+            config_dir / "passport.json",
+        ):
+            path_validation = validate_explicit_passport_path(candidate)
+            if path_validation.valid and candidate.exists():
+                return str(candidate)
 
     default_paths = get_default_passport_paths()
     framework = config.get("framework")
@@ -87,6 +98,52 @@ class ToolContext(TypedDict, total=False):
 class Decision(TypedDict, total=False):
     allow: bool
     reasons: list[dict[str, str]]
+    decision_id: str
+    policy_id: str
+    passport_id: str
+    agent_id: str
+    owner_id: str
+    assurance_level: str
+    issued_at: str
+    created_at: str
+    expires_at: str
+    expires_in: int
+    passport_digest: str
+    signature: str
+    kid: str
+    decision_token: str
+    verification_mode: str
+    prev_decision_id: str | None
+    prev_content_hash: str | None
+    content_hash: str
+
+
+def _normalize_decision_payload(
+    payload: Any,
+    *,
+    default_error_code: str,
+    default_error_message: str,
+) -> Decision:
+    if not isinstance(payload, dict):
+        return {
+            "allow": False,
+            "reasons": [{
+                "code": default_error_code,
+                "message": default_error_message,
+            }],
+        }
+
+    decision: Decision = dict(payload)
+    decision["allow"] = bool(decision.get("allow", False))
+
+    reasons = decision.get("reasons")
+    if not isinstance(reasons, list):
+        reasons = [{
+            "code": default_error_code,
+            "message": default_error_message,
+        }]
+    decision["reasons"] = reasons
+    return decision
 
 
 def _get_fail_open_when_missing_config(config: dict[str, Any]) -> bool:
@@ -95,15 +152,42 @@ def _get_fail_open_when_missing_config(config: dict[str, Any]) -> bool:
     return v in (True, "1", "true")
 
 
-def _get_guardrail_script_path(config: dict[str, Any]) -> str | None:
-    """Resolve path to aport-guardrail-bash.sh or wrapper."""
-    script = config.get("guardrail_script") or os.environ.get("APORT_GUARDRAIL_SCRIPT")
-    if script and Path(script).exists():
-        return script
-    # Default wrapper installed by npx agent-guardrails
-    default = Path.home() / ".openclaw" / ".skills" / "aport-guardrail.sh"
-    if default.exists():
-        return str(default)
+def _resolve_path_candidate(path: str | None, *, config_path: Path | None = None) -> Path | None:
+    if not path:
+        return None
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute() and config_path is not None:
+        candidate = (config_path.parent / candidate).resolve()
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def _get_guardrail_script_path(config: dict[str, Any], *, config_path: Path | None = None) -> str | None:
+    """Resolve path to the local guardrail wrapper script."""
+    explicit = _resolve_path_candidate(
+        config.get("guardrail_script") or os.environ.get("APORT_GUARDRAIL_SCRIPT"),
+        config_path=config_path,
+    )
+    if explicit is not None:
+        return str(explicit)
+
+    if config_path is not None:
+        config_dir = config_path.parent
+        for candidate in (
+            config_dir / "aport" / "runtime" / "bin" / "aport-guardrail.sh",
+            config_dir / ".skills" / "aport-guardrail.sh",
+        ):
+            if candidate.exists():
+                return str(candidate)
+
+    bundled = resolve_runtime_script("aport-guardrail.sh")
+    if bundled is not None:
+        return str(bundled)
+
+    legacy = Path.home() / ".openclaw" / ".skills" / "aport-guardrail.sh"
+    if legacy.exists():
+        return str(legacy)
     return None
 
 
@@ -224,7 +308,7 @@ def _run_guardrail_sync(
 
     # SECURITY: Validate passport path to prevent path traversal
     passport_path_obj = Path(passport_path)
-    path_validation = validate_passport_path(passport_path_obj)
+    path_validation = validate_explicit_passport_path(passport_path_obj)
     if not path_validation.valid:
         return {
             "allow": False,
@@ -255,9 +339,11 @@ def _run_guardrail_sync(
     if decision_file.exists():
         try:
             data = json.loads(decision_file.read_text())
-            allow = data.get("allow", False)
-            reasons = data.get("reasons", [{"message": "Policy evaluation failed"}])
-            return {"allow": allow, "reasons": reasons}
+            return _normalize_decision_payload(
+                data,
+                default_error_code="oap.evaluator_error",
+                default_error_message="Policy evaluation failed",
+            )
         except (json.JSONDecodeError, OSError):
             pass
     return {
@@ -356,10 +442,11 @@ def _call_api_sync(
             decision = data.get("decision") if isinstance(data.get("decision"), dict) else data
             if not decision:
                 decision = data
-            return {
-                "allow": decision.get("allow", False),
-                "reasons": decision.get("reasons", [{"message": "API response"}]),
-            }
+            return _normalize_decision_payload(
+                decision,
+                default_error_code="oap.api_error",
+                default_error_message="API response missing decision",
+            )
     except (URLError, OSError, json.JSONDecodeError) as e:
         return {
             "allow": False,
@@ -397,6 +484,20 @@ class Evaluator:
         if self.config_path and self.config_path.is_file():
             return self.config_path
         return find_config_path(self._framework)
+
+    def _resolve_passport(self, config: dict[str, Any]) -> tuple[str | None, Decision | None]:
+        explicit_path = config.get("passport_path") or os.environ.get("OPENCLAW_PASSPORT_FILE")
+        if explicit_path:
+            validation = validate_explicit_passport_path(Path(explicit_path).expanduser())
+            if not validation.valid:
+                return None, {
+                    "allow": False,
+                    "reasons": [{
+                        "code": validation.error_code or "oap.invalid_passport_path",
+                        "message": validation.error_message or "Invalid passport path",
+                    }],
+                }
+        return _resolve_passport_path(config, config_path=self._resolved_config_path()), None
 
     def _audit_log(self, config: dict[str, Any], tool_name: str, pack_id: str, decision: Decision, context: dict[str, Any]) -> None:
         """Best-effort audit log write. Never raises."""
@@ -441,7 +542,10 @@ class Evaluator:
             policy_pack = policy
 
         # Resolve passport path once — used by both API and local modes
-        passport_path = _resolve_passport_path(config)
+        passport_path, passport_error = self._resolve_passport(config)
+        if passport_error is not None:
+            self._audit_log(config, tool_name, pack_id, passport_error, ctx)
+            return passport_error
 
         if mode == "api":
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
@@ -487,7 +591,7 @@ class Evaluator:
                 self._audit_log(config, tool_name, pack_id, decision, ctx)
                 return decision
         # Local mode or fallback
-        guardrail_script = _get_guardrail_script_path(config)
+        guardrail_script = _get_guardrail_script_path(config, config_path=self.config_path)
         if not passport_path or not guardrail_script:
             decision: Decision
             if _get_fail_open_when_missing_config(config):
@@ -534,7 +638,10 @@ class Evaluator:
             policy_pack = policy
 
         # Resolve passport path once — used by both API and local modes
-        passport_path = _resolve_passport_path(config)
+        passport_path, passport_error = self._resolve_passport(config)
+        if passport_error is not None:
+            self._audit_log(config, tool_name, pack_id, passport_error, ctx)
+            return passport_error
 
         if mode == "api":
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
@@ -565,7 +672,7 @@ class Evaluator:
                 )
                 self._audit_log(config, tool_name, pack_id, decision, ctx)
                 return decision
-        guardrail_script = _get_guardrail_script_path(config)
+        guardrail_script = _get_guardrail_script_path(config, config_path=self.config_path)
         if not passport_path or not guardrail_script:
             decision: Decision
             if _get_fail_open_when_missing_config(config):

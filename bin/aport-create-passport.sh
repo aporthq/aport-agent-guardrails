@@ -15,7 +15,7 @@
 set -e
 
 PASSPORT_FILE=""
-NON_INTERACTIVE=""
+NON_INTERACTIVE="${APORT_NONINTERACTIVE:-${CI:-}}"
 # Parse --output, --non-interactive, --framework=
 while [ $# -gt 0 ]; do
     case "$1" in

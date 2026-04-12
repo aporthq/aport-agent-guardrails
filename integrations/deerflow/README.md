@@ -39,4 +39,4 @@ Evaluation modes:
 - **Config:** `~/.aport/deerflow/` or `.aport/config.yaml`
 - **Setup:** `npx @aporthq/aport-agent-guardrails deerflow` or `aport setup --framework deerflow`
 
-See [docs/frameworks/deerflow.md](../../docs/frameworks/deerflow.md) (coming soon).
+See [docs/frameworks/deerflow.md](../../docs/frameworks/deerflow.md).

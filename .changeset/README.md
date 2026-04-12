@@ -1,6 +1,6 @@
 # Changesets
 
-We use a **single version** for the whole suite (core + all framework adapters). When you add a changeset, it will drive a single bump for every package.
+We use a **single version** for the whole suite (core + all framework adapters + the root CLI package).
 
 ## Adding a changeset
 
@@ -13,7 +13,8 @@ npx changeset
 - Choose the type of change: **patch** (bugfix), **minor** (feature), **major** (breaking).
 - Write a short summary for the changelog.
 - Commit the new file under `.changeset/`.
+- Target one of the **workspace packages** in the fixed release group, typically `@aporthq/aport-agent-guardrails-core`.
 
-When the release is cut, `changeset version` will bump **all** packages to the same new version and update changelogs. Python packages are then synced to that version via `npm run sync-version`.
+When the release is cut, `changeset version` bumps the fixed workspace group and updates workspace changelogs. Then `npm run sync-version` propagates that same version to the root CLI package, Python packages, manifests, lockfiles, and release docs.
 
 See [docs/RELEASE.md](../docs/RELEASE.md) for the full release flow.

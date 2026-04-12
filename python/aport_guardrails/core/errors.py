@@ -260,7 +260,7 @@ RESOLUTIONS = {
         "Flatten nested structures to reduce nesting depth. Maximum depth: 10 levels."
     ),
     ErrorCode.PATH_NOT_ALLOWED: (
-        "Use standard APort directories: ~/.openclaw/, ~/.aport/, or /tmp/aport-*. "
+        "Use standard framework config directories such as ~/.openclaw/, ~/.aport/, ~/.cursor/, ~/.claude/, ~/.n8n/, or /tmp/aport-*. "
         "Contact administrator to add custom allowed directories."
     ),
     ErrorCode.PATH_TRAVERSAL_ATTEMPT: (
@@ -268,8 +268,8 @@ RESOLUTIONS = {
         "This is a security feature to prevent path traversal attacks."
     ),
     ErrorCode.PASSPORT_NOT_FOUND: (
-        "Create a passport by running: npx @aporthq/aport-agent-guardrails openclaw\n"
-        "See: https://github.com/aporthq/agent-guardrails#passport-setup"
+        "Create a passport by running: npx @aporthq/aport-agent-guardrails <framework>\n"
+        "See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs/frameworks"
     ),
     ErrorCode.PASSPORT_MISSING_CAPABILITY: (
         "Request capability be added to passport or generate new passport with required capabilities."
@@ -291,7 +291,7 @@ RESOLUTIONS = {
     ),
     ErrorCode.MISCONFIGURED: (
         "Run setup: npx @aporthq/aport-agent-guardrails <framework>. "
-        "Check passport exists at ~/.openclaw/passport.json and guardrail script at ~/.openclaw/.skills/aport-guardrail.sh"
+        "Check your framework config directory for aport/passport.json and aport/runtime/bin/aport-guardrail.sh."
     ),
 }
 

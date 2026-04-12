@@ -13,6 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Source validation library for input sanitization
 # shellcheck source=bin/lib/validation.sh
 . "${SCRIPT_DIR}/bin/lib/validation.sh"
+# shellcheck source=bin/lib/tool-mapping.sh
+. "${SCRIPT_DIR}/bin/lib/tool-mapping.sh"
 
 # Get script directory to find submodules (external/ per GIT_SUBMODULES_EXPLAINED.md)
 POLICIES_DIR="$SCRIPT_DIR/external/aport-policies"
@@ -94,11 +96,14 @@ write_decision() {
     local deny_message="${4:-Policy evaluation failed}"
 
     local decision_id=$(uuidgen 2> /dev/null || echo "local-$(date +%s)")
-    local passport_id=$(jq -r '.passport_id // "unknown"' "$PASSPORT_FILE")
+    local passport_id=$(jq -r '.passport_id // .agent_id // "unknown"' "$PASSPORT_FILE")
+    local agent_id=$(jq -r '.agent_id // .passport_id // "unknown"' "$PASSPORT_FILE")
     local owner_id=$(jq -r '.owner_id // "unknown"' "$PASSPORT_FILE")
     local assurance_level=$(jq -r '.assurance_level // "L0"' "$PASSPORT_FILE")
     local passport_digest=$(compute_passport_digest "$PASSPORT_FILE")
     local issued_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local created_at="$issued_at"
+    local expires_in=3600
     local expires_at=$(date -u -v+1H +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
 
     # Build reasons array per OAP v1.0 spec
@@ -126,12 +131,15 @@ write_decision() {
         --arg decision_id "$decision_id" \
         --arg policy_id "$policy_id" \
         --arg passport_id "$passport_id" \
+        --arg agent_id "$agent_id" \
         --arg owner_id "$owner_id" \
         --arg assurance_level "$assurance_level" \
         --argjson allow "$allow" \
         --argjson reasons "$reasons" \
         --arg issued_at "$issued_at" \
+        --arg created_at "$created_at" \
         --arg expires_at "$expires_at" \
+        --argjson expires_in "$expires_in" \
         --arg passport_digest "$passport_digest" \
         --arg prev_decision_id "$prev_decision_id" \
         --arg prev_content_hash "$prev_content_hash" \
@@ -139,12 +147,15 @@ write_decision() {
             decision_id: $decision_id,
             policy_id: $policy_id,
             passport_id: $passport_id,
+            agent_id: $agent_id,
             owner_id: $owner_id,
             assurance_level: $assurance_level,
             allow: $allow,
             reasons: $reasons,
             issued_at: $issued_at,
+            created_at: $created_at,
             expires_at: $expires_at,
+            expires_in: $expires_in,
             passport_digest: $passport_digest,
             signature: "local-unsigned",
             kid: "oap:local:dev-key",
@@ -216,58 +227,12 @@ if [ "$SPEC_VERSION" != "oap/1.0" ]; then
     write_decision false "unknown" "oap.passport_version_mismatch" "Passport spec version is '$SPEC_VERSION', expected 'oap/1.0'"
 fi
 
-# Map tool to policy pack ID
-POLICY_ID=""
-case "$TOOL_NAME" in
-    git.create_pr | git.merge | git.push | git.*)
-        POLICY_ID="code.repository.merge.v1"
-        ;;
-    exec | exec.run | exec.* | system.* | bash | shell | command)
-        POLICY_ID="system.command.execute.v1"
-        ;;
-    gateway | gateway.* | process | process.*)
-        # High risk operations - treat as command execution
-        POLICY_ID="system.command.execute.v1"
-        ;;
-    message.send | message.* | messaging.* | sms | whatsapp | slack | email)
-        POLICY_ID="messaging.message.send.v1"
-        ;;
-    read | file.read | file.read.* | data.file.read | data.file.read.*)
-        POLICY_ID="data.file.read.v1"
-        ;;
-    write | edit | file.write | file.write.* | file.edit | file.edit.* | data.file.write | data.file.write.*)
-        POLICY_ID="data.file.write.v1"
-        ;;
-    web_fetch | webfetch | web.fetch | web.fetch.* | web_search | websearch | web.search | web.search.*)
-        POLICY_ID="web.fetch.v1"
-        ;;
-    browser | browser.* | web.browser | web.browser.*)
-        POLICY_ID="web.browser.v1"
-        ;;
-    mcp.*)
-        POLICY_ID="mcp.tool.execute.v1"
-        ;;
-    agent.session.* | session.create | session.* | sessions.* | sessions_spawn | sessions_send)
-        POLICY_ID="agent.session.create.v1"
-        ;;
-    cron | cron.*)
-        # Scheduled tasks - treat as session management
-        POLICY_ID="agent.session.create.v1"
-        ;;
-    agent.tool.* | tool.register)
-        POLICY_ID="agent.tool.register.v1"
-        ;;
-    payment.refund | refund | payment.charge | charge | payment.* | finance.*)
-        POLICY_ID="finance.payment.refund.v1"
-        ;;
-    database.write | database.insert | database.update | database.delete | data.export | data.export.*)
-        POLICY_ID="data.export.create.v1"
-        ;;
-    *)
-        # Unknown tool - deny by default for security
-        write_decision false "unknown" "oap.unknown_capability" "Tool '$TOOL_NAME' is not mapped to a policy pack"
-        ;;
-esac
+# Map tool to policy pack ID from the shared JSON source of truth.
+POLICY_ID="$(resolve_policy_id_from_tool_name "$TOOL_NAME" || true)"
+if [[ -z "$POLICY_ID" ]]; then
+    # Unknown tool - deny by default for security.
+    write_decision false "unknown" "oap.unknown_capability" "Tool '$TOOL_NAME' is not mapped to a policy pack"
+fi
 
 # Capability-specific context summary for audit log (command, recipient, repo/branch, file_path, etc.)
 CONTEXT_SUMMARY=""
