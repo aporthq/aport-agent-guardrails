@@ -1,11 +1,23 @@
 {
   "name": "@aporthq/openclaw-aport",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "OpenClaw plugin for deterministic pre-action authorization via APort guardrails",
   "main": "index.js",
   "type": "module",
+  "files": [
+    "index.js",
+    "api-client.js",
+    "audit.js",
+    "decision.js",
+    "local-evaluator.js",
+    "tool-mapping.js",
+    "openclaw.plugin.json",
+    "README.md",
+    "MIGRATION.md",
+    "CHANGELOG.md"
+  ],
   "scripts": {
-    "test": "node test.js"
+    "test": "node ../../tests/extensions/openclaw-aport.test.js"
   },
   "keywords": [
     "openclaw",
@@ -30,8 +42,17 @@
   },
   "openclaw": {
     "extensions": [
-      "./index.ts"
-    ]
+      "./index.js"
+    ],
+    "install": {
+      "minHostVersion": ">=2026.4.11"
+    },
+    "compat": {
+      "pluginApi": ">=2026.4.11"
+    },
+    "build": {
+      "openclawVersion": "2026.4.11"
+    }
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

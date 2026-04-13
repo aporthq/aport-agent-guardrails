@@ -1,8 +1,14 @@
 # Changelog - APort OpenClaw Plugin
 
-## 1.0.21
-
 All notable changes to the APort OpenClaw plugin will be documented in this file.
+
+## [1.0.22] - 2026-04-13
+
+### Fixed
+- Replaced the old shell-spawning runtime with a scanner-safe JavaScript plugin runtime for local and API evaluation.
+- Added current OpenClaw compatibility metadata in `package.json` and aligned the hook return shape with the documented `before_tool_call` contract.
+- Kept `alwaysVerifyEachToolCall` as a deprecated manifest field so existing installs continue to load during upgrade.
+- Updated the public install and migration docs to match the plugin-based OpenClaw path.
 
 ## [1.0.21] - 2026-02-19
 
