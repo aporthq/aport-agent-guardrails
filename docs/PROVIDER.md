@@ -8,7 +8,7 @@ APort ships a generic `OAPGuardrailProvider` for both Python and TypeScript. It 
 Framework defines interface          APort implements it
 ────────────────────────             ───────────────────
 DeerFlow: GuardrailProvider    ←──   Python OAPGuardrailProvider
-OpenClaw: GuardrailProvider    ←──   TypeScript OAPGuardrailProvider
+TypeScript frameworks with a GuardrailProvider seam ←──   TypeScript OAPGuardrailProvider
 Your framework: same shape     ←──   Same class, same language
 ```
 
@@ -45,23 +45,23 @@ guardrails:
 ```typescript
 import { OAPGuardrailProvider } from "@aporthq/aport-agent-guardrails-core";
 
-const provider = new OAPGuardrailProvider({ framework: "openclaw" });
+const provider = new OAPGuardrailProvider({ framework: "your-framework" });
 const decision = await provider.evaluate(request);  // async
 const decision = provider.evaluateSync(request);     // sync
 ```
 
-**Supported frameworks:** OpenClaw, any TypeScript framework with a `GuardrailProvider` interface.
+**Supported frameworks:** TypeScript frameworks that expose a `GuardrailProvider` interface. Current public OpenClaw uses the plugin path documented in `docs/frameworks/openclaw.md`; a native provider path would be additive when upstream support exists.
 
-**Config:** `~/.openclaw/aport/config.yaml` or `~/.aport/<framework>/config.yaml`
+**Config:** `~/.aport/<framework>/config.yaml` or the framework-specific path your host expects
 
-**OpenClaw config.yaml:**
+**Example TypeScript host config:**
 ```yaml
 guardrails:
   enabled: true
   provider:
     use: "@aporthq/aport-agent-guardrails-core"
     config:
-      framework: "openclaw"
+      framework: "your-framework"
 ```
 
 ## What the provider does

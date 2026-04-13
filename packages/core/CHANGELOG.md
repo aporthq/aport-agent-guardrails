@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.22
+
+### Patch Changes
+
+- Fix the public OpenClaw integration by shipping the scanner-safe plugin runtime, aligning setup/docs with the plugin-based flow, and tightening plugin compatibility metadata and hook contract handling.
+
 ## 1.0.21
 
 ### Patch Changes

@@ -2,7 +2,7 @@
   "id": "openclaw-aport",
   "name": "APort Guardrails",
   "description": "Deterministic pre-action authorization via APort policy enforcement. Registers before_tool_call to block disallowed tools.",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -14,7 +14,7 @@
           "api"
         ],
         "default": "local",
-        "description": "local = guardrail script, api = APort API"
+        "description": "local = built-in JS evaluator, api = APort API"
       },
       "passportFile": {
         "type": "string",
@@ -24,7 +24,7 @@
       "guardrailScript": {
         "type": "string",
         "default": "~/.openclaw/.skills/aport-guardrail-bash.sh",
-        "description": "Path to guardrail script (local mode)"
+        "description": "Legacy compatibility field for manual smoke tests and shell tooling. Current plugin versions use the built-in JS local evaluator in local mode."
       },
       "apiUrl": {
         "type": "string",
@@ -32,7 +32,7 @@
       },
       "apiKey": {
         "type": "string",
-        "description": "Optional. Prefer APORT_API_KEY env var; do not put ${APORT_API_KEY} in config (OpenClaw requires the var to exist)."
+        "description": "Optional API key for hosted verification mode. Configure it directly in plugin config if needed."
       },
       "failClosed": {
         "type": "boolean",
@@ -51,7 +51,7 @@
       "alwaysVerifyEachToolCall": {
         "type": "boolean",
         "default": true,
-        "description": "Run fresh APort verify for each tool call"
+        "description": "Deprecated compatibility field. Current plugin versions always verify each tool call and ignore this setting."
       },
       "mapExecToPolicy": {
         "type": "boolean",

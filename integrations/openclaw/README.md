@@ -2,15 +2,21 @@
 
 Framework-specific code for APort guardrails on OpenClaw.
 
+## Current public path
+
+OpenClaw currently uses the `openclaw-aport` plugin path.
+
+- Public setup: `npx @aporthq/aport-agent-guardrails openclaw`
+- Development install: `openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport`
+- Runtime enforcement: plugin `before_tool_call`
+
 ## Location
 
-- **Plugin:** [extensions/openclaw-aport](../../extensions/openclaw-aport) — `before_tool_call` hook, config wiring, install via `bin/openclaw`.
-- **Guardrail scripts:** [bin/aport-guardrail-bash.sh](../../bin/aport-guardrail-bash.sh), [bin/aport-guardrail-api.sh](../../bin/aport-guardrail-api.sh) (shared).
+- Plugin runtime: [extensions/openclaw-aport](../../extensions/openclaw-aport)
+- Installer: [bin/openclaw](../../bin/openclaw)
+- Shared shell tooling and wrappers: [bin](../../bin)
 
-## What lives here
+## Notes
 
-- **extensions/** — Placeholder; actual plugin lives in repo root `extensions/openclaw-aport/` so OpenClaw can resolve it from the package.
-
-## Adding a new framework (reference)
-
-OpenClaw is the most complex integration (full installer in `bin/openclaw`). Other frameworks use [bin/frameworks/openclaw.sh](../../bin/frameworks/openclaw.sh), which simply delegates to `bin/openclaw`. See [docs/ADDING_A_FRAMEWORK.md](../../docs/ADDING_A_FRAMEWORK.md) for the pattern.
+- The public OpenClaw path is plugin-based today
+- Native provider wiring is future work, not the current default
