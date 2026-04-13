@@ -1,69 +1,153 @@
 # APort Guardrails — OpenClaw
 
-OpenClaw is an open-source AI agent platform with a plugin system and built-in `before_tool_call` hooks. APort integrates via two paths:
-
-- **Native `guardrails:` config** (recommended) — OpenClaw's built-in `GuardrailProvider` interface loads `OAPGuardrailProvider` directly. No plugin needed.
-- **Plugin** (legacy, still works) — The `openclaw-aport` plugin registers a `before_tool_call` hook.
-
-Both paths use the same evaluator, passport, and policies.
+APort integrates with the current public OpenClaw release as a plugin. The plugin registers `before_tool_call` and blocks disallowed tools before execution. No OpenClaw core patch or native guardrail-provider merge is required.
 
 ## Quick start
 
 ```bash
-npm install @aporthq/aport-agent-guardrails-core
 npx @aporthq/aport-agent-guardrails openclaw
 ```
 
-The first command installs the provider. The second runs the passport wizard.
+If you already have a hosted passport on aport.io, pass the `agent_id` and skip local passport creation:
 
-## Config (native — recommended)
-
-Add to your OpenClaw `config.yaml`:
-
-```yaml
-guardrails:
-  enabled: true
-  provider:
-    use: "@aporthq/aport-agent-guardrails-core"
-    config:
-      framework: "openclaw"
+```bash
+npx @aporthq/aport-agent-guardrails openclaw ap_your_agent_id
 ```
 
-This loads `OAPGuardrailProvider` as a core guardrail service — runs before plugin hooks, cannot be bypassed by disabling a plugin.
+The setup command:
 
-## Config (plugin — legacy)
+1. Chooses your OpenClaw config directory
+2. Creates a local passport or wires a hosted `agent_id`
+3. Installs the `openclaw-aport` plugin with `openclaw plugins install -l ...`
+4. Writes `plugins.entries.openclaw-aport` config into your OpenClaw config files
+5. Installs APort wrappers in `CONFIG_DIR/.skills/` for manual status checks and smoke tests
 
-The setup wizard (`npx @aporthq/aport-agent-guardrails openclaw`) installs the `openclaw-aport` plugin automatically. This registers a `before_tool_call` hook that calls the same evaluator.
+After setup, start OpenClaw with the generated config:
 
-Both approaches are supported. The native config is recommended for new deployments.
+```bash
+openclaw gateway start --config ~/.openclaw/config.yaml
+```
+
+## What OpenClaw already gives you
+
+OpenClaw already ships meaningful runtime security controls:
+
+- sandboxing and OpenShell decide where tools run
+- tool policy decides which tools are callable
+- elevated execution gates host-level exec outside the sandbox
+- install-time scanning blocks obviously dangerous plugin bundles
+
+Those controls matter, and for many single-runtime deployments they may be enough.
+
+## What APort adds
+
+APort is useful when you need authorization and audit beyond OpenClaw's built-in containment and static tool policy:
+
+- per-agent identity and passport-based capability limits
+- parameter-aware authorization, not just tool allow/deny
+- local or hosted kill switch by suspending the passport
+- signed decision receipts and centralized audit in API mode
+- the same policy model across OpenClaw, CrewAI, DeerFlow, LangChain, and other runtimes
+
+In short: OpenClaw secures where tools run and which tools exist; APort secures whether a specific action is authorized for a specific agent right now.
+
+## Configuration
+
+The installer writes the plugin config for you. A minimal manual config looks like this:
+
+```yaml
+plugins:
+  enabled: true
+  entries:
+    openclaw-aport:
+      enabled: true
+      config:
+        mode: api
+        passportFile: ~/.openclaw/aport/passport.json
+        apiUrl: https://api.aport.io
+        failClosed: true
+        allowUnmappedTools: true
+```
+
+Hosted passport mode uses `agentId` instead of `passportFile`:
+
+```yaml
+plugins:
+  enabled: true
+  entries:
+    openclaw-aport:
+      enabled: true
+      config:
+        mode: api
+        agentId: ap_your_agent_id
+        apiUrl: https://api.aport.io
+        failClosed: true
+        allowUnmappedTools: true
+```
+
+## Modes
+
+### API mode
+
+Best for production, signed decisions, and cloud kill switch workflows.
+
+- The plugin sends the request context and passport or `agentId` to `api.aport.io`
+- The API returns a signed decision
+- If your deployment needs authentication, set `apiKey` in plugin config
+
+### Local mode
+
+Best for privacy-sensitive or offline environments.
+
+- The plugin evaluates decisions with a built-in JavaScript evaluator
+- No `child_process` spawn is required
+- The installer still writes `guardrailScript` wrappers for manual smoke tests and legacy shell tooling, but current plugin versions do not depend on that script for local-mode enforcement
+
+## Manual install for development
+
+The public path is `npx @aporthq/aport-agent-guardrails openclaw`. If you are developing locally from a checkout, you can install the plugin directly:
+
+```bash
+openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport
+```
+
+Then add the same `plugins.entries.openclaw-aport` config shown above.
 
 ## How it works
 
-```
+```text
 Agent decides to use a tool
-        │
-        ▼
-  GuardrailService (native)     or     Plugin hook (legacy)
-        │                                      │
-        ▼                                      ▼
-  OAPGuardrailProvider ──────────────── same Evaluator
-        │
-  ┌─────┴─────┐
-  │           │
-ALLOW       DENY
-  │           │
-Tool runs   Agent sees denial reason
+        |
+        v
+OpenClaw fires before_tool_call
+        |
+        v
+APort plugin maps tool -> policy pack
+        |
+        v
+APort evaluates passport + limits (local JS evaluator or API)
+   |                    |
+   v                    v
+ allow                deny
+   |                    |
+Tool runs        Plugin returns block=true
 ```
 
-- **Provider class:** `OAPGuardrailProvider` from `@aporthq/aport-agent-guardrails-core`
-- **Passport:** `~/.openclaw/aport/passport.json` (created by wizard)
-- **Config:** `~/.openclaw/aport/config.yaml`
-- **Audit log:** `~/.openclaw/aport/audit.log`
+Common mappings include:
 
-## Suspend (kill switch)
+- `exec`, `exec.run` -> `system.command.execute.v1`
+- `git.create_pr`, `git.merge`, `git.push` -> `code.repository.merge.v1`
+- `message.send` -> `messaging.message.send.v1`
+- `read`, `view`, `glob` -> `data.file.read.v1`
+- `write`, `edit`, `multiedit` -> `data.file.write.v1`
 
-Local: set passport `status` to `suspended`. Remote: use API mode and suspend at [aport.io](https://aport.io).
+## Kill switch
+
+- Local passport: set `status` to `suspended` in `~/.openclaw/aport/passport.json`
+- Hosted passport: suspend the passport at aport.io
 
 ## Status
 
-Shipped; in production. Native `guardrails:` config available when [OpenClaw #46441](https://github.com/openclaw/openclaw/issues/46441) merges.
+Current public OpenClaw integration: plugin-based.
+
+Future path: if OpenClaw ships a native guardrail-provider seam upstream, APort can also plug into that provider path. That is not the current public default.

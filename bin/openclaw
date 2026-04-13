@@ -1,7 +1,8 @@
 #!/bin/bash
 # OpenClaw + APort: interactive setup
-# Run from repo root. One run secures OpenClaw: creates passport, installs the
-# APort plugin (deterministic enforcement), writes config and guardrail wrappers.
+# Works from a repo checkout or from the published npm package via npx.
+# One run secures OpenClaw: creates a passport or wires a hosted agent_id,
+# installs the APort plugin, writes config, and installs guardrail wrappers.
 # After setup, start OpenClaw with the generated config (e.g. --config ~/.openclaw/config.yaml).
 #
 # Usage: ./bin/openclaw [agent_id]
@@ -216,8 +217,12 @@ if true; then
             echo "  ✅ Plugin installed successfully"
             PLUGIN_INSTALLED=true
         else
-            echo "  ⚠️  Plugin installation failed. You can install manually later:"
+            echo "  ❌ Plugin installation failed."
+            echo "     OpenClaw did not accept the plugin bundle, so setup is stopping here"
+            echo "     instead of writing plugin config that points at a broken install."
+            echo "     Retry after fixing the bundle or install it manually:"
             echo "     openclaw plugins install -l $APORT_PLUGIN_PATH"
+            exit 1
         fi
         echo ""
 
@@ -322,7 +327,7 @@ YAML
         # Passport file location (in aport/ subdir)
         passportFile: $PASSPORT_FILE
 
-        # For local mode: path to guardrail script
+        # Legacy compatibility field; current plugin versions use the built-in JS local evaluator
         guardrailScript: $CONFIG_DIR/.skills/aport-guardrail-bash.sh
 YAML
         fi
@@ -433,26 +438,21 @@ YAML
                 '{ mode: $mode, passportFile: $pf, guardrailScript: $gs, failClosed: true, allowUnmappedTools: ($allow_unmapped == "true") } + (if $mode == "api" then { apiUrl: $api_url } else {} end)')
         fi
 
-        if jq --argjson cfg "$CONFIG_JSON" --arg plugin_path "$APORT_PLUGIN_PATH" '
+        if jq --argjson cfg "$CONFIG_JSON" '
             .plugins = (.plugins // {}) |
             .plugins.entries = (.plugins.entries // {}) |
             .plugins.entries["openclaw-aport"] = ((.plugins.entries["openclaw-aport"] // {}) | .enabled = true | .config = $cfg) |
-            .plugins.load = (.plugins.load // {}) |
-            .plugins.load.paths = (
-                ((.plugins.load.paths // []) | map(select((type == "string" and contains("/openclaw-aport")) | not))) + [$plugin_path]
-            ) |
             .plugins.installs = (.plugins.installs // {}) |
-            .plugins.installs["openclaw-aport"] = ((.plugins.installs["openclaw-aport"] // {})
-                | .source = "path"
-                | .sourcePath = $plugin_path
-                | .installPath = $plugin_path)
+            del(.plugins.installs["openclaw-aport"]) |
+            .plugins.load = (.plugins.load // {}) |
+            .plugins.load.paths = ((.plugins.load.paths // []) | map(select((type == "string" and contains("/openclaw-aport")) | not)))
         ' "$OPENCLAW_JSON" > "$OPENCLAW_JSON.tmp" 2>/dev/null && { backup_file "$OPENCLAW_JSON"; mv "$OPENCLAW_JSON.tmp" "$OPENCLAW_JSON"; }; then
             if [ "$USE_HOSTED_PASSPORT" = true ]; then
                 echo "  ✅ Merged plugin config into $OPENCLAW_JSON (mode=$PLUGIN_MODE, hosted passport, allowUnmappedTools=$ALLOW_UNMAPPED)"
             else
                 echo "  ✅ Merged plugin config into $OPENCLAW_JSON (mode=$PLUGIN_MODE, allowUnmappedTools=$ALLOW_UNMAPPED)"
             fi
-            echo "  ✅ Canonicalized plugin load path → $APORT_PLUGIN_PATH"
+            echo "  ✅ Removed stale source-linked OpenClaw plugin paths from $OPENCLAW_JSON"
         fi
     fi
 

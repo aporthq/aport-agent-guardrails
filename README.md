@@ -97,7 +97,7 @@ The security concern is that agent tools and skills can execute sensitive action
 
 | Framework | Doc | Integration | Install |
 |-----------|-----|--------------|--------|
-| **OpenClaw** | [docs/frameworks/openclaw.md](docs/frameworks/openclaw.md) | Native `GuardrailProvider` or plugin | `npm i @aporthq/aport-agent-guardrails-core && npx @aporthq/aport-agent-guardrails openclaw` |
+| **OpenClaw** | [docs/frameworks/openclaw.md](docs/frameworks/openclaw.md) | **Plugin:** `before_tool_call` via `openclaw-aport` | `npx @aporthq/aport-agent-guardrails openclaw` |
 | **Cursor** | [docs/frameworks/cursor.md](docs/frameworks/cursor.md) | `beforeShellExecution` / `preToolUse` hooks → writes `~/.cursor/hooks.json`. **Runtime enforcement is the bash hook;** the Node package `@aporthq/aport-agent-guardrails-cursor` is a helper only (Evaluator, `getHookPath()`). | `npx @aporthq/aport-agent-guardrails cursor` |
 | **Claude Code** | [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md) | PreToolUse hook → writes `~/.claude/settings.json` (Claude Code format; not Cursor). | `npx @aporthq/aport-agent-guardrails claude-code` |
 | **LangChain / LangGraph** | [docs/frameworks/langchain.md](docs/frameworks/langchain.md) | **Python:** `APortCallback` (`on_tool_start`) | `npx @aporthq/aport-agent-guardrails langchain` then `pip install aport-agent-guardrails-langchain` + `aport-langchain setup` |
@@ -126,13 +126,18 @@ npx @aporthq/aport-agent-guardrails
 # or: npx @aporthq/aport-agent-guardrails openclaw | cursor | claude-code | langchain | crewai | deerflow | n8n
 ```
 
-**Python (LangChain, CrewAI, or DeerFlow):** Run the wizard via the Node command above, then install the Python package and follow the printed next steps. Or use the Python CLI to see the exact commands:
+**Python (LangChain, CrewAI, or DeerFlow):** Use the Python CLI directly via `uvx` or an installed package:
+```bash
+uvx --from aport-agent-guardrails aport setup --framework=langchain
+# or --framework=crewai / deerflow
+```
+Or install the package first:
 ```bash
 pip install aport-agent-guardrails
 aport setup --framework=langchain
 # or --framework=crewai / deerflow
 ```
-Then run the printed `npx` command to create passport and config, and the printed Python integration step for your framework.
+Then install the framework-specific Python package and follow the printed integration step for your framework.
 
 This runs the **passport wizard** and writes config for your framework. Follow the **next steps** printed at the end (e.g. restart Cursor; or for CrewAI: by default install `aport-agent-guardrails-crewai` for released CrewAI, or opt into native-provider mode if your CrewAI build supports it).
 

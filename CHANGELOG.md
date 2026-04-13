@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.22] - 2026-04-13
+
+### Fixed
+- **OpenClaw public integration:** `npx @aporthq/aport-agent-guardrails openclaw` now ships the scanner-safe plugin runtime, correct compatibility metadata, and installer behavior that stops on plugin install failure instead of writing broken config.
+- **OpenClaw docs and setup guidance:** public docs, quickstarts, and generated setup content now consistently describe the plugin-based OpenClaw path and the value split between OpenClaw security controls and APort authorization.
+
+
 ## [1.0.21] - 2026-04-11
 
 ### Fixed
