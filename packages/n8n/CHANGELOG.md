@@ -1,5 +1,12 @@
 # @aporthq/aport-agent-guardrails-n8n
 
+## 1.0.22
+
+### Patch Changes
+
+- Updated dependencies
+  - @aporthq/aport-agent-guardrails-core@1.0.22
+
 ## 1.0.21
 
 ### Patch Changes
