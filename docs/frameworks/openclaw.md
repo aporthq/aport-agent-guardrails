@@ -14,6 +14,20 @@ If you already have a hosted passport on aport.io, pass the `agent_id` and skip 
 npx @aporthq/aport-agent-guardrails openclaw ap_your_agent_id
 ```
 
+If you run `openclaw plugins install @aporthq/openclaw-aport` directly, that installs only the plugin bundle. It does not create a local passport or write the plugin config. Use the setup command above for the full APort + OpenClaw flow, or configure the plugin manually.
+
+After a direct plugin install, the recommended next step is:
+
+```bash
+npx @aporthq/aport-agent-guardrails openclaw
+```
+
+Hosted passport:
+
+```bash
+npx @aporthq/aport-agent-guardrails openclaw ap_your_agent_id
+```
+
 The setup command:
 
 1. Chooses your OpenClaw config directory
@@ -137,9 +151,10 @@ Common mappings include:
 
 - `exec`, `exec.run` -> `system.command.execute.v1`
 - `git.create_pr`, `git.merge`, `git.push` -> `code.repository.merge.v1`
-- `message.send` -> `messaging.message.send.v1`
+- `message` with send-family actions like `send`, `reply`, `broadcast`, `sendAttachment`, `upload-file`, or `react` -> `messaging.message.send.v1`
 - `read`, `view`, `glob` -> `data.file.read.v1`
 - `write`, `edit`, `multiedit` -> `data.file.write.v1`
+- bundle MCP tools exposed as `serverName__toolName` -> `mcp.tool.execute.v1`
 
 ## Kill switch
 
