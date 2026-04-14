@@ -18,6 +18,7 @@ cat > "$FAKE_BIN/openclaw" << 'SCRIPT'
 #!/bin/bash
 set -e
 LOG_FILE="${APORT_FAKE_OPENCLAW_LOG:?}"
+PLUGIN_VERSION="${APORT_FAKE_OPENCLAW_PLUGIN_VERSION:?}"
 
 if [[ "$1" == "plugins" && "$2" == "list" && "$3" == "--json" ]]; then
   cat <<JSON
@@ -26,7 +27,7 @@ if [[ "$1" == "plugins" && "$2" == "list" && "$3" == "--json" ]]; then
   "plugins": [
     {
       "id": "openclaw-aport",
-      "version": "__PLUGIN_VERSION__"
+      "version": "$PLUGIN_VERSION"
     }
   ]
 }
@@ -58,11 +59,9 @@ fi
 
 exit 0
 SCRIPT
-sed -i '' "s|__PLUGIN_VERSION__|$PLUGIN_VERSION|g" "$FAKE_BIN/openclaw"
-sed -i '' "s|__LOG_FILE__|$LOG_FILE|g" "$FAKE_BIN/openclaw"
 chmod +x "$FAKE_BIN/openclaw"
 
-printf '\n\n\n' | env PATH="$FAKE_BIN:$NODE_DIR:/usr/bin:/bin" OPENCLAW_HOME="$CONFIG_DIR" APORT_FAKE_OPENCLAW_LOG="$LOG_FILE" \
+printf '\n\n\n' | env PATH="$FAKE_BIN:$NODE_DIR:/usr/bin:/bin" OPENCLAW_HOME="$CONFIG_DIR" APORT_FAKE_OPENCLAW_LOG="$LOG_FILE" APORT_FAKE_OPENCLAW_PLUGIN_VERSION="$PLUGIN_VERSION" \
     "$REPO_ROOT/bin/openclaw" "$AGENT_ID" > "$TEST_DIR/stdout.log" 2>&1
 
 if [[ -f "$LOG_FILE" ]] && grep -q "INSTALL_CALLED" "$LOG_FILE"; then
