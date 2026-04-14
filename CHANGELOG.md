@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.23] - 2026-04-13
+
+### Fixed
+- **OpenClaw plugin mapping correctness:** the OpenClaw plugin now maps current OpenClaw tool calls more accurately, including `message` send-family actions and MCP bundle tools exposed as `serverName__toolName`, while dropping speculative session, finance, and export mappings that did not match the current host tool surface.
+- **OpenClaw hosted/API context normalization:** hosted evaluation now normalizes OpenClaw file, message, and MCP tool params into the context shape expected by the APort API, avoiding `400` failures caused by mismatched field names like `path` vs `file_path`.
+- **OpenClaw setup idempotence:** `npx @aporthq/aport-agent-guardrails openclaw` now skips plugin reinstall when the same `openclaw-aport` version is already installed, while still reinstalling when versions differ.
+- **OpenClaw direct-install guidance:** docs now explicitly state that `openclaw plugins install @aporthq/openclaw-aport` installs only the plugin bundle and should be followed by the full APort setup command to create a passport and write config.
+
 ## [1.0.22] - 2026-04-13
 
 ### Fixed
 - **OpenClaw public integration:** `npx @aporthq/aport-agent-guardrails openclaw` now ships the scanner-safe plugin runtime, correct compatibility metadata, and installer behavior that stops on plugin install failure instead of writing broken config.
 - **OpenClaw docs and setup guidance:** public docs, quickstarts, and generated setup content now consistently describe the plugin-based OpenClaw path and the value split between OpenClaw security controls and APort authorization.
-
 
 ## [1.0.21] - 2026-04-11
 

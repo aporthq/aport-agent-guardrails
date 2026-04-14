@@ -33,6 +33,28 @@ After setup, start OpenClaw with the generated config:
 openclaw gateway start --config ~/.openclaw/config.yaml
 ```
 
+## If you installed with `openclaw plugins install`
+
+If you installed the plugin directly with:
+
+```bash
+openclaw plugins install @aporthq/openclaw-aport
+```
+
+that installs only the plugin bundle. It does not create a passport, choose API vs local mode, or write plugin config.
+
+Run the full APort setup immediately after install:
+
+```bash
+npx @aporthq/aport-agent-guardrails openclaw
+```
+
+If you already have a hosted passport, use:
+
+```bash
+npx @aporthq/aport-agent-guardrails openclaw ap_your_agent_id
+```
+
 ## What OpenClaw already gives you
 
 OpenClaw already ships sandboxing, tool policy, elevated exec controls, and install-time scanning. Those are real security controls, not marketing copy.
@@ -55,6 +77,12 @@ If you are working from a local checkout, install the plugin directly from the e
 
 ```bash
 openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport
+```
+
+That command installs only the OpenClaw plugin bundle. It does not create a passport, choose API vs local mode, or write plugin config. For a full working setup, use:
+
+```bash
+npx @aporthq/aport-agent-guardrails openclaw
 ```
 
 Then configure it in your OpenClaw config:
@@ -95,10 +123,10 @@ The plugin keeps the existing OpenClaw-specific tool mappings. Common examples:
 
 - `exec`, `exec.run` -> `system.command.execute.v1`
 - `git.create_pr`, `git.merge`, `git.push` -> `code.repository.merge.v1`
-- `message.send` -> `messaging.message.send.v1`
+- `message` with send-family actions like `send`, `reply`, `broadcast`, `sendAttachment`, `upload-file`, or `react` -> `messaging.message.send.v1`
 - `read`, `view`, `glob` -> `data.file.read.v1`
 - `write`, `edit`, `multiedit` -> `data.file.write.v1`
-- `mcp__*` -> `mcp.tool.execute.v1`
+- bundle MCP tools exposed as `serverName__toolName` -> `mcp.tool.execute.v1`
 
 `allowUnmappedTools: true` keeps the previous OpenClaw compatibility behavior for custom skills and unmapped tools.
 

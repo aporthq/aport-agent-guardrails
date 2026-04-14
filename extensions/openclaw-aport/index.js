@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import { logAuditEntry } from "./audit.js";
 import { canonicalize, formatReasons, verifyDecisionIntegrity } from "./decision.js";
 import { evaluateLocalDecision } from "./local-evaluator.js";
-import { mapToolToPolicy, normalizeExecContext } from "./tool-mapping.js";
+import { mapToolToPolicy, normalizePolicyContext } from "./tool-mapping.js";
 import { verifyViaApi } from "./api-client.js";
 
 export { canonicalize, mapToolToPolicy, verifyDecisionIntegrity };
@@ -48,7 +48,7 @@ export default definePluginEntry({
 
       try {
         const policyName =
-          toolName === "exec" && !mapExecToPolicy ? null : mapToolToPolicy(toolName);
+          toolName === "exec" && !mapExecToPolicy ? null : mapToolToPolicy(toolName, params);
 
         if (!policyName) {
           if (allowUnmappedTools) {
@@ -64,23 +64,22 @@ export default definePluginEntry({
 
         let effectivePolicyName = policyName;
         let effectiveToolName = toolName;
-        let context =
-          policyName === "system.command.execute.v1"
-            ? normalizeExecContext(params, event)
-            : (params || {});
+        let context = normalizePolicyContext(policyName, toolName, params, event);
 
         const delegated = parseGuardrailInvocation(
           effectivePolicyName === "system.command.execute.v1" ? context.command : null,
         );
         if (delegated) {
-          const innerPolicy = mapToolToPolicy(delegated.innerToolName);
+          const innerPolicy = mapToolToPolicy(delegated.innerToolName, delegated.innerContext);
           if (innerPolicy) {
             effectivePolicyName = innerPolicy;
             effectiveToolName = delegated.innerToolName;
-            context =
-              innerPolicy === "system.command.execute.v1"
-                ? normalizeExecContext(delegated.innerContext, { params: delegated.innerContext })
-                : delegated.innerContext;
+            context = normalizePolicyContext(
+              innerPolicy,
+              delegated.innerToolName,
+              delegated.innerContext,
+              { params: delegated.innerContext },
+            );
           }
         }
 
