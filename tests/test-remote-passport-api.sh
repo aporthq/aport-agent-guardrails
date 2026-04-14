@@ -3,7 +3,7 @@
 # The API fetches the passport from the registry by agent_id.
 #
 # Usage: ./test-remote-passport-api.sh
-#   Optional: APORT_TEST_REMOTE_AGENT_ID=ap_xxx  (default: ap_8955f5450cd542fe8f67bbbf07c3e103)
+#   Optional: APORT_TEST_REMOTE_AGENT_ID=ap_xxx  (default fallback fixture may skip if its hosted policy drifts)
 #   Optional: APORT_API_URL (default: https://api.aport.io; use http://localhost:8787 for local)
 #   Optional: APORT_API_KEY=... (if API requires auth)
 #
@@ -22,7 +22,12 @@ set -e
 source "$(dirname "$0")/setup.sh"
 
 # Remote passport (hosted) to test — create one at https://aport.io/builder/create
-REMOTE_AGENT_ID="${APORT_TEST_REMOTE_AGENT_ID:-ap_8955f5450cd542fe8f67bbbf07c3e103}"
+DEFAULT_REMOTE_AGENT_ID="ap_28a13d934f594713b98091e83bac14d3"
+REMOTE_AGENT_ID="${APORT_TEST_REMOTE_AGENT_ID:-$DEFAULT_REMOTE_AGENT_ID}"
+USING_DEFAULT_REMOTE_AGENT_ID=""
+if [ -z "${APORT_TEST_REMOTE_AGENT_ID:-}" ]; then
+    USING_DEFAULT_REMOTE_AGENT_ID="1"
+fi
 
 if [ -n "$APORT_SKIP_REMOTE_PASSPORT_TEST" ]; then
     echo "  Skipping remote passport API test (APORT_SKIP_REMOTE_PASSPORT_TEST is set)"
@@ -59,6 +64,16 @@ RESP=$(curl -s --connect-timeout 5 -w "\n%{http_code}" -X POST "${APORT_API_URL%
 if echo "${RESP:-}" | grep -q "passport_not_found\|Passport with the specified agent ID was not found"; then
     echo "  Skipping: No hosted passport for agent $REMOTE_AGENT_ID (create one at aport.io or set APORT_TEST_REMOTE_AGENT_ID)"
     exit 0
+fi
+
+if echo "${RESP:-}" | grep -q "Missing required capabilities: system.command.execute"; then
+    if [ -n "$USING_DEFAULT_REMOTE_AGENT_ID" ]; then
+        echo "  Skipping: default hosted fixture $REMOTE_AGENT_ID no longer allows system.command.execute"
+        echo "  Set APORT_TEST_REMOTE_AGENT_ID to a live hosted passport with that capability to run the full remote smoke test."
+        exit 0
+    fi
+    echo "  ❌ Hosted passport $REMOTE_AGENT_ID is reachable but missing required capability system.command.execute"
+    exit 1
 fi
 
 echo "  Test 1: ALLOW — safe command (e.g. ls)"
