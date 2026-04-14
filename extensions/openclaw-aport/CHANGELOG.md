@@ -1,10 +1,17 @@
 # Changelog - APort OpenClaw Plugin
 
+## 1.0.23
+
+### Patch Changes
+
+- Fix the OpenClaw plugin and setup flow for current public OpenClaw releases. This update makes the plugin installer and setup flow more reliable, tightens tool-to-policy mapping for current OpenClaw tools like `message` and MCP bundle tools, normalizes hosted API context for file and message tools, and skips redundant plugin reinstall when the same version is already installed.
+
 All notable changes to the APort OpenClaw plugin will be documented in this file.
 
 ## [1.0.22] - 2026-04-13
 
 ### Fixed
+
 - Replaced the old shell-spawning runtime with a scanner-safe JavaScript plugin runtime for local and API evaluation.
 - Added current OpenClaw compatibility metadata in `package.json` and aligned the hook return shape with the documented `before_tool_call` contract.
 - Kept `alwaysVerifyEachToolCall` as a deprecated manifest field so existing installs continue to load during upgrade.

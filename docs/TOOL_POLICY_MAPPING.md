@@ -1,8 +1,8 @@
 # Tool → policy pack mapping
 
-OpenClaw (or any caller) invokes the guardrail with a **tool name** and **context JSON**. The guardrail maps the tool name to a **policy pack** in `external/aport-policies/` and evaluates the request against that policy and the passport.
+The shell/API guardrail entrypoints invoke the guardrail with a **tool name** and **context JSON**. The guardrail maps the tool name to a **policy pack** in `external/aport-policies/` and evaluates the request against that policy and the passport.
 
-This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guardrail-bash.sh`. The table below is the single source of truth for documentation.
+This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guardrail-bash.sh`. The OpenClaw plugin has its own host-specific mapping in `extensions/openclaw-aport/tool-mapping.js`.
 
 ## Mapping table
 

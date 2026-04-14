@@ -13,6 +13,11 @@ import plugin, {
   verifyDecisionIntegrity,
 } from "../../extensions/openclaw-aport/index.js";
 import { evaluateLocalDecision } from "../../extensions/openclaw-aport/local-evaluator.js";
+import {
+  normalizeFileContext,
+  normalizeMcpContext,
+  normalizeMessageContext,
+} from "../../extensions/openclaw-aport/tool-mapping.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,13 +95,100 @@ describe("verifyDecisionIntegrity", () => {
 });
 
 describe("mapToolToPolicy", () => {
-  it("keeps the existing OpenClaw policy mappings", () => {
+  it("maps current OpenClaw message and MCP tools while dropping speculative mappings", () => {
     assert.strictEqual(mapToolToPolicy("exec.run"), "system.command.execute.v1");
     assert.strictEqual(mapToolToPolicy("git.create_pr"), "code.repository.merge.v1");
-    assert.strictEqual(mapToolToPolicy("message.send"), "messaging.message.send.v1");
+    assert.strictEqual(mapToolToPolicy("message", { action: "send" }), "messaging.message.send.v1");
+    assert.strictEqual(mapToolToPolicy("message", { action: "react" }), "messaging.message.send.v1");
+    assert.strictEqual(mapToolToPolicy("message", { action: "read" }), null);
     assert.strictEqual(mapToolToPolicy("multiedit"), "data.file.write.v1");
     assert.strictEqual(mapToolToPolicy("mcp__github__list"), "mcp.tool.execute.v1");
+    assert.strictEqual(mapToolToPolicy("vigil-harbor__memory_search"), "mcp.tool.execute.v1");
+    assert.strictEqual(mapToolToPolicy("sessions_spawn"), null);
+    assert.strictEqual(mapToolToPolicy("sessions_send"), null);
+    assert.strictEqual(mapToolToPolicy("tool.register"), null);
+    assert.strictEqual(mapToolToPolicy("refund"), null);
+    assert.strictEqual(mapToolToPolicy("export"), null);
     assert.strictEqual(mapToolToPolicy("unknown.tool"), null);
+  });
+});
+
+describe("normalizeFileContext", () => {
+  it("maps OpenClaw path-shaped file params to OAP file_path", () => {
+    assert.deepStrictEqual(normalizeFileContext({ path: "README.md", content: "hi" }), {
+      path: "README.md",
+      file_path: "README.md",
+      content: "hi",
+    });
+    assert.deepStrictEqual(normalizeFileContext({ file_path: "README.md", content: "hi" }), {
+      file_path: "README.md",
+      content: "hi",
+    });
+  });
+});
+
+describe("normalizeMessageContext", () => {
+  it("maps current OpenClaw message params to APort messaging context", () => {
+    assert.deepStrictEqual(
+      normalizeMessageContext({
+        action: "sendAttachment",
+        target: "telegram:group:123",
+        caption: "Invoice attached",
+        filename: "invoice.pdf",
+        threadId: "42",
+        replyTo: "99",
+      }),
+      {
+        action: "sendAttachment",
+        target: "telegram:group:123",
+        caption: "Invoice attached",
+        filename: "invoice.pdf",
+        threadId: "42",
+        replyTo: "99",
+        message_type: "file",
+        channel_id: "telegram:group:123",
+        message: "Invoice attached",
+        thread_id: "42",
+        reply_to: "99",
+        attachments: [{ filename: "invoice.pdf" }],
+      },
+    );
+    assert.deepStrictEqual(
+      normalizeMessageContext({ action: "react", target: "whatsapp:chat:1", emoji: "👍" }),
+      {
+        action: "react",
+        target: "whatsapp:chat:1",
+        emoji: "👍",
+        message_type: "reaction",
+        channel_id: "whatsapp:chat:1",
+        message: "👍",
+      },
+    );
+  });
+});
+
+describe("normalizeMcpContext", () => {
+  it("derives MCP policy context from provider-safe OpenClaw tool names", () => {
+    assert.deepStrictEqual(
+      normalizeMcpContext("vigil-harbor__memory_search", { query: "release notes" }),
+      {
+        query: "release notes",
+        server: "mcp://vigil-harbor",
+        tool: "memory_search",
+        parameters: { query: "release notes" },
+      },
+    );
+    assert.deepStrictEqual(
+      normalizeMcpContext("mcp__github__pull_requests-create", {
+        input: { owner: "aporthq", repo: "aport-agent-guardrails" },
+      }),
+      {
+        input: { owner: "aporthq", repo: "aport-agent-guardrails" },
+        server: "mcp://github",
+        tool: "pull_requests-create",
+        parameters: { owner: "aporthq", repo: "aport-agent-guardrails" },
+      },
+    );
   });
 });
 
@@ -138,6 +230,42 @@ describe("plugin hook contract", () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(denyResult, "reasons"));
 
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("normalizes write tool params before API verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let seenBody = null;
+    globalThis.fetch = async (_url, opts) => {
+      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      return {
+        ok: true,
+        async json() {
+          return {
+            decision: {
+              allow: true,
+              decision_id: "dec-1",
+              reasons: [{ code: "oap.allowed", message: "ok" }],
+              content_hash: `sha256:${createHash("sha256").update(canonicalize({
+                allow: true,
+                decision_id: "dec-1",
+                reasons: [{ code: "oap.allowed", message: "ok" }],
+              }), "utf8").digest("hex")}`,
+            },
+          };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({ mode: "api", agentId: "ap_test" });
+      const result = await beforeToolCall({ toolName: "write", params: { path: "README.md", content: "hi" } });
+      assert.deepStrictEqual(result, {});
+      assert.ok(seenBody);
+      assert.strictEqual(seenBody.context.file_path, "README.md");
+      assert.strictEqual(seenBody.context.path, "README.md");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

@@ -14,7 +14,15 @@ export async function verifyViaApi({ apiUrl, apiKey, policyName, context, passpo
   });
 
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+    let details = "";
+    try {
+      const text = await response.text();
+      if (text) details = text;
+    } catch {
+      details = "";
+    }
+    const suffix = details ? ` - ${details}` : "";
+    throw new Error(`API request failed: ${response.status} ${response.statusText}${suffix}`);
   }
 
   const data = await response.json();

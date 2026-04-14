@@ -30,6 +30,48 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APORT_PLUGIN_PATH="$REPO_ROOT/extensions/openclaw-aport"
 DEFAULT_CONFIG="${OPENCLAW_HOME:-$HOME/.openclaw}"
 
+read_local_plugin_version() {
+    if ! command -v node >/dev/null 2>&1; then
+        return 0
+    fi
+    local package_json="$APORT_PLUGIN_PATH/package.json"
+    if [ ! -f "$package_json" ]; then
+        return 0
+    fi
+    node -e '
+const fs = require("node:fs");
+try {
+  const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  if (pkg && typeof pkg.version === "string") process.stdout.write(pkg.version);
+} catch {}
+' "$package_json"
+}
+
+read_installed_plugin_version() {
+    if ! command -v openclaw >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+        return 0
+    fi
+    openclaw plugins list --json 2>/dev/null | node -e '
+let raw = "";
+process.stdin.on("data", (chunk) => {
+  raw += chunk;
+});
+process.stdin.on("end", () => {
+  const jsonStart = raw.indexOf("{");
+  if (jsonStart < 0) return;
+  try {
+    const data = JSON.parse(raw.slice(jsonStart));
+    const plugin = Array.isArray(data.plugins)
+      ? data.plugins.find((entry) => entry && entry.id === "openclaw-aport")
+      : null;
+    if (plugin && typeof plugin.version === "string") {
+      process.stdout.write(plugin.version);
+    }
+  } catch {}
+});
+'
+}
+
 # Parse command line arguments
 HOSTED_AGENT_ID=""
 if [ -n "$1" ]; then
@@ -210,19 +252,29 @@ if true; then
             echo "  Skipping plugin installation."
         fi
     else
+        LOCAL_PLUGIN_VERSION="$(read_local_plugin_version)"
+        INSTALLED_PLUGIN_VERSION="$(read_installed_plugin_version)"
         echo ""
-        echo "  Installing plugin from: $APORT_PLUGIN_PATH"
-        echo "  (Using -l to link local directory; OpenClaw accepts only registry or --link for install.)"
-        if openclaw plugins install -l "$APORT_PLUGIN_PATH" 2>&1; then
-            echo "  ✅ Plugin installed successfully"
+        if [ -n "$LOCAL_PLUGIN_VERSION" ] && [ "$LOCAL_PLUGIN_VERSION" = "$INSTALLED_PLUGIN_VERSION" ]; then
+            echo "  ✅ Plugin version $LOCAL_PLUGIN_VERSION already installed; skipping reinstall."
             PLUGIN_INSTALLED=true
         else
-            echo "  ❌ Plugin installation failed."
-            echo "     OpenClaw did not accept the plugin bundle, so setup is stopping here"
-            echo "     instead of writing plugin config that points at a broken install."
-            echo "     Retry after fixing the bundle or install it manually:"
-            echo "     openclaw plugins install -l $APORT_PLUGIN_PATH"
-            exit 1
+            if [ -n "$INSTALLED_PLUGIN_VERSION" ]; then
+                echo "  Existing openclaw-aport version: $INSTALLED_PLUGIN_VERSION"
+            fi
+            echo "  Installing plugin from: $APORT_PLUGIN_PATH"
+            echo "  (Using -l to link local directory; OpenClaw accepts only registry or --link for install.)"
+            if openclaw plugins install -l "$APORT_PLUGIN_PATH" 2>&1; then
+                echo "  ✅ Plugin installed successfully"
+                PLUGIN_INSTALLED=true
+            else
+                echo "  ❌ Plugin installation failed."
+                echo "     OpenClaw did not accept the plugin bundle, so setup is stopping here"
+                echo "     instead of writing plugin config that points at a broken install."
+                echo "     Retry after fixing the bundle or install it manually:"
+                echo "     openclaw plugins install -l $APORT_PLUGIN_PATH"
+                exit 1
+            fi
         fi
         echo ""
 
@@ -590,19 +642,18 @@ echo "   OpenClaw (or your code) calls the guardrail with a tool name and contex
 echo "   The guardrail maps that to a policy pack in external/aport-policies:"
 echo
 cat << 'TABLE'
-   Tool name (examples)              → Policy pack
-   ------------------------------------------------
-   git.create_pr, git.merge, git.*   → code.repository.merge.v1
-   exec.run, system.command.*       → system.command.execute.v1
-   message.send, messaging.*        → messaging.message.send.v1
-   mcp.tool.*, mcp.*                 → mcp.tool.execute.v1
-   agent.session.*, session.*       → agent.session.create.v1
-   agent.tool.*, tool.register      → agent.tool.register.v1
-   payment.refund, finance.*        → finance.payment.refund.v1
-   payment.charge                    → finance.payment.charge.v1
-   database.write, data.export       → data.export.create.v1
+	   Tool name (examples)              → Policy pack
+	   ------------------------------------------------
+	   git.create_pr, git.merge, git.*   → code.repository.merge.v1
+	   exec.run, system.command.*        → system.command.execute.v1
+	   message + send/reply/broadcast    → messaging.message.send.v1
+	   message + sendAttachment/react    → messaging.message.send.v1
+	   serverName__toolName, mcp__*      → mcp.tool.execute.v1
+	   read, glob, grep                  → data.file.read.v1
+	   write, edit, multiedit            → data.file.write.v1
 TABLE
-echo "   Full list: docs/TOOL_POLICY_MAPPING.md"
+echo "   Plugin mapping source: extensions/openclaw-aport/tool-mapping.js"
+echo "   Unmapped tools are allowed by default; set allowUnmappedTools: false for strict mode."
 echo
 
 # 5. Enforcement summary
