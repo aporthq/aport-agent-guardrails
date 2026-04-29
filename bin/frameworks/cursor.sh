@@ -12,21 +12,43 @@ source "$LIB/passport.sh"
 source "$LIB/config.sh"
 # shellcheck source=../lib/framework-setup.sh
 source "$LIB/framework-setup.sh"
+# shellcheck source=../lib/guardrail-mode.sh
+source "$LIB/guardrail-mode.sh"
 
 run_setup() {
+    parse_guardrail_mode_args "$@"
+
     log_info "Setting up APort guardrails for Cursor..."
     # Passport and data live under Cursor's config dir (~/.cursor/aport/ by default).
     config_dir="$(ensure_aport_dir_secure cursor)"
 
     export APORT_FRAMEWORK=cursor
 
-    # Check AGENTS.md for enforcement config — skip wizard if already configured
-    # shellcheck source=../lib/agentsmd.sh
-    source "$LIB/agentsmd.sh"
-    setup_from_agentsmd_or_wizard "$@"
+    local hosted_agent_id=""
+    if [[ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
+        hosted_agent_id="$APORT_HOSTED_AGENT_ID_CLI"
+        export APORT_AGENT_ID="$hosted_agent_id"
+        log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
+    else
+        # Check AGENTS.md for enforcement config — skip wizard if already configured
+        # shellcheck source=../lib/agentsmd.sh
+        source "$LIB/agentsmd.sh"
+        setup_from_agentsmd_or_wizard "${APORT_FRAMEWORK_ARGS[@]}"
+    fi
 
     # Harden permissions on passport (contains policy/capabilities)
     [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
+
+    if [[ -z "$hosted_agent_id" && -n "${APORT_AGENT_ID:-}" ]]; then
+        hosted_agent_id="$APORT_AGENT_ID"
+    fi
+
+    select_guardrail_mode "cursor" "$hosted_agent_id"
+    select_guardrail_api_url "$APORT_SELECTED_GUARDRAIL_MODE"
+    if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
+        export APORT_API_URL="${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
+    fi
+    MODE_FILE="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id")"
 
     # Resolve absolute path to hook script (works from repo or npx package)
     HOOK_SCRIPT="$(resolve_hook_script_path "${APORT_CURSOR_HOOK_SCRIPT:-}" "aport-cursor-hook.sh" "$LIB")"
@@ -72,8 +94,13 @@ run_setup() {
     echo "  ────────────────────"
     echo "  1. Hooks config written to: $CURSOR_HOOKS_FILE"
     echo "  2. Hook script: $HOOK_SCRIPT"
-    echo "  3. Restart Cursor (or reload window) so hooks are picked up."
-    echo "  4. Shell commands and tool use will be checked by APort policy (exit 2 = block)."
+    echo "  3. Guardrail mode: $APORT_SELECTED_GUARDRAIL_MODE"
+    if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
+        echo "     API URL: ${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
+    fi
+    echo "  4. Mode config: $MODE_FILE"
+    echo "  5. Restart Cursor (or reload window) so hooks are picked up."
+    echo "  6. Shell commands and tool use will be checked by APort policy (exit 2 = block)."
     echo ""
     echo "  Same script works for VS Code + Copilot. For Claude Code use the dedicated integration: docs/frameworks/claude-code.md"
     echo ""

@@ -54,7 +54,7 @@ PASSPORT_PATH="$CLAUDE_DIR/aport/passport.json"
 mkdir -p "$(dirname "$PASSPORT_PATH")"
 cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$PASSPORT_PATH" 2> /dev/null || true
 
-"$DISPATCHER" --framework=claude-code --output "$PASSPORT_PATH" --non-interactive 2>&1 | tee "$TEST_DIR/claude-code-setup.log" || true
+"$DISPATCHER" --framework=claude-code --output "$PASSPORT_PATH" --non-interactive --mode=api --api-url="https://api.aport.io" 2>&1 | tee "$TEST_DIR/claude-code-setup.log" || true
 
 if [[ ! -f "$CLAUDE_DIR/settings.json" ]]; then
     echo "FAIL: expected settings.json at $CLAUDE_DIR/settings.json" >&2
@@ -97,6 +97,23 @@ if command -v jq &> /dev/null; then
     fi
     echo "  ✅ custom Claude hooks preserved"
 fi
+
+MODE_FILE="$CLAUDE_DIR/aport/guardrail-mode.env"
+if [[ ! -f "$MODE_FILE" ]]; then
+    echo "FAIL: expected mode file at $MODE_FILE" >&2
+    exit 1
+fi
+grep -q '^APORT_GUARDRAIL_MODE=api$' "$MODE_FILE" || {
+    echo "FAIL: expected api mode in $MODE_FILE" >&2
+    cat "$MODE_FILE" >&2
+    exit 1
+}
+grep -q '^APORT_API_URL=https://api.aport.io$' "$MODE_FILE" || {
+    echo "FAIL: expected API URL in $MODE_FILE" >&2
+    cat "$MODE_FILE" >&2
+    exit 1
+}
+echo "  ✅ guardrail mode config saved (api)"
 
 echo ""
 echo "  Claude Code setup integration test passed."
