@@ -8,11 +8,21 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-bash.sh"
 
 # Path resolver: probes ~/.claude, ~/.cursor, ~/.openclaw, etc.
 # shellcheck source=bin/aport-resolve-paths.sh
 . "$ROOT_DIR/bin/aport-resolve-paths.sh"
+# shellcheck source=bin/lib/guardrail-mode.sh
+. "$ROOT_DIR/bin/lib/guardrail-mode.sh"
+load_guardrail_mode_for_hooks "${OPENCLAW_CONFIG_DIR:-$HOME/.claude}"
+
+GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-bash.sh"
+if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
+    GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-api.sh"
+    if [ -n "${APORT_API_URL:-}" ]; then
+        export APORT_API_URL
+    fi
+fi
 
 # Read stdin
 INPUT=""

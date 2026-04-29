@@ -1,26 +1,24 @@
 #!/bin/bash
-# Integration test: run agent-guardrails --framework=langchain and assert config dir + config.yaml exist.
-# Uses APORT_LANGCHAIN_CONFIG_DIR so we don't touch ~/.aport. Pipes newlines for wizard prompts.
-# Usage: ./setup.sh
+# Integration test: run agent-guardrails --framework=deerflow and assert config/mode file exists.
 
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 DISPATCHER="$REPO_ROOT/bin/agent-guardrails"
 TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2> /dev/null || echo "$REPO_ROOT/tests/output")}"
-CONFIG_DIR="$TEST_DIR/.aport/langchain"
+CONFIG_DIR="$TEST_DIR/.aport/deerflow"
 rm -rf "$CONFIG_DIR"
 mkdir -p "$(dirname "$CONFIG_DIR")"
 
 echo ""
-echo "  Integration — LangChain setup (agent-guardrails --framework=langchain)"
+echo "  Integration — DeerFlow setup (agent-guardrails --framework=deerflow)"
 echo "  Config dir: $CONFIG_DIR"
 echo ""
 
-export APORT_LANGCHAIN_CONFIG_DIR="$CONFIG_DIR"
+export APORT_DEERFLOW_CONFIG_DIR="$CONFIG_DIR"
 export APORT_NONINTERACTIVE="${APORT_NONINTERACTIVE:-1}"
 export APORT_SKIP_ADAPTER_CHECK=1
-"$DISPATCHER" --framework=langchain --mode=api --api-url="https://api.aport.io" 2>&1 | tee "$TEST_DIR/langchain-setup.log" || true
+"$DISPATCHER" --framework=deerflow --mode=api --api-url="https://api.aport.io" 2>&1 | tee "$TEST_DIR/deerflow-setup.log" || true
 
 if [[ ! -d "$CONFIG_DIR" ]]; then
     echo "FAIL: expected config dir $CONFIG_DIR" >&2
@@ -58,5 +56,5 @@ grep -q '^APORT_API_URL=https://api.aport.io$' "$MODE_FILE" || {
 echo "  ✅ guardrail mode config saved (api)"
 
 echo ""
-echo "  LangChain setup integration test passed."
+echo "  DeerFlow setup integration test passed."
 echo ""

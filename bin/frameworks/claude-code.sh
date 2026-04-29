@@ -12,20 +12,42 @@ source "$LIB/passport.sh"
 source "$LIB/config.sh"
 # shellcheck source=../lib/framework-setup.sh
 source "$LIB/framework-setup.sh"
+# shellcheck source=../lib/guardrail-mode.sh
+source "$LIB/guardrail-mode.sh"
 
 run_setup() {
+    parse_guardrail_mode_args "$@"
+
     log_info "Setting up APort guardrails for Claude Code..."
     config_dir="$(ensure_aport_dir_secure claude-code)"
 
     export APORT_FRAMEWORK=claude-code
 
-    # Check AGENTS.md for enforcement config — skip wizard if already configured
-    # shellcheck source=../lib/agentsmd.sh
-    source "$LIB/agentsmd.sh"
-    setup_from_agentsmd_or_wizard "$@"
+    local hosted_agent_id=""
+    if [[ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
+        hosted_agent_id="$APORT_HOSTED_AGENT_ID_CLI"
+        export APORT_AGENT_ID="$hosted_agent_id"
+        log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
+    else
+        # Check AGENTS.md for enforcement config — skip wizard if already configured
+        # shellcheck source=../lib/agentsmd.sh
+        source "$LIB/agentsmd.sh"
+        setup_from_agentsmd_or_wizard "${APORT_FRAMEWORK_ARGS[@]}"
+    fi
 
     # Harden permissions on passport (contains policy/capabilities)
     [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
+
+    if [[ -z "$hosted_agent_id" && -n "${APORT_AGENT_ID:-}" ]]; then
+        hosted_agent_id="$APORT_AGENT_ID"
+    fi
+
+    select_guardrail_mode "claude-code" "$hosted_agent_id"
+    select_guardrail_api_url "$APORT_SELECTED_GUARDRAIL_MODE"
+    if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
+        export APORT_API_URL="${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
+    fi
+    MODE_FILE="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id")"
 
     # Resolve absolute path to hook script (works from repo or npx package)
     HOOK_SCRIPT="$(resolve_hook_script_path "${APORT_CLAUDE_CODE_HOOK_SCRIPT:-}" "aport-claude-code-hook.sh" "$LIB")"
@@ -48,8 +70,13 @@ run_setup() {
     echo "  ─────────────────────────"
     echo "  1. Settings written to: $SETTINGS_FILE"
     echo "  2. Hook script: $HOOK_SCRIPT"
-    echo "  3. Restart Claude Code so the PreToolUse hook is picked up."
-    echo "  4. Tool use will be checked by APort policy (exit 2 = block)."
+    echo "  3. Guardrail mode: $APORT_SELECTED_GUARDRAIL_MODE"
+    if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
+        echo "     API URL: ${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
+    fi
+    echo "  4. Mode config: $MODE_FILE"
+    echo "  5. Restart Claude Code so the PreToolUse hook is picked up."
+    echo "  6. Tool use will be checked by APort policy (exit 2 = block)."
     echo ""
     echo "  Audit log: $config_dir/aport/audit.log"
     echo ""

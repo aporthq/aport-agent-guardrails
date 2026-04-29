@@ -37,6 +37,9 @@ aport setup --framework deerflow
 
 ```bash
 npx @aporthq/aport-agent-guardrails deerflow
+# Optional mode flags:
+#   --mode=api --api-url=https://api.aport.io
+#   --mode=local
 ```
 
 **Hosted passport (production)**

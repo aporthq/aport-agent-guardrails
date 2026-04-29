@@ -22,6 +22,9 @@ n8n support is **coming soon**; the custom node and npm package are not yet rele
 
 ```bash
 npx @aporthq/aport-agent-guardrails n8n
+# Optional mode flags:
+#   --mode=api --api-url=https://api.aport.io
+#   --mode=local
 # Runs passport wizard and writes config only. Custom node is NOT yet available.
 # When the node is released, it will install to ~/.n8n/custom/ and you will restart n8n.
 ```
