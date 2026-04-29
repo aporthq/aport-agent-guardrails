@@ -100,6 +100,21 @@ run_hook "Copilot-style: allow (npm install)" \
 run_hook "Empty stdin: allow (fail-open)" \
     '' 0 '"allowed":true'
 
+# --- mode selection: local vs api ---
+MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+EOF
+run_hook "Mode=api with unreachable API: deny" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 2 '"permission":"deny"'
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+run_hook "Mode=local after switch: allow" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
+
 echo ""
 echo "  All Cursor hook unit tests passed."
 echo ""
