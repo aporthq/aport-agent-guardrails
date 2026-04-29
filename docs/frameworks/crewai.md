@@ -16,12 +16,18 @@ Bootstrap config, passport, and local runtime with the Python-native CLI:
 
 ```bash
 uvx --from aport-agent-guardrails aport setup --framework=crewai
+# Optional mode flags:
+#   --mode=api --api-url=https://api.aport.io
+#   --mode=local
 ```
 
 Or use the Node bootstrap if you prefer:
 
 ```bash
 npx -y @aporthq/aport-agent-guardrails crewai
+# Optional mode flags:
+#   --mode=api --api-url=https://api.aport.io
+#   --mode=local
 ```
 
 For CI or other non-interactive environments with the Python-native CLI:

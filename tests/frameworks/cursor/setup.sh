@@ -34,11 +34,12 @@ echo "  Hooks dir: $CURSOR_DIR"
 echo ""
 
 export CURSOR_HOOKS_DIR="$CURSOR_DIR"
+export APORT_CURSOR_CONFIG_DIR="$CURSOR_DIR"
 export APORT_NONINTERACTIVE="${APORT_NONINTERACTIVE:-1}"
 # Pass --output and --non-interactive so wizard writes to test dir and does not abort
 PASSPORT_PATH="$TEST_DIR/aport/passport.json"
 mkdir -p "$(dirname "$PASSPORT_PATH")"
-"$DISPATCHER" --framework=cursor --output "$PASSPORT_PATH" --non-interactive 2>&1 | tee "$TEST_DIR/cursor-setup.log" || true
+"$DISPATCHER" --framework=cursor --output "$PASSPORT_PATH" --non-interactive --mode=api --api-url="https://api.aport.io" 2>&1 | tee "$TEST_DIR/cursor-setup.log" || true
 
 if [[ ! -f "$CURSOR_DIR/hooks.json" ]]; then
     echo "FAIL: expected hooks.json at $CURSOR_DIR/hooks.json" >&2
@@ -80,6 +81,23 @@ if command -v jq &> /dev/null; then
     fi
     echo "  ✅ custom hooks preserved"
 fi
+
+MODE_FILE="$CURSOR_DIR/aport/guardrail-mode.env"
+if [[ ! -f "$MODE_FILE" ]]; then
+    echo "FAIL: expected mode file at $MODE_FILE" >&2
+    exit 1
+fi
+grep -q '^APORT_GUARDRAIL_MODE=api$' "$MODE_FILE" || {
+    echo "FAIL: expected api mode in $MODE_FILE" >&2
+    cat "$MODE_FILE" >&2
+    exit 1
+}
+grep -q '^APORT_API_URL=https://api.aport.io$' "$MODE_FILE" || {
+    echo "FAIL: expected API URL in $MODE_FILE" >&2
+    cat "$MODE_FILE" >&2
+    exit 1
+}
+echo "  ✅ guardrail mode config saved (api)"
 
 echo ""
 echo "  Cursor setup integration test passed."

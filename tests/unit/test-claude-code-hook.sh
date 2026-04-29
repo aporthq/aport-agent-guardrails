@@ -117,6 +117,40 @@ EXIT7=$?
 }
 echo "  ✅ Shell alias: exit 0"
 
+# 8. mode selection (api -> deny on unreachable API; local -> allow)
+MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+EOF
+OUT8="$TEST_DIR/claude-api-mode-unreachable.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT8" 2> /dev/null
+EXIT8=$?
+set -e
+[[ "$EXIT8" -eq 2 ]] || {
+    echo "FAIL: expected exit 2 in api mode with unreachable API, got $EXIT8" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT8" || {
+    echo "FAIL: expected deny payload in api mode failure path" >&2
+    cat "$OUT8" >&2
+    exit 1
+}
+echo "  ✅ API mode with unreachable endpoint denies"
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+OUT9="$TEST_DIR/claude-local-mode-after-api.txt"
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT9" 2> /dev/null
+EXIT9=$?
+[[ "$EXIT9" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 after switching back to local mode, got $EXIT9" >&2
+    exit 1
+}
+echo "  ✅ local mode after switch allows"
+
 echo ""
 echo "  All Claude Code hook unit tests passed."
 echo ""

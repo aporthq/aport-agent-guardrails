@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.24
+
+### Patch Changes
+
+- Release 1.0.24: installer guardrail mode parity, packaged CLI runtime fix (`tool-pack-mapping.json`), and README clarification for Python vs Node setup flags.
+
 ## 1.0.23
 
 ## 1.0.22

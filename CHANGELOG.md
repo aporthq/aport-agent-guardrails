@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.24] - 2026-04-29
+
+### Added
+- **Guardrail mode parity (CLI installers):** All framework installers (`generic.sh`, Cursor, Claude Code hooks) honor `--mode=api|local`, optional `--api-url` (default `https://api.aport.io`), and hosted `ap_<hex>` passport IDs (`parse_guardrail_mode_args` / `guardrail-mode.sh`). Mode is persisted to `<framework-config>/aport/guardrail-mode.env` so hooks and runtime evaluation stay aligned across sessions.
+
+### Fixed
+- **CLI npm tarball:** The published `@aporthq/aport-agent-guardrails` package now includes `python/aport_guardrails/core/tool-pack-mapping.json` in its `files` list so packaged `npx`/npm installs succeed when installers copy the runtime manifest into the user config (`install_runtime_tree` previously failed with “Runtime source missing” when that file was omitted).
+
+### Changed
+- **Docs:** README clarifies that **Node** installers accept `--mode` / `--api-url` and hosted IDs; **`aport setup` (Python)** does not parse those flags yet—users should prefer the Node wizard for setup-time API/local selection or configure `config.yaml` per framework docs.
+
 ## [1.0.23] - 2026-04-13
 
 ### Fixed

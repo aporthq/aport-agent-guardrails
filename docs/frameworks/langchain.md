@@ -22,6 +22,9 @@ You typically use **both**: run the CLI once to create passport and config, then
 
 ```bash
 npx @aporthq/aport-agent-guardrails langchain   # wizard + config (optional)
+# Optional mode flags:
+#   --mode=api --api-url=https://api.aport.io
+#   --mode=local
 pip install aport-agent-guardrails-langchain
 aport-langchain setup
 ```
