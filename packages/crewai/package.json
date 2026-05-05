@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-crewai",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "APort guardrails for CrewAI — task decorator / middleware",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,7 +21,7 @@
   "author": "APort Technologies Inc.",
   "license": "Apache-2.0",
   "dependencies": {
-    "@aporthq/aport-agent-guardrails-core": ">=1.0.25"
+    "@aporthq/aport-agent-guardrails-core": ">=1.0.26"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

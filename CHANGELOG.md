@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.26] - 2026-05-05
+
+### Added
+- **Framework reset command:** Added `agent-guardrails reset <framework>` with `bin/aport-reset-framework.sh` to remove APort-managed hook/config artifacts safely while preserving user custom hooks where applicable.
+- **Tests:** Added `tests/unit/test-framework-reset.sh` coverage for framework reset behavior and dispatcher reset routing.
+
+### Changed
+- **CI hardening:** Workflow install steps now use safer/reliable defaults (`apt` retries+timeouts, `--no-install-recommends`, pip non-interactive flags).
+- **Release/dependency verification:** Added npm signature verification (`npm audit signatures`) and dependency consistency checks (`pip check`) in CI/release pipelines.
+
 ## [1.0.25] - 2026-05-05
 
 ### Fixed

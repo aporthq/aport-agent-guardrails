@@ -55,6 +55,7 @@ npx @aporthq/aport-agent-guardrails
 - Choose your framework: `openclaw`, `cursor`, `claude-code`, `langchain`, `crewai`, `deerflow`, `n8n`
 - OpenClaw direct: `npx @aporthq/aport-agent-guardrails openclaw`
 - Hosted passport: `npx @aporthq/aport-agent-guardrails openclaw <agent_id>`
+- Reset a framework to a clean APort state: `npx @aporthq/aport-agent-guardrails reset claude-code --yes`
 
 ### Why Developers and teams trust APort
 
@@ -129,6 +130,22 @@ npx @aporthq/aport-agent-guardrails
 #   --mode=local
 ```
 
+**Reset / uninstall APort-owned wiring**
+
+Use the same dispatcher for cleanup:
+
+```bash
+npx @aporthq/aport-agent-guardrails reset claude-code --yes
+# or
+npx @aporthq/aport-agent-guardrails claude-code reset --yes
+```
+
+Supported reset targets match the CLI-supported frameworks:
+`openclaw`, `cursor`, `claude-code`, `langchain`, `crewai`, `deerflow`, `n8n`.
+
+Reset removes APort-owned config and integration wiring for the selected framework.
+When possible, unrelated user hooks are preserved.
+
 **Python (LangChain, CrewAI, or DeerFlow):** Use the Python CLI directly via `uvx` or an installed package:
 ```bash
 uvx --from aport-agent-guardrails aport setup --framework=langchain
@@ -183,7 +200,7 @@ Your framework doc (Cursor, OpenClaw, LangChain, CrewAI) describes where the con
 | **Bypass risk** | None | High |
 | **Recommended** | **Yes** | Only if plugin unavailable |
 
-**Plugin (recommended):** Platform runs the guardrail before every tool; the model cannot skip it. This repo implements the **plugin (before_tool_call)** integration—Option 2 in the [APort × OpenClaw integration proposal](https://github.com/aporthq/agent-passport/tree/main/_plan/execution/openclaw).  
+**Plugin (recommended):** Platform runs the guardrail before every tool; the model cannot skip it. This repo implements the public **plugin (before_tool_call)** integration for OpenClaw.
 **AGENTS.md:** Agent is *instructed* to call the guardrail; best-effort only.
 
 ---
@@ -405,6 +422,7 @@ See [Verification methods](docs/VERIFICATION_METHODS.md) for a detailed comparis
 | Command | Purpose |
 |--------|---------|
 | `agent-guardrails` | Main entry — prompt for framework or pass one: `agent-guardrails openclaw \| cursor \| claude-code \| langchain \| crewai \| deerflow \| n8n`. Args after the framework are passed through (e.g. `agent-guardrails openclaw <agent_id>`). |
+| `agent-guardrails reset <framework> [--yes]` | Remove APort-owned config and hook/plugin wiring for one framework. Positional form also works: `agent-guardrails <framework> reset --yes`. |
 | `aport` | OpenClaw one-command setup (passport + plugin + wrappers). Optional: `aport <agent_id>` for hosted passport. |
 | `aport-guardrail` | Run guardrail check from the CLI (e.g. `aport-guardrail system.command.execute '{"command":"ls"}'`). Uses passport from your framework config dir. |
 
@@ -517,7 +535,7 @@ Contributions welcome: policy packs, framework adapters, docs. See [CONTRIBUTING
 
 Apache 2.0 — see [LICENSE](LICENSE).
 
-**Open-core:** Local evaluation and CLI in this repo are open source (Apache 2.0). [api.aport.io](https://api.aport.io) is a separate product for cloud features (signed receipts, global kill switch, team sync). See [APort × OpenClaw proposal](https://github.com/aporthq/agent-passport/tree/main/_plan/execution/openclaw) for free vs. paid tiers.
+**Open-core:** Local evaluation and CLI in this repo are open source (Apache 2.0). [api.aport.io](https://api.aport.io) is a separate product for cloud features such as signed receipts, global kill switch, and team sync.
 
 ---
 
@@ -527,5 +545,3 @@ Apache 2.0 — see [LICENSE](LICENSE).
 - [GitHub Issues](https://github.com/aporthq/aport-agent-guardrails/issues) · [Discussions](https://github.com/aporthq/aport-agent-guardrails/discussions)
 
 ---
-
-<p align="center">Made with ❤️ by [Uchi](https://github.com/uchibeke/) </p>

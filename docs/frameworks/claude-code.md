@@ -24,6 +24,28 @@ npx @aporthq/aport-agent-guardrails --framework=claude-code
 
 This runs the **passport wizard** and writes **`~/.claude/settings.json`** with the APort hook registered for **all tools** via `"matcher": "*"`. Default passport path: **`~/.claude/aport/passport.json`**. Restart Claude Code after setup so the PreToolUse hook is picked up.
 
+If you already have a hosted passport and API key, the intended hosted install path is:
+
+```bash
+export APORT_API_KEY="apk_..."
+export APORT_AGENT_ID="ap_..."
+npx @aporthq/aport-agent-guardrails claude-code "ap_..." --non-interactive
+```
+
+That setup writes `~/.claude/aport/guardrail-mode.env`, and the Claude hook loads those values before every tool call. Hosted mode is fail-closed: if the API evaluator is unreachable, the tool call is denied rather than silently downgraded to local mode.
+
+## Reset / uninstall
+
+To remove APort-owned Claude hook wiring and local config:
+
+```bash
+npx @aporthq/aport-agent-guardrails reset claude-code --yes
+# or
+npx @aporthq/aport-agent-guardrails claude-code reset --yes
+```
+
+This removes `~/.claude/aport/` and strips APort hook entries from `~/.claude/settings.json` while preserving unrelated Claude hooks where possible.
+
 ### Marketplace install (Claude plugins)
 
 APort now includes a Claude plugin marketplace catalog at `.claude-plugin/marketplace.json`.

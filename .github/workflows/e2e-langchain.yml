@@ -23,7 +23,9 @@ jobs:
 
       - name: Install core and langchain adapter (editable)
         run: |
-          pip install -e python/aport_guardrails -e "python/langchain_adapter[dev]"
+          python -m pip install --upgrade pip
+          pip install --disable-pip-version-check --no-input -e python/aport_guardrails -e "python/langchain_adapter[dev]"
+          python -m pip check
 
       - name: aport-langchain --ci (setup)
         run: |
@@ -58,5 +60,6 @@ jobs:
       - name: Run pytest (core frameworks/langchain)
         run: |
           cd python/aport_guardrails
-          pip install pytest pytest-asyncio -q
+          pip install --disable-pip-version-check --no-input pytest pytest-asyncio -q
+          python -m pip check
           pytest tests/ -v --tb=short
