@@ -1,5 +1,12 @@
 # @aporthq/aport-agent-guardrails-langchain
 
+## 1.0.25
+
+### Patch Changes
+
+- Updated dependencies
+  - @aporthq/aport-agent-guardrails-core@1.0.25
+
 ## 1.0.24
 
 ### Patch Changes

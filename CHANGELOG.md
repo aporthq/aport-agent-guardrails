@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.25] - 2026-05-05
+
+### Fixed
+- **Hosted API mode in hooks:** `load_guardrail_mode_for_hooks` uses `set -a` / `set +a` while sourcing `guardrail-mode.env` so `APORT_GUARDRAIL_MODE`, `APORT_API_URL`, `APORT_AGENT_ID`, etc. are **exported** to child guardrail processes (hosted API verification).
+
+### Changed
+- **Release workflow:** npm and PyPI verification steps retry (4 attempts, 25s between tries) after publish so transient registry/CDN lag does not fail the job.
+
+### Added
+- **Tests:** Unit coverage ensuring guardrail-mode env values are exported after loading from disk.
+
 ## [1.0.24] - 2026-04-29
 
 ### Added
