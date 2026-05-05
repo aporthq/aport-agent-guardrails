@@ -1,7 +1,7 @@
 {
   "name": "aport-guardrails",
   "description": "APort Agent Guardrails — security policy enforcement for every tool call. Intercepts tool use, evaluates against your passport policy, and blocks unauthorized actions.",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "author": {
     "name": "APort Technologies Inc.",
     "email": "hello@aport.io",

@@ -23,8 +23,10 @@ jobs:
 
       - name: Install core and crewai adapter (editable)
         run: |
-          pip install -e python/aport_guardrails -e "python/crewai_adapter[dev]"
-          pip install "crewai>=0.80"
+          python -m pip install --upgrade pip
+          pip install --disable-pip-version-check --no-input -e python/aport_guardrails -e "python/crewai_adapter[dev]"
+          pip install --disable-pip-version-check --no-input "crewai>=0.80"
+          python -m pip check
 
       - name: aport-crewai --ci (setup)
         run: |

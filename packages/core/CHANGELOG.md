@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.26
+
+### Patch Changes
+
+- Release 1.0.26: add framework reset command, CI/install supply-chain hardening, and release dependency verification checks.
+
 ## 1.0.25
 
 ### Patch Changes

@@ -29,6 +29,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRAMEWORKS_DIR="$SCRIPT_DIR/frameworks"
 LIB_DIR="$SCRIPT_DIR/lib"
 SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code deerflow n8n)
+reset_requested=""
 
 framework_supported() {
   local candidate="${1:-}"
@@ -44,6 +45,7 @@ framework_supported() {
 # Parse --framework= and -f (skip detection when set)
 framework=""
 integration_mode=""
+noninteractive_requested=""
 REST=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -73,6 +75,10 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       ;;
+    --non-interactive|--noninteractive)
+      noninteractive_requested="1"
+      shift
+      ;;
     *)
       REST+=("$1")
       shift
@@ -80,7 +86,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -n "$noninteractive_requested" ]]; then
+  export APORT_NONINTERACTIVE=1
+fi
+
 # If no framework from args, check if first REST argument is a framework name
+if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]]; then
+  first_arg="${REST[0]}"
+  if [[ "$first_arg" == "reset" ]] && [[ ${#REST[@]} -gt 1 ]]; then
+    second_arg="${REST[1]}"
+    if framework_supported "$second_arg"; then
+      framework="$second_arg"
+      reset_requested="1"
+      REST=("${REST[@]:2}")
+    fi
+  fi
+fi
+
 if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]]; then
   first_arg="${REST[0]}"
   # Check if first arg looks like a framework name (lowercase alphanumeric + hyphen)
@@ -91,6 +113,11 @@ if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]]; then
       REST=("${REST[@]:1}")
     fi
   fi
+fi
+
+if [[ -n "$framework" ]] && [[ ${#REST[@]} -gt 0 ]] && [[ "${REST[0]}" == "reset" ]]; then
+  reset_requested="1"
+  REST=("${REST[@]:1}")
 fi
 
 # If still no framework from args, try APORT_FRAMEWORK (non-interactive) or detection
@@ -164,6 +191,15 @@ if ! framework_supported "$framework"; then
 fi
 
 echo "[aport] Selected framework: $framework" >&2
+
+if [[ -n "$reset_requested" ]]; then
+  reset_script="$SCRIPT_DIR/aport-reset-framework.sh"
+  if [[ ! -x "$reset_script" ]]; then
+    echo "[aport] ERROR: Reset helper not found: $reset_script" >&2
+    exit 1
+  fi
+  exec "$reset_script" "$framework" ${REST+"${REST[@]}"}
+fi
 
 if [[ -n "$integration_mode" ]]; then
   case "$integration_mode" in
