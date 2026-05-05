@@ -51,9 +51,9 @@ jobs:
 
       - name: Install shfmt
         run: |
-          curl -sSL "https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_amd64" -o /tmp/shfmt
-          chmod +x /tmp/shfmt
-          sudo mv /tmp/shfmt /usr/local/bin/shfmt
+          set -euo pipefail
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 update
+          sudo apt-get install -y --no-install-recommends shfmt
           shfmt --version
 
       - name: Check shell script formatting
