@@ -148,7 +148,9 @@ load_guardrail_mode_for_hooks() {
     local config_dir="$1"
     local mode_file="$config_dir/aport/guardrail-mode.env"
     if [[ -f "$mode_file" ]]; then
+        set -a
         # shellcheck disable=SC1090
         source "$mode_file"
+        set +a
     fi
 }
