@@ -3,7 +3,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_ROOT="${APORT_PRE_PUSH_TMP_ROOT:-/tmp/aport-prepush}"
+if [[ -n "${APORT_PRE_PUSH_TMP_ROOT:-}" ]]; then
+    TMP_ROOT="$APORT_PRE_PUSH_TMP_ROOT"
+    CLEANUP_TMP_ROOT=0
+else
+    TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/aport-prepush.XXXXXX")"
+    CLEANUP_TMP_ROOT=1
+fi
 TEST_HOME="${APORT_PRE_PUSH_HOME:-$TMP_ROOT/home/default}"
 CREWAI_VENV="$TMP_ROOT/venvs/crewai"
 LANGCHAIN_VENV="$TMP_ROOT/venvs/langchain"
@@ -11,6 +17,13 @@ CREWAI_HOME="$TMP_ROOT/homes/crewai"
 LANGCHAIN_HOME="$TMP_ROOT/homes/langchain"
 OPENCLAW_HOME="$TMP_ROOT/openclaw"
 DEFAULT_AGENT_ID="ap_8955f5450cd542fe8f67bbbf07c3e103"
+
+cleanup() {
+    if [[ "${CLEANUP_TMP_ROOT:-0}" = "1" ]]; then
+        rm -rf "$TMP_ROOT"
+    fi
+}
+trap cleanup EXIT
 
 log_step() {
     printf '\n[%s] %s\n' "pre-push" "$1"
@@ -89,7 +102,7 @@ run_openclaw_e2e() {
     run_cmd "E2E OpenClaw CLI setup" bash -lc "
     cd '$REPO_ROOT'
     OPENCLAW_HOME='$OPENCLAW_HOME' AGENT_ID='${APORT_TEST_REMOTE_AGENT_ID:-$DEFAULT_AGENT_ID}' \
-      printf '\n\n\n\n' | ./bin/agent-guardrails --framework=openclaw \"\${AGENT_ID}\" >/tmp/aport-prepush-openclaw.log 2>&1 || true
+      printf '\n\n\n\n' | ./bin/agent-guardrails --framework=openclaw \"\${AGENT_ID}\" >'$TMP_ROOT/openclaw-cli.log' 2>&1 || true
     test -f '$OPENCLAW_HOME/config.yaml'
     grep -q 'agentId:' '$OPENCLAW_HOME/config.yaml'
   "

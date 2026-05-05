@@ -16,8 +16,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq uuid-runtime
+          set -euo pipefail
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 update
+          sudo apt-get install -y --no-install-recommends jq uuid-runtime
       
       - name: Make scripts executable
         run: |
@@ -47,6 +48,9 @@ jobs:
 
       - name: Install Node dependencies
         run: npm ci
+
+      - name: Verify npm dependency signatures
+        run: npm audit signatures
 
       - name: Build and test Node packages
         run: |
