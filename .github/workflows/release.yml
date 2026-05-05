@@ -86,23 +86,52 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # npm registry CDN can briefly lag behind a successful publish; retry before failing CI.
       - name: Verify npm publication
         run: |
-          set -euo pipefail
+          set -uo pipefail
           VERSION="${{ steps.version.outputs.VERSION }}"
-          for pkg in \
-            @aporthq/aport-agent-guardrails \
-            @aporthq/aport-agent-guardrails-core \
-            @aporthq/aport-agent-guardrails-langchain \
-            @aporthq/aport-agent-guardrails-crewai \
-            @aporthq/aport-agent-guardrails-cursor \
-            @aporthq/aport-agent-guardrails-claude-code \
-            @aporthq/openclaw-aport \
-            @aporthq/agent-guardrails; do
-            echo "Verifying ${pkg}@${VERSION} on npm..."
-            npm view "${pkg}@${VERSION}" version --registry https://registry.npmjs.org/ >/dev/null
+          PACKAGES=(
+            "@aporthq/aport-agent-guardrails"
+            "@aporthq/aport-agent-guardrails-core"
+            "@aporthq/aport-agent-guardrails-langchain"
+            "@aporthq/aport-agent-guardrails-crewai"
+            "@aporthq/aport-agent-guardrails-cursor"
+            "@aporthq/aport-agent-guardrails-claude-code"
+            "@aporthq/openclaw-aport"
+            "@aporthq/agent-guardrails"
+          )
+          MAX_ATTEMPTS="4"
+          SLEEP_SECONDS="25"
+
+          verify_all() {
+            local failed=0
+            for pkg in "${PACKAGES[@]}"; do
+              echo "  Checking ${pkg}@${VERSION}"
+              if ! npm view "${pkg}@${VERSION}" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+                failed=1
+              fi
+            done
+            return "$failed"
+          }
+
+          for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
+            echo "npm verify (${attempt}/${MAX_ATTEMPTS})..."
+            set +e
+            verify_all
+            rc=$?
+            set -e
+            if [[ "$rc" -eq 0 ]]; then
+              echo "npm publication OK"
+              exit 0
+            fi
+            if [[ "$attempt" -lt "${MAX_ATTEMPTS}" ]]; then
+              echo "registry not consistent yet; waiting ${SLEEP_SECONDS}s..."
+              sleep "${SLEEP_SECONDS}"
+            fi
           done
-          echo "npm publication OK"
+          echo "::error::npm verification failed after ${MAX_ATTEMPTS} attempts (${SLEEP_SECONDS}s between retries)"
+          exit 1
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -156,25 +185,38 @@ jobs:
           python -m twine upload --skip-existing python/langchain_adapter/dist/*
           python -m twine upload --skip-existing python/crewai_adapter/dist/*
 
+      # Simple index can lag briefly after twine upload succeeds; retry before failing CI.
       - name: Verify PyPI publication
         run: |
+          set -uo pipefail
           export VERSION="${{ steps.version.outputs.VERSION }}"
-          for pkg in aport-agent-guardrails aport-agent-guardrails-langchain aport-agent-guardrails-crewai; do
-            echo "Verifying $pkg@$VERSION on PyPI..."
-            export PKG="$pkg"
-            python -c "
-          import urllib.request, json, sys, os
-          v = os.environ.get('VERSION', '')
-          p = os.environ.get('PKG', '')
-          req = urllib.request.Request(f'https://pypi.org/pypi/{p}/json')
-          with urllib.request.urlopen(req) as r:
-              data = json.loads(r.read().decode())
-          if v in data.get('releases', {}):
-              print(f'OK: {p}@{v} published')
-          else:
-              sys.exit(f'Version {v} not found for {p}')
-          "
+          MAX_ATTEMPTS="4"
+          SLEEP_SECONDS="25"
+
+          verify_py() {
+            local pkg
+            for pkg in aport-agent-guardrails aport-agent-guardrails-langchain aport-agent-guardrails-crewai; do
+              PKG="$pkg" VERSION="$VERSION" python -c "import json, os, urllib.request as u, sys; v=os.environ['VERSION']; p=os.environ['PKG']; d=json.loads(u.urlopen('https://pypi.org/pypi/'+p+'/json').read().decode()); sys.exit(0 if v in d.get('releases',{}) else 1)"
+            done
+          }
+
+          for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
+            echo "PyPI verify (${attempt}/${MAX_ATTEMPTS})..."
+            set +e
+            verify_py
+            rc=$?
+            set -e
+            if [[ "$rc" -eq 0 ]]; then
+              echo "PyPI publication OK"
+              exit 0
+            fi
+            if [[ "$attempt" -lt "${MAX_ATTEMPTS}" ]]; then
+              echo "index not listing version yet; waiting ${SLEEP_SECONDS}s..."
+              sleep "${SLEEP_SECONDS}"
+            fi
           done
+          echo "::error::PyPI verification failed after ${MAX_ATTEMPTS} attempts (${SLEEP_SECONDS}s between retries)"
+          exit 1
 
   create-release:
     needs: [publish-npm, publish-python]

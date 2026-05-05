@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.25
+
+### Patch Changes
+
+- Release 1.0.25: export guardrail-mode env for API child processes; release workflow verify retries.
+
 ## 1.0.24
 
 ### Patch Changes
