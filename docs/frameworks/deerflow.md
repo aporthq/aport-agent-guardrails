@@ -105,14 +105,18 @@ guardrails:
 
 ## Tool-to-policy mapping
 
-| DeerFlow tool | OAP policy pack |
-|---|---|
-| `bash`, `write_file`, `str_replace` | `system.command.execute.v1` |
-| `web_search`, `web_fetch`, `image_search` | `web.fetch.v1` |
-| `read_file`, `ls` | `data.file.read.v1` |
-| `present_file`, `view_image` | `data.file.read.v1` |
-| `ask_clarification`, `task` | `agent.session.create.v1` |
-| MCP tools (dynamic) | `mcp.tool.execute.v1` |
+| DeerFlow tool | OAP policy pack | Passport capability |
+|---|---|---|
+| `bash` | `system.command.execute.v1` | `system.command.execute` |
+| `write_file`, `str_replace` | `data.file.write.v1` | `data.file.write` |
+| `web_search`, `web_fetch`, `image_search` | `web.fetch.v1` | `web.fetch` |
+| `read_file`, `ls`, `present_file`, `view_image` | `data.file.read.v1` | `data.file.read` |
+| `git.create_pr`, `git.*` | `code.repository.merge.v1` | `repo.merge` / `repo.pr.create` |
+| `messaging.send`, `message.*` | `messaging.message.send.v1` | `messaging.message.send` |
+| `ask_clarification`, `task` | `agent.session.create.v1` | `agent.session.create` |
+| MCP tools (`mcp.*`, dynamic names) | `mcp.tool.execute.v1` | `mcp.tool.execute` |
+
+Mapping is implemented in `packages/core/src/core/tool-pack-mapping.json` (via `tool_to_pack_id()`). DeerFlow passes the raw tool name from each tool invocation.
 
 ## Evaluation modes
 

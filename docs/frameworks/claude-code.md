@@ -71,16 +71,20 @@ This command intentionally runs the same supported installer flow (`npx @aporthq
 
 | Claude Code tool   | APort policy              | Default   |
 |--------------------|---------------------------|----------|
-| Bash               | system.command.execute.v1 | Enforce  |
-| Read, Glob, LS, Grep, TodoRead | data.file.read.v1  | **Allow by default** (no evaluator call) |
-| Write, Edit, MultiEdit, TodoWrite | data.file.write.v1 | Enforce  |
+| Bash, PowerShell, Monitor | system.command.execute.v1 | Enforce  |
+| Read, ReadFile, SemanticSearch (with `file_path`) | data.file.read.v1 | **Enforce** (sensitive paths blocked; API/local) |
+| Glob, Grep, LSP, ListMcpResourcesTool, ReadMcpResourceTool, ToolSearch, WaitForMcpServers, TaskGet, TaskList, TodoRead | data.file.read.v1 | Allow without evaluator (no single path) |
+| Write, Edit, MultiEdit, NotebookEdit, TodoWrite, ShareOnboardingGuide | data.file.write.v1 | Enforce  |
 | WebSearch, WebFetch | web.fetch.v1             | Enforce  |
 | Browser            | web.browser.v1            | Enforce  |
-| Task               | agent.session.create.v1   | Enforce  |
+| Agent, Task, TaskCreate, TaskUpdate, TaskStop, Skill, EnterWorktree, ExitWorktree, SendMessage, TeamCreate, TeamDelete, RemoteTrigger | agent.session.create.v1 | Enforce  |
+| CronCreate, CronDelete | agent.session.create.v1 | Enforce  |
 | mcp__&lt;server&gt;__&lt;tool&gt; | mcp.tool.execute.v1 | Enforce  |
 | **Unknown tool**    | —                         | **Denied (fail-closed)** |
 
-Read-family tools (Read, Glob, LS, Grep, TodoRead) exit 0 immediately without calling the evaluator to save ~40ms per file read. The HN incident was about Bash escaping a sandbox — not reads.
+Permission-rule specifiers such as `Agent(Explore)` are stripped before mapping (the hook receives `Agent(Explore)` and normalizes to `agent`).
+
+Path-based **Read** tools call the guardrail with only `file_path` in context (not full file bodies). **Glob/Grep/LS** and similar tools still allow without an evaluator call when no single `file_path` is present.
 
 ---
 

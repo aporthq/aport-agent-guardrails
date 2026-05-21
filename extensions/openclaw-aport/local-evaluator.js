@@ -152,6 +152,19 @@ function allowByList(value, list, matcher) {
   return list.some((entry) => matcher(value, entry));
 }
 
+function isDefaultSensitiveReadPath(filePath) {
+  const value = String(filePath).toLowerCase();
+  return /(^|\/)\.env/.test(value) ||
+    /(^|\/)\.aws\//.test(value) ||
+    /(^|\/)\.ssh\//.test(value) ||
+    value.includes("credentials") ||
+    /(^|\/)id_(rsa|dsa|ecdsa|ed25519)/.test(value) ||
+    /\.(pem|key)$/.test(value) ||
+    value.includes("password") ||
+    /(^|\/)\.gnupg\//.test(value) ||
+    /(^|\/)\.kube\//.test(value);
+}
+
 function makeDeny(baseParams, code, message) {
   return buildDecision({ allow: false, code, message, ...baseParams });
 }
@@ -267,6 +280,10 @@ export function evaluateLocalDecision({ policyName, context, passportFile }) {
 
   if (policyName === "data.file.read.v1") {
     const filePath = String(context.file_path ?? context.path ?? "");
+    if (isDefaultSensitiveReadPath(filePath)) {
+      return makeDeny(params, "oap.blocked_pattern", "File path matches default sensitive read pattern");
+    }
+
     if (!allowByList(filePath, limits.allowed_paths, (value, pattern) => value.startsWith(pattern) || pattern === "*")) {
       return makeDeny(params, "oap.path_not_allowed", `File path '${filePath}' is not in allowed list`);
     }

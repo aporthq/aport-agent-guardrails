@@ -26,7 +26,7 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
         with:
-          scandir: './bin'
+          scandir: './bin ./enterprise-scripts ./scripts'
           severity: error
           additional_files: 'tests'
         env:
@@ -59,7 +59,7 @@ jobs:
       - name: Check shell script formatting
         run: |
           # Check formatting (reads config from .editorconfig)
-          find bin tests -name "*.sh" -type f -print0 | xargs -0 shfmt -d
+          find bin tests enterprise-scripts scripts -name "*.sh" -type f -print0 | xargs -0 shfmt -d
 
       - name: Comment on PR (if formatting issues found)
         if: failure() && github.event_name == 'pull_request'

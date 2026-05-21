@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.27
+
+### Patch Changes
+
+- Release 1.0.27: enforce path-based Read hooks in API/local mode, default sensitive file read blocking, cross-platform enterprise device install scripts, and OpenClaw/tool-mapping alignment.
+
 ## 1.0.26
 
 ### Patch Changes

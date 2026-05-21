@@ -1,5 +1,12 @@
 # @aporthq/aport-agent-guardrails-cursor
 
+## 1.0.27
+
+### Patch Changes
+
+- Updated dependencies
+  - @aporthq/aport-agent-guardrails-core@1.0.27
+
 ## 1.0.26
 
 ### Patch Changes
