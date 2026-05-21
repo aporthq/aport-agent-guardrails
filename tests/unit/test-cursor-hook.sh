@@ -10,10 +10,13 @@ source "$(dirname "$0")/../setup.sh"
 # Use test dir for config so guardrail finds fixture passport (must export for guardrail subprocess)
 mkdir -p "$TEST_DIR/aport"
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
 export OPENCLAW_CONFIG_DIR="$TEST_DIR"
 export OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json"
-export OPENCLAW_DECISION_FILE="$TEST_DIR/decision.json"
-export OPENCLAW_AUDIT_LOG="$TEST_DIR/audit.log"
+export OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json"
+export OPENCLAW_AUDIT_LOG="$TEST_DIR/aport/audit.log"
 
 HOOK_SCRIPT="$REPO_ROOT/bin/aport-cursor-hook.sh"
 chmod +x "$HOOK_SCRIPT" 2> /dev/null || true
@@ -28,7 +31,8 @@ run_hook() {
     local desc="$1" input="$2" expect_exit="$3" expect_field="$4"
     local out="$TEST_DIR/hook-out-$RANDOM.txt"
     set +e
-    echo "$input" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$out" 2> /dev/null
+    echo "$input" | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$out" 2> /dev/null
     local actual_exit=$?
     set -e
     if [[ "$actual_exit" -ne "$expect_exit" ]]; then
@@ -56,9 +60,12 @@ run_hook "preToolUse Shell: allow (ls)" \
 run_hook "preToolUse Shell: deny (sudo)" \
     '{"tool_name":"Shell","tool_input":{"command":"sudo reboot"}}' 2 '"permission":"deny"'
 
-# --- preToolUse: Read (allow without evaluator) ---
-run_hook "preToolUse Read: allow (no evaluator)" \
-    '{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"}}' 0 ''
+# --- preToolUse: Read (evaluator: allow allowed path) ---
+run_hook "preToolUse Read: allow (allowed path)" \
+    '{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
+
+run_hook "preToolUse Read: deny (.env sensitive path)" \
+    '{"tool_name":"Read","tool_input":{"file_path":"/repo/.env.local"}}' 2 '"permission":"deny"'
 
 # --- preToolUse: Grep (allow without evaluator) ---
 run_hook "preToolUse Grep: allow (no evaluator)" \
@@ -75,6 +82,16 @@ run_hook "preToolUse Delete: allow" \
 # --- preToolUse: Task ---
 run_hook "preToolUse Task: allow" \
     '{"tool_name":"Task","tool_input":{"description":"run tests"}}' 0 '"permission":"allow"'
+
+# --- preToolUse: Agent / WebSearch (Claude Code parity) ---
+run_hook "preToolUse Agent: allow" \
+    '{"tool_name":"Agent","tool_input":{"description":"explore repo"}}' 0 '"permission":"allow"'
+
+run_hook "preToolUse WebSearch: allow" \
+    '{"tool_name":"WebSearch","tool_input":{"query":"aport guardrails"}}' 0 '"permission":"allow"'
+
+run_hook "preToolUse Edit: allow" \
+    '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
 
 # --- preToolUse: MCP:<name> ---
 run_hook "preToolUse MCP:tool: allow" \

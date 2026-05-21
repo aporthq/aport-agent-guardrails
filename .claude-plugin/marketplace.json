@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Official APort plugins — security guardrails for AI coding agents",
-    "version": "1.0.26",
+    "version": "1.0.27",
     "license": "Apache-2.0",
     "homepage": "https://aport.io"
   },
@@ -17,7 +17,7 @@
       "source": {
         "source": "github",
         "repo": "aporthq/aport-agent-guardrails",
-        "ref": "v1.0.26"
+        "ref": "v1.0.27"
       },
       "keywords": [
         "security",

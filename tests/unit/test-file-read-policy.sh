@@ -112,6 +112,44 @@ else
     exit 1
 fi
 
+cat > "$PASSPORT_FILE" << 'EOF'
+{
+  "spec_version": "oap/1.0",
+  "passport_id": "ap_test_file_read_wildcard",
+  "owner_id": "org_test",
+  "owner_type": "organization",
+  "kind": "agent",
+  "status": "active",
+  "assurance_level": "L0",
+  "never_expires": true,
+  "capabilities": [
+    {"id": "data.file.read"}
+  ],
+  "limits": {
+    "data.file.read": {
+      "allowed_paths": ["*"]
+    }
+  }
+}
+EOF
+
+for sensitive_path in "/tmp/project/.envrc" "/tmp/project/.env.local" "/Users/test/.aws/credentials" "/Users/test/.ssh/id_rsa" "/tmp/service-credentials.json" "/tmp/private.pem" "/tmp/private.key" "/tmp/.kube/config" "/tmp/passwords.txt"; do
+    echo
+    echo "Test 6: Deny sensitive wildcard read from $sensitive_path"
+    if "$SCRIPT_DIR/bin/aport-guardrail-bash.sh" read "{\"file_path\":\"$sensitive_path\"}" > "$DECISION_FILE" 2>&1; then
+        ALLOW=$(jq -r '.allow' "$DECISION_FILE")
+        if [ "$ALLOW" = "false" ]; then
+            echo "✅ PASS: Denied sensitive path"
+        else
+            echo "❌ FAIL: Should deny sensitive path $sensitive_path"
+            cat "$DECISION_FILE"
+            exit 1
+        fi
+    else
+        echo "✅ PASS: Denied sensitive path (exit code 1)"
+    fi
+done
+
 # Cleanup
 rm -f "$PASSPORT_FILE" "$DECISION_FILE"
 

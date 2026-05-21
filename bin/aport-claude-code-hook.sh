@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# APort Claude Code hook: reads tool_name + tool_input from JSON stdin,
+# APort Claude Code hook: reads tool_name + tool_input from JSON stdin (path-based Read uses guardrail).
 # maps to APort policy, calls guardrail, outputs hookSpecificOutput deny or exit 0.
 # Exit 0 = allow, exit 2 = block. Other exits = hook error (Claude Code may fail-open).
 # Output format: Claude Code official schema (hookSpecificOutput.permissionDecision), NOT Cursor format.
@@ -14,6 +14,8 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$ROOT_DIR/bin/aport-resolve-paths.sh"
 # shellcheck source=bin/lib/guardrail-mode.sh
 . "$ROOT_DIR/bin/lib/guardrail-mode.sh"
+# shellcheck source=bin/lib/hook-read-policy.sh
+. "$ROOT_DIR/bin/lib/hook-read-policy.sh"
 load_guardrail_mode_for_hooks "${OPENCLAW_CONFIG_DIR:-$HOME/.claude}"
 
 GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-bash.sh"
@@ -49,7 +51,8 @@ set -e
 if [ "$JQ_EXIT" -ne 0 ] || [ -z "$TOOL_NAME" ]; then
     TOOL_NAME="unknown"
 fi
-TOOL_NAME_NORM="$(printf '%s' "$TOOL_NAME" | tr -d '[:space:]' | sed 's/^functions\.//' | tr '[:upper:]' '[:lower:]')"
+# Strip permission-rule specifiers (e.g. Agent(Explore) -> Agent) before normalization.
+TOOL_NAME_NORM="$(printf '%s' "$TOOL_NAME" | tr -d '[:space:]' | sed 's/^functions\.//' | sed 's/(.*$//' | tr '[:upper:]' '[:lower:]')"
 set +e
 TOOL_INPUT="$(echo "$INPUT" | jq -c '.tool_input // {}' 2> /dev/null)"
 JQ_EXIT=$?
@@ -81,40 +84,45 @@ GUARDRAIL_TOOL=""
 CONTEXT_JSON="{}"
 
 case "$TOOL_NAME_NORM" in
-    bash | shell)
+    bash | shell | powershell | monitor)
         GUARDRAIL_TOOL="bash"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{command: (.command // "")}')"
+        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{command: (.command // .script // "")}')"
         ;;
-    read | glob | ls | grep | todoread | toolsearch | askuserquestion | readfile | semanticsearch)
-        # Read-family + user-interaction tools: allow without calling evaluator
+    read | readfile | semanticsearch)
+        if ! aport_hook_try_read_evaluation "$TOOL_NAME_NORM" "$TOOL_INPUT"; then
+            exit 0
+        fi
+        ;;
+    glob | ls | grep | lsp | todoread | toolsearch | askuserquestion | listmcpresourcestool | readmcpresourcetool | waitformcpservers)
+        # Search/list/read tools without a single file_path: allow without evaluator
         exit 0
         ;;
-    taskget | tasklist | taskoutput | cronlist)
-        # Read-only task/cron queries: allow without evaluator
+    taskget | tasklist | taskoutput | cronlist | schedulewakeup | pushnotification)
+        # Read-only task/cron queries and notifications: allow without evaluator
         exit 0
         ;;
     enterplanmode | exitplanmode)
         # Internal state transitions: allow without evaluator
         exit 0
         ;;
-    write | edit | multiedit | notebookedit | todowrite | delete | strreplace | editnotebook)
+    write | edit | multiedit | notebookedit | todowrite | delete | strreplace | editnotebook | shareonboardingguide)
         GUARDRAIL_TOOL="write"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{file_path: (.file_path // .path // "")}')"
         ;;
     websearch | webfetch)
-        GUARDRAIL_TOOL="webfetch"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{url: (.url // .query // "")}')"
+        GUARDRAIL_TOOL="websearch"
+        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{url: (.url // ""), query: (.query // "")}')"
         ;;
     browser)
         GUARDRAIL_TOOL="browser"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{url: (.url // "")}')"
         ;;
-    task | taskcreate | taskupdate | taskstop | agent | skill | enterworktree | subagent | subagentstart)
+    agent | task | taskcreate | taskupdate | taskstop | skill | enterworktree | exitworktree | subagent | subagentstart | sendmessage | teamcreate | teamdelete | remotetrigger)
         GUARDRAIL_TOOL="session.create"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .prompt // "")}')"
+        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .prompt // .task // .message // ""), subagent_type: (.subagent_type // .agent_type // "")}')"
         ;;
     croncreate | crondelete)
-        GUARDRAIL_TOOL="cron"
+        GUARDRAIL_TOOL="session.create"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .schedule // "")}')"
         ;;
     mcp__* | mcp:* | callmcptool)
@@ -132,6 +140,14 @@ HOOK_DECISION_FILE="${OPENCLAW_DECISION_FILE:-}"
 if [ -n "$HOOK_DECISION_FILE" ]; then
     HOOK_DECISION_FILE="${HOOK_DECISION_FILE%.json}-$$.json"
     export OPENCLAW_DECISION_FILE="$HOOK_DECISION_FILE"
+fi
+
+# Read tools: send only file_path to the evaluator (Claude may attach large file bodies in tool_input).
+if [ "$GUARDRAIL_TOOL" = "read" ]; then
+    CONTEXT_JSON="$(printf '%s' "$CONTEXT_JSON" | jq -c '{file_path: (.file_path // .path // "")}' 2> /dev/null || echo '{"file_path":""}')"
+    if [ -z "$(printf '%s' "$CONTEXT_JSON" | jq -r '.file_path // ""' 2> /dev/null)" ]; then
+        exit 0
+    fi
 fi
 
 # Call core evaluator (guardrail expects tool name, not policy ID)

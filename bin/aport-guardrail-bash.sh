@@ -301,6 +301,17 @@ else
     LIMITS=$(echo "$PASSPORT" | jq ".limits.\"$POLICY_BASE\" // {}")
 fi
 
+is_default_sensitive_read_path() {
+    local path_lower
+    path_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$path_lower" in
+        .env* | */.env* | .aws/* | */.aws/* | .ssh/* | */.ssh/* | *credentials* | *id_rsa* | *id_dsa* | *id_ecdsa* | *id_ed25519* | *.pem | *.key | *password* | .gnupg/* | */.gnupg/* | .kube/* | */.kube/*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 # Evaluate policy-specific limits
 if [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
     FILES_CHANGED=$(echo "$CONTEXT_JSON" | jq -r '.files_changed // .files // 0')
@@ -426,6 +437,10 @@ fi
 if [[ "$POLICY_ID" == "data.file.read.v1" ]]; then
     FILE_PATH=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""')
     if [ -n "$FILE_PATH" ]; then
+        if is_default_sensitive_read_path "$FILE_PATH"; then
+            write_decision false "$POLICY_ID" "oap.blocked_pattern" "File path matches default sensitive read pattern"
+        fi
+
         # Check allowed paths
         PATH_ALLOWED=false
         while IFS= read -r allowed_path; do

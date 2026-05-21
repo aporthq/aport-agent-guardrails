@@ -63,7 +63,9 @@ export function mapToolToPolicy(toolName, params) {
   if (tool.match(/exec\.(run|shell)/)) return "system.command.execute.v1";
   if (tool.startsWith("exec.")) return "system.command.execute.v1";
   if (tool.startsWith("system.command.")) return "system.command.execute.v1";
-  if (tool === "bash" || tool === "shell" || tool === "command") return "system.command.execute.v1";
+  if (tool === "bash" || tool === "shell" || tool === "command" || tool === "powershell" || tool === "monitor") {
+    return "system.command.execute.v1";
+  }
 
   if (tool === "message") {
     return MESSAGE_SEND_ACTIONS.has(readAction(params)) ? "messaging.message.send.v1" : null;
@@ -81,9 +83,10 @@ export function mapToolToPolicy(toolName, params) {
     return "messaging.message.send.v1";
   }
 
-  if (tool === "read") return "data.file.read.v1";
+  if (tool === "read" || tool === "view") return "data.file.read.v1";
   if (tool.startsWith("file.read")) return "data.file.read.v1";
   if (tool.startsWith("data.file.read")) return "data.file.read.v1";
+  if (tool === "sessions_list" || tool === "sessions_history") return "data.file.read.v1";
   if (tool === "write" || tool === "edit") return "data.file.write.v1";
   if (tool === "multiedit" || tool === "notebookedit") return "data.file.write.v1";
   if (tool === "glob" || tool === "ls" || tool === "grep" || tool === "toolsearch") {
@@ -91,9 +94,35 @@ export function mapToolToPolicy(toolName, params) {
   }
   if (tool === "todoread") return "data.file.read.v1";
   if (tool === "todowrite") return "data.file.write.v1";
-  if (tool === "taskget" || tool === "tasklist" || tool === "taskoutput") return "data.file.read.v1";
+  if (tool === "taskget" || tool === "tasklist" || tool === "taskoutput" || tool === "cronlist") {
+    return "data.file.read.v1";
+  }
+  if (
+    tool === "agent" ||
+    tool === "task" ||
+    tool === "taskcreate" ||
+    tool === "taskupdate" ||
+    tool === "taskstop" ||
+    tool === "skill" ||
+    tool === "enterworktree" ||
+    tool === "exitworktree" ||
+    tool === "subagent" ||
+    tool === "subagentstart" ||
+    tool === "sendmessage" ||
+    tool === "teamcreate" ||
+    tool === "teamdelete" ||
+    tool === "remotetrigger" ||
+    tool === "sessions_spawn" ||
+    tool === "sessions_send" ||
+    tool === "sessions_yield" ||
+    tool === "subagents" ||
+    tool === "session_status" ||
+    tool === "croncreate" ||
+    tool === "crondelete"
+  ) {
+    return "agent.session.create.v1";
+  }
   if (tool === "askuserquestion" || tool === "enterplanmode" || tool === "exitplanmode") return null;
-  if (tool === "cronlist") return "data.file.read.v1";
   if (tool.startsWith("file.write")) return "data.file.write.v1";
   if (tool.startsWith("file.edit")) return "data.file.write.v1";
   if (tool.startsWith("data.file.write")) return "data.file.write.v1";

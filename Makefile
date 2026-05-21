@@ -15,7 +15,7 @@ install:
 
 test:
 	@echo "Running tests (unit, OAP, integration)..."
-	@chmod +x bin/*.sh bin/lib/*.sh bin/frameworks/*.sh tests/*.sh tests/unit/*.sh tests/frameworks/openclaw/setup.sh tests/frameworks/claude-code/setup.sh 2>/dev/null || true
+	@chmod +x bin/*.sh bin/lib/*.sh bin/frameworks/*.sh enterprise-scripts/*.sh enterprise-scripts/*.mjs scripts/*.sh tests/*.sh tests/unit/*.sh tests/frameworks/openclaw/setup.sh tests/frameworks/claude-code/setup.sh 2>/dev/null || true
 	@bash tests/run.sh
 	@echo "✅ Tests complete"
 

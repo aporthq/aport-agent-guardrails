@@ -8,12 +8,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$(dirname "$0")/../setup.sh"
 mkdir -p "$TEST_DIR/aport"
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
 export OPENCLAW_CONFIG_DIR="$TEST_DIR"
 export OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json"
-export OPENCLAW_DECISION_FILE="$TEST_DIR/decision.json"
-export OPENCLAW_AUDIT_LOG="$TEST_DIR/audit.log"
+export OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json"
+export OPENCLAW_AUDIT_LOG="$TEST_DIR/aport/audit.log"
 
 HOOK_SCRIPT="$REPO_ROOT/bin/aport-claude-code-hook.sh"
+MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
 chmod +x "$HOOK_SCRIPT" 2> /dev/null || true
 
 echo ""
@@ -21,16 +25,57 @@ echo "  Unit — Claude Code hook script (allow/deny, exit 0/2, hookSpecificOutp
 echo "  Hook: $HOOK_SCRIPT"
 echo ""
 
-# 1. Allow: Read-family (exit 0 immediately, no evaluator call)
-echo "  Test: Read tool -> allow (exit 0)..."
+# 1. Allow: Read with allowed path (local evaluator)
+echo "  Test: Read tool -> allow (allowed path)..."
 OUT1="$TEST_DIR/claude-allow-read.txt"
-echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/foo"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT1" 2> /dev/null
+set +e
+echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/foo"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT1" 2> /dev/null
 EXIT1=$?
+set -e
 [[ "$EXIT1" -eq 0 ]] || {
     echo "FAIL: expected exit 0 for Read allow, got $EXIT1" >&2
     exit 1
 }
-echo "  ✅ Read: exit 0"
+echo "  ✅ Read allowed path: exit 0"
+
+# 1b. Deny: Read sensitive path (.env default block)
+echo "  Test: Read tool -> deny (.env)..."
+OUT1B="$TEST_DIR/claude-deny-read-env.txt"
+set +e
+echo '{"tool_name":"Read","tool_input":{"file_path":"/repo/.env.local"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT1B" 2> /dev/null
+EXIT1B=$?
+set -e
+[[ "$EXIT1B" -eq 2 ]] || {
+    echo "FAIL: expected exit 2 for Read .env deny, got $EXIT1B" >&2
+    exit 1
+}
+echo "  ✅ Read sensitive path: exit 2"
+
+# 1c. API mode: Read calls guardrail (unreachable API -> deny)
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+EOF
+echo "  Test: Read in API mode with unreachable API -> deny..."
+OUT1C="$TEST_DIR/claude-api-read-deny.txt"
+set +e
+echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/foo"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT1C" 2> /dev/null
+EXIT1C=$?
+set -e
+[[ "$EXIT1C" -eq 2 ]] || {
+    echo "FAIL: expected exit 2 for Read in api mode, got $EXIT1C" >&2
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Read API mode: exit 2 when API unreachable"
 
 # 2. Allow: Bash with allowed command (ls)
 echo "  Test: Bash allow (command in allowlist)..."
@@ -118,7 +163,6 @@ EXIT7=$?
 echo "  ✅ Shell alias: exit 0"
 
 # 8. mode selection (api -> deny on unreachable API; local -> allow)
-MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=api
 APORT_API_URL=http://127.0.0.1:9
@@ -150,6 +194,50 @@ EXIT9=$?
     exit 1
 }
 echo "  ✅ local mode after switch allows"
+
+# 10. Agent tool -> session.create policy path (allow with fixture passport)
+echo "  Test: Agent tool -> allow..."
+OUT10="$TEST_DIR/claude-allow-agent.txt"
+echo '{"tool_name":"Agent","tool_input":{"description":"explore codebase","prompt":"find auth flow"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
+EXIT10=$?
+[[ "$EXIT10" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Agent, got $EXIT10 (output: $(cat "$OUT10" 2> /dev/null))" >&2
+    exit 1
+}
+echo "  ✅ Agent: exit 0"
+
+# 11. Agent(Explore) specifier stripped -> allow
+echo "  Test: Agent(Explore) specifier -> allow..."
+OUT11="$TEST_DIR/claude-allow-agent-spec.txt"
+echo '{"tool_name":"Agent(Explore)","tool_input":{"description":"search"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT11" 2> /dev/null
+EXIT11=$?
+[[ "$EXIT11" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Agent(Explore), got $EXIT11" >&2
+    exit 1
+}
+echo "  ✅ Agent(Explore): exit 0"
+
+# 12. WebSearch -> allow
+echo "  Test: WebSearch -> allow..."
+OUT12="$TEST_DIR/claude-allow-websearch.txt"
+echo '{"tool_name":"WebSearch","tool_input":{"query":"claude code hooks"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT12" 2> /dev/null
+EXIT12=$?
+[[ "$EXIT12" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for WebSearch, got $EXIT12" >&2
+    exit 1
+}
+echo "  ✅ WebSearch: exit 0"
+
+# 13. PowerShell -> allow (maps to bash policy)
+echo "  Test: PowerShell -> allow..."
+OUT13="$TEST_DIR/claude-allow-powershell.txt"
+echo '{"tool_name":"PowerShell","tool_input":{"command":"pnpm --version"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT13" 2> /dev/null
+EXIT13=$?
+[[ "$EXIT13" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for PowerShell, got $EXIT13" >&2
+    exit 1
+}
+echo "  ✅ PowerShell: exit 0"
 
 echo ""
 echo "  All Claude Code hook unit tests passed."
