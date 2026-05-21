@@ -22,7 +22,7 @@ jobs:
       
       - name: Make scripts executable
         run: |
-          chmod +x bin/*.sh bin/lib/*.sh tests/*.sh tests/unit/*.sh tests/frameworks/openclaw/setup.sh 2>/dev/null || true
+          chmod +x bin/*.sh bin/lib/*.sh enterprise-scripts/*.sh enterprise-scripts/*.mjs scripts/*.sh tests/*.sh tests/unit/*.sh tests/frameworks/openclaw/setup.sh 2>/dev/null || true
       
       - name: Validate passport schema
         run: |
@@ -39,6 +39,12 @@ jobs:
         run: make test
         env:
           APORT_SKIP_REMOTE_PASSPORT_TEST: "1"
+
+      - name: Enterprise MDM script bundle check
+        run: |
+          set -euo pipefail
+          chmod +x scripts/bundle-enterprise-scripts.sh
+          bash tests/unit/test-enterprise-device-scripts.sh
 
       - name: Setup Node
         uses: actions/setup-node@v4

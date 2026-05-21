@@ -27,13 +27,13 @@ if [ "$UPDATE_REMOTE" = true ]; then
 fi
 
 # Check if any submodule refs are uncommitted (would mean we updated and didn't commit)
-SUBMODULE_STATUS=$(git submodule status 2>/dev/null || true)
+SUBMODULE_STATUS=$(git submodule status 2> /dev/null || true)
 if [ -z "$SUBMODULE_STATUS" ]; then
     exit 0
 fi
 
 # git submodule status: leading + means submodule is at a different commit than recorded in parent
-if git submodule status 2>/dev/null | grep -q '^+'; then
+if git submodule status 2> /dev/null | grep -q '^+'; then
     echo "error: Submodule references were updated but not committed." >&2
     echo "  Run: git add external/ && git commit -m 'chore: Update submodules to latest'" >&2
     echo "  Then push again." >&2
@@ -41,7 +41,7 @@ if git submodule status 2>/dev/null | grep -q '^+'; then
 fi
 
 # Uncommitted submodule refs (modified in index)
-if git status 2>/dev/null | grep -q "new commits"; then
+if git status 2> /dev/null | grep -q "new commits"; then
     echo "error: Submodules have new commits. Commit the submodule reference updates before pushing." >&2
     echo "  Run: git add external/ && git commit -m 'chore: Update submodules to latest'" >&2
     exit 1

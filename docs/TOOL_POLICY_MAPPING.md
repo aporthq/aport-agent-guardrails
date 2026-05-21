@@ -14,7 +14,10 @@ This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guard
 | `read`, `file.read`, `data.file.read` | `data.file.read.v1` | API / evaluator |
 | `write`, `file.write`, `data.file.write` | `data.file.write.v1` | API / evaluator |
 | `mcp.tool.*`, `mcp.*` | `mcp.tool.execute.v1` | API / evaluator |
-| `agent.session.*`, `session.create`, `session.*` | `agent.session.create.v1` | API / evaluator |
+| `agent.session.*`, `session.create`, `session.*`, `cron`, `sessions_spawn`, `sessions_send`, `sessions_yield`, `subagents`, `session_status` | `agent.session.create.v1` | API / evaluator |
+| `sessions_list`, `sessions_history`, `view` | `data.file.read.v1` | API / evaluator |
+| `websearch`, `web_search`, `webfetch`, `web_fetch` | `web.fetch.v1` | API / evaluator |
+| `browser`, `web.browser` | `web.browser.v1` | API / evaluator |
 | `agent.tool.*`, `tool.register`, `tool.*` | `agent.tool.register.v1` | API / evaluator |
 | `payment.refund`, `payment.*`, `finance.payment.refund` | `finance.payment.refund.v1` | `external/aport-policies/finance.payment.refund.v1/` |
 | `payment.charge`, `finance.payment.charge` | `finance.payment.charge.v1` | `external/aport-policies/finance.payment.charge.v1/` |
@@ -40,6 +43,8 @@ To add a new tool → policy mapping, edit the `case` block in:
 - `bin/aport-guardrail-bash.sh`
 
 and add a new pattern and policy pack ID. The policy pack must exist under `external/aport-policies/<pack_id>/` (or in local-overrides / API).
+
+Per-framework host tool names and hook behavior: [FRAMEWORK_TOOL_MAPPING_AUDIT.md](FRAMEWORK_TOOL_MAPPING_AUDIT.md).
 
 ## Reference
 

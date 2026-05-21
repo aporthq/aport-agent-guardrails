@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.27] - 2026-05-21
+
+### Security
+- Claude Code and Cursor hooks now evaluate path-based `Read` / `ReadFile` / `SemanticSearch` (and Cursor `beforeReadFile`) through the guardrail in local and API mode, so sensitive file read policy applies when `file_path` is present.
+- Local evaluator applies default sensitive read patterns (`.env*`, `.aws/*`, `.ssh/*`, credentials, keys) via `is_default_sensitive_read_path()` even when the passport omits `blocked_patterns`.
+
+### Added
+- **Enterprise device scripts:** Cross-platform IT install (`enterprise-scripts/aport-device-core.mjs`, `.sh` / `.ps1` entrypoints) with enrollment (`issue`) + runtime (`read`) API key flow aligned with agent-passport `setup-key`.
+- **Shared read hook policy:** `bin/lib/hook-read-policy.sh` for path-only context (avoids oversized API payloads from full `tool_input`).
+- **Tool mapping audit:** `docs/FRAMEWORK_TOOL_MAPPING_AUDIT.md`; expanded `tool-pack-mapping.json` (Node + Python); Claude Code `claudeCodeTools.ts`.
+- **Tests:** `test-enterprise-device-scripts.sh`, `test-tool-pack-mapping.sh`; expanded hook and file-read policy coverage.
+
+### Changed
+- OpenClaw plugin tool mapping and context normalization (message/MCP tools; drop speculative mappings).
+- CI/release: enterprise bundle step, `enterprise-scripts/` in ShellCheck; release assets include `aport-device-core.mjs` and PowerShell entrypoints.
+- Docs: Claude Code Read enforcement; tool policy mapping tables updated.
+
+### Fixed
+- Hosted API mode: Read-family hooks no longer exit before calling `aport-guardrail-api.sh`.
+
 ## [1.0.26] - 2026-05-05
 
 ### Added

@@ -5,6 +5,7 @@ _aport_tool_mapping_file() {
     lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 
     local candidates=(
+        "$lib_dir/../../packages/core/src/core/tool-pack-mapping.json"
         "$lib_dir/../../python/aport_guardrails/core/tool-pack-mapping.json"
         "$lib_dir/../python/aport_guardrails/core/tool-pack-mapping.json"
         "$lib_dir/../../aport/runtime/python/aport_guardrails/core/tool-pack-mapping.json"
@@ -26,7 +27,7 @@ resolve_policy_id_from_tool_name() {
     local normalized=""
     local policy_id=""
 
-    normalized="$(printf '%s' "$tool_name" | tr '[:upper:]' '[:lower:]')"
+    normalized="$(printf '%s' "$tool_name" | tr '[:upper:]' '[:lower:]' | sed 's/^functions\.//' | sed 's/(.*$//')"
     mapping_file="$(_aport_tool_mapping_file)" || return 1
 
     policy_id="$(
@@ -42,6 +43,9 @@ resolve_policy_id_from_tool_name() {
             ) // empty
         ' "$mapping_file"
     )"
+
+    # Do not apply JSON "default" here: bash/API guardrail must deny unmapped tool names.
+    # Python/TypeScript adapters use tool_to_pack_id() / toolToPackId() which apply default for custom tools.
 
     if [[ -n "$policy_id" && "$policy_id" != "null" ]]; then
         printf '%s\n' "$policy_id"
