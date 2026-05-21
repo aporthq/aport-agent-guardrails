@@ -18,6 +18,8 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$ROOT_DIR/bin/aport-resolve-paths.sh"
 # shellcheck source=bin/lib/guardrail-mode.sh
 . "$ROOT_DIR/bin/lib/guardrail-mode.sh"
+# shellcheck source=bin/lib/hook-read-policy.sh
+. "$ROOT_DIR/bin/lib/hook-read-policy.sh"
 load_guardrail_mode_for_hooks "${OPENCLAW_CONFIG_DIR:-$HOME/.cursor}"
 
 GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-bash.sh"
@@ -82,8 +84,10 @@ HOOK_EVENT="$(echo "$INPUT" | jq -r '.hook_event_name // ""' 2> /dev/null)"
 TOOL_NAME="$(echo "$INPUT" | jq -r '.tool_name // ""' 2> /dev/null)"
 
 if [ "$HOOK_EVENT" = "beforeReadFile" ] || { [ -z "$HOOK_EVENT" ] && [ -z "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.file_path and .content' &> /dev/null; }; then
-    # beforeReadFile: file reads — allow without evaluator (same as Claude Code)
-    exit 0
+    FILE_PATH="$(echo "$INPUT" | jq -r '.file_path // ""' 2> /dev/null || true)"
+    if ! aport_hook_try_read_evaluation_from_file_path "$FILE_PATH"; then
+        exit 0
+    fi
 
 elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INPUT" | jq -e '.subagent_id' &> /dev/null; }; then
     # subagentStart: sub-agent spawning
@@ -96,36 +100,48 @@ elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -n "$TOOL_NAME" ] && echo "
     CONTEXT_JSON="$(safe_jq "$INPUT" '{tool_name: (.tool_name // ""), tool_input: (.tool_input // {})}')"
 
 elif [ -n "$TOOL_NAME" ]; then
-    # preToolUse: Cursor tool names — Shell, Read, Write, Grep, Delete, Task, MCP:<name>
-    # Normalize: trim whitespace, lowercase (patterns must match TOOL_NORM)
-    TOOL_NORM="$(echo "$TOOL_NAME" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    # preToolUse: Shell, Read, Write, Grep, Delete, Task, WebSearch, Agent, MCP:*, etc.
+    # See docs/FRAMEWORK_TOOL_MAPPING_AUDIT.md and https://cursor.com/docs/agent/hooks
+    TOOL_NORM="$(printf '%s' "$TOOL_NAME" | tr -d '[:space:]' | sed 's/^functions\.//' | sed 's/(.*$//' | tr '[:upper:]' '[:lower:]')"
     case "$TOOL_NORM" in
-        shell)
+        shell | bash)
             GUARDRAIL_TOOL="bash"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{command: (.tool_input.command // "")}')"
             ;;
-        read | grep | glob | semanticsearch)
-            # Read-family: allow without calling evaluator (matches Claude Code behavior)
+        read | readfile | semanticsearch)
+            TOOL_INPUT="$(safe_jq "$INPUT" '.tool_input // {}')"
+            if ! aport_hook_try_read_evaluation "$TOOL_NORM" "$TOOL_INPUT"; then
+                exit 0
+            fi
+            ;;
+        grep | glob | ls | lsp | listmcpresourcestool | readmcpresourcetool | toolsearch | waitformcpservers | taskget | tasklist | taskoutput | cronlist)
             exit 0
             ;;
-        write | strreplace | editnotebook)
+        write | strreplace | edit | multiedit | editnotebook | applypatch | notebookedit | delete)
             GUARDRAIL_TOOL="write"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{file_path: (.tool_input.file_path // .tool_input.path // "")}')"
             ;;
-        delete)
-            GUARDRAIL_TOOL="write"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{file_path: (.tool_input.file_path // .tool_input.path // "")}')"
+        websearch | webfetch)
+            GUARDRAIL_TOOL="websearch"
+            CONTEXT_JSON="$(safe_jq "$INPUT" '{url: (.tool_input.url // ""), query: (.tool_input.query // "")}')"
             ;;
-        task)
+        browser)
+            GUARDRAIL_TOOL="browser"
+            CONTEXT_JSON="$(safe_jq "$INPUT" '{url: (.tool_input.url // "")}')"
+            ;;
+        task | agent | taskcreate | taskupdate | taskstop | skill | subagent | subagentstart | sendmessage | teamcreate | teamdelete)
             GUARDRAIL_TOOL="session.create"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{description: (.tool_input.description // .tool_input.prompt // "")}')"
             ;;
-        mcp:*)
+        croncreate | crondelete)
+            GUARDRAIL_TOOL="session.create"
+            CONTEXT_JSON="$(safe_jq "$INPUT" '{description: (.tool_input.description // .tool_input.schedule // "")}')"
+            ;;
+        mcp__* | mcp:* | callmcptool)
             GUARDRAIL_TOOL="mcp.tool"
             CONTEXT_JSON="$(safe_jq "$INPUT" '{tool_name: (.tool_name // ""), tool_input: (.tool_input // {})}')"
             ;;
         *)
-            # Unknown preToolUse tool: fail-closed
             deny "🛡️ APort: unknown tool '$TOOL_NAME' — fail-closed policy"
             ;;
     esac
@@ -152,6 +168,15 @@ HOOK_DECISION_FILE="${OPENCLAW_DECISION_FILE:-}"
 if [ -n "$HOOK_DECISION_FILE" ]; then
     HOOK_DECISION_FILE="${HOOK_DECISION_FILE%.json}-$$.json"
     export OPENCLAW_DECISION_FILE="$HOOK_DECISION_FILE"
+fi
+
+# Read tools: send only file_path to the evaluator (Cursor may attach large file bodies in tool_input).
+if [ "$GUARDRAIL_TOOL" = "read" ]; then
+    CONTEXT_JSON="$(printf '%s' "$CONTEXT_JSON" | jq -c '{file_path: (.file_path // .path // "")}' 2> /dev/null || echo '{"file_path":""}')"
+    if [ -z "$(printf '%s' "$CONTEXT_JSON" | jq -r '.file_path // ""' 2> /dev/null)" ]; then
+        echo '{"permission":"allow","allowed":true}'
+        exit 0
+    fi
 fi
 
 # Call core evaluator
