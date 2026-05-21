@@ -25,9 +25,19 @@ function die(msg) {
 }
 
 function requireCmd(name) {
-  const checker = isWin() ? 'where' : 'command';
-  const args = isWin() ? [name] : ['-v', name];
-  const ok = spawnSync(checker, args, { stdio: 'ignore', shell: isWin() }).status === 0;
+  let ok = false;
+  if (isWin()) {
+    ok = spawnSync('where', [name], { stdio: 'ignore', shell: true }).status === 0;
+  } else {
+    // Use bash: POSIX `command` is a shell builtin (spawnSync('command', …) fails on Linux CI).
+    ok =
+      spawnSync('bash', ['-c', `command -v ${JSON.stringify(name)}`], {
+        stdio: 'ignore',
+      }).status === 0;
+    if (!ok) {
+      ok = spawnSync('which', [name], { stdio: 'ignore' }).status === 0;
+    }
+  }
   if (!ok) die(`${name} is required`);
 }
 
