@@ -4,13 +4,18 @@
  * Integrates with Mastra's processor pipeline to provide deterministic
  * tool-call authorization based on YAML policy configuration.
  * 
+ * This processor implements Mastra's Processor interface with processInput
+ * and processOutput hooks for proper integration.
+ * 
  * @example
  * ```typescript
  * import { Agent } from '@mastra/core';
  * import { OAPToolProcessor } from '@aporthq/aport-agent-guardrails-mastra';
  * 
+ * const processor = new OAPToolProcessor('./oap-policy.yaml');
+ * 
  * const agent = new Agent({
- *   processors: [new OAPToolProcessor('./oap-policy.yaml')],
+ *   inputProcessors: [processor],
  *   tools: { webSearch, readFile },
  * });
  * ```
@@ -63,9 +68,16 @@ export class OAPToolProcessor {
 
   /**
    * Get or create the Evaluator instance.
+   * 
+   * Honors the failOpenWhenMissing config by setting the environment variable
+   * before evaluator initialization if needed.
    */
   private getEvaluator(): Evaluator {
     if (!this.evaluator) {
+      // Set fail-open env var before creating evaluator to honor the config option
+      if (this.config.failOpenWhenMissing !== undefined) {
+        process.env.APORT_FAIL_OPEN_WHEN_MISSING_CONFIG = this.config.failOpenWhenMissing ? '1' : '0';
+      }
       const configPath = this.config.policyPath || findConfigPath(this.config.framework || 'mastra');
       this.evaluator = new Evaluator(configPath, this.config.framework || 'mastra');
     }
@@ -74,6 +86,9 @@ export class OAPToolProcessor {
 
   /**
    * Build tool context for the evaluator.
+   * 
+   * SECURITY: Params are nested under `params` key to prevent argument spoofing.
+   * Tool arguments cannot overwrite trusted `tool` and `input` values.
    */
   private buildToolContext(toolName: string, args: unknown): ToolContext {
     const params =
@@ -82,7 +97,8 @@ export class OAPToolProcessor {
         : {};
     const inputStr =
       typeof args === 'object' ? JSON.stringify(args) : String(args);
-    return { tool: toolName, input: inputStr, ...params };
+    // Nest params to prevent spoofing - tool args cannot overwrite trusted values
+    return { tool: toolName, input: inputStr, params };
   }
 
   /**
@@ -133,46 +149,131 @@ export class OAPToolProcessor {
   }
 
   /**
-   * beforeToolCall hook — called by Mastra before executing any tool.
+   * processInput — Mastra processor hook called before tool execution.
    * 
-   * This is the main integration point. It:
-   * 1. Looks up the tool's policy pack
-   * 2. Evaluates the tool call against the policy
+   * This is the main integration point for Mastra's processor pipeline. It:
+   * 1. Extracts tool name and arguments from the input
+   * 2. Evaluates the tool call against the OAP policy
    * 3. Either allows the call or throws OAPAuthorizationError
    * 
-   * @param toolName - Name of the tool being called
-   * @param args - Arguments passed to the tool
+   * @param input - The tool call input containing tool name and arguments
    * @param context - Mastra agent context
+   * @returns The input (unchanged if allowed)
    * @throws OAPAuthorizationError if the tool call is denied
+   */
+  public async processInput(
+    input: { toolName: string; args: unknown },
+    context: AgentContext
+  ): Promise<{ toolName: string; args: unknown }> {
+    const { toolName, args } = input;
+    const evaluator = this.getEvaluator();
+    const toolCtx = this.buildToolContext(toolName, args);
+    const packId = toolToPackId(toolName);
+
+    // Load and apply policy from policyPath if it contains tool allow/deny rules
+    const policy = await this.loadPolicyPack(toolName, packId);
+
+    // Run OAP verification
+    const decision = evaluator.verifySync({}, policy, toolCtx);
+
+    // Handle the decision (throws if denied)
+    this.handleDecision(toolName, decision, context);
+
+    return input;
+  }
+
+  /**
+   * processOutput — Mastra processor hook called after tool execution.
+   * 
+   * Currently a no-op but available for future audit logging of successful calls.
+   * 
+   * @param output - The tool execution result
+   * @param context - Mastra agent context
+   * @returns The output (unchanged)
+   */
+  public async processOutput(
+    output: unknown,
+    _context: AgentContext
+  ): Promise<unknown> {
+    // No-op: successful calls are already logged via oap:receipt event
+    return output;
+  }
+
+  /**
+   * Load policy pack for the tool, including tool allow/deny rules from policy file.
+   * 
+   * This reads the YAML policy file at policyPath to extract tool-specific
+   * allow/deny configurations and passes them to the evaluator.
+   */
+  private async loadPolicyPack(
+    toolName: string,
+    packId: string
+  ): Promise<{ capability: string; id?: string; tools?: { allowed?: string[]; denied?: string[] } }> {
+    // Start with capability-based pack ID
+    const policy: { capability: string; id?: string; tools?: { allowed?: string[]; denied?: string[] } } = {
+      capability: packId,
+    };
+
+    // If policyPath is configured, try to load tool allow/deny rules from it
+    if (this.config.policyPath) {
+      try {
+        const fs = await import('node:fs');
+        const yaml = await import('yaml');
+        
+        if (fs.existsSync(this.config.policyPath)) {
+          const content = fs.readFileSync(this.config.policyPath, 'utf8');
+          const parsed = yaml.parse(content) as {
+            tools?: {
+              allowed?: Array<{ name: string } | string>;
+              denied?: Array<{ name: string } | string>;
+            };
+          };
+
+          if (parsed.tools) {
+            // Extract allowed tool names
+            const allowed = (parsed.tools.allowed || [])
+              .map((t) => (typeof t === 'string' ? t : t.name))
+              .filter(Boolean);
+
+            // Extract denied tool names
+            const denied = (parsed.tools.denied || [])
+              .map((t) => (typeof t === 'string' ? t : t.name))
+              .filter(Boolean);
+
+            if (allowed.length > 0 || denied.length > 0) {
+              policy.tools = { allowed, denied };
+            }
+          }
+        }
+      } catch {
+        // Best-effort: if policy file can't be read, fall back to capability-only
+      }
+    }
+
+    return policy;
+  }
+
+  /**
+   * @deprecated Use processInput instead. Kept for backward compatibility.
    */
   public async beforeToolCall(
     toolName: string,
     args: unknown,
     context: AgentContext
   ): Promise<void> {
-    const evaluator = this.getEvaluator();
-    const toolCtx = this.buildToolContext(toolName, args);
-    const packId = toolToPackId(toolName);
-
-    // Run OAP verification
-    const decision = evaluator.verifySync({}, { capability: packId }, toolCtx);
-
-    // Handle the decision (throws if denied)
-    this.handleDecision(toolName, decision, context);
+    await this.processInput({ toolName, args }, context);
   }
 
   /**
-   * afterToolCall hook — called by Mastra after tool execution.
-   * 
-   * Currently a no-op but available for future audit logging of successful calls.
+   * @deprecated Use processOutput instead. Kept for backward compatibility.
    */
   public async afterToolCall(
     _toolName: string,
     _args: unknown,
-    _result: unknown,
-    _context: AgentContext
+    result: unknown,
+    context: AgentContext
   ): Promise<void> {
-    // No-op: successful calls are already logged via oap:receipt event
+    await this.processOutput(result, context);
   }
 
   /**

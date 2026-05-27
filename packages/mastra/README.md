@@ -14,8 +14,10 @@ npm install @aporthq/aport-agent-guardrails-mastra
 import { Agent } from '@mastra/core';
 import { OAPToolProcessor } from '@aporthq/aport-agent-guardrails-mastra';
 
+const processor = new OAPToolProcessor('./oap-policy.yaml');
+
 const agent = new Agent({
-  processors: [new OAPToolProcessor('./oap-policy.yaml')],
+  inputProcessors: [processor],
   tools: { 
     webSearch, 
     readFile,
@@ -59,7 +61,7 @@ import { OAPToolProcessor } from '@aporthq/aport-agent-guardrails-mastra';
 const processor = new OAPToolProcessor('./oap-policy.yaml');
 
 const agent = new Agent({
-  processors: [processor],
+  inputProcessors: [processor],
   tools: { webSearch, readFile },
 });
 ```
@@ -122,7 +124,7 @@ Listen for receipts in your agent context:
 
 ```typescript
 const agent = new Agent({
-  processors: [processor],
+  inputProcessors: [processor],
   tools: { webSearch },
   onEvent: (event) => {
     if (event.type === 'oap:receipt') {
