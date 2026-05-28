@@ -22,14 +22,37 @@ npx @aporthq/aport-agent-guardrails claude-code
 npx @aporthq/aport-agent-guardrails --framework=claude-code
 ```
 
-This runs the **passport wizard** and writes **`~/.claude/settings.json`** with the APort hook registered for **all tools** via `"matcher": "*"`. Default passport path: **`~/.claude/aport/passport.json`**. Restart Claude Code after setup so the PreToolUse hook is picked up.
+This runs setup and writes **`~/.claude/settings.json`** with the APort hook registered for **all tools** via `"matcher": "*"`. Restart Claude Code after setup so the PreToolUse hook is picked up.
+
+When prompted for passport setup:
+
+1. `Create hosted APort passport now` — recommended; creates a hosted passport and narrow setup key.
+2. `Use existing hosted passport ID` — paste an existing `agent_id`.
+3. `Create local passport file` — writes **`~/.claude/aport/passport.json`** for offline/local mode.
+
+For a non-interactive hosted setup:
+
+```bash
+npx --yes @aporthq/aport-agent-guardrails claude-code \
+  --quick-hosted \
+  --email you@example.com \
+  --non-interactive
+```
+
+Equivalent environment-variable form:
+
+```bash
+APORT_OWNER_EMAIL="you@example.com" \
+APORT_QUICK_HOSTED=1 \
+npx --yes @aporthq/aport-agent-guardrails claude-code --non-interactive
+```
 
 If you already have a hosted passport and API key, the intended hosted install path is:
 
 ```bash
 export APORT_API_KEY="apk_..."
 export APORT_AGENT_ID="ap_..."
-npx @aporthq/aport-agent-guardrails claude-code "ap_..." --non-interactive
+npx --yes @aporthq/aport-agent-guardrails claude-code "ap_..." --non-interactive
 ```
 
 That setup writes `~/.claude/aport/guardrail-mode.env`, and the Claude hook loads those values before every tool call. Hosted mode is fail-closed: if the API evaluator is unreachable, the tool call is denied rather than silently downgraded to local mode.

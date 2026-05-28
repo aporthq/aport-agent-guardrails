@@ -46,16 +46,40 @@ From the live APort Vault adversarial testbed:
 
 ## Start Here
 
-### Install in 30 seconds
+### Install in 60 seconds
 
 ```bash
 npx @aporthq/aport-agent-guardrails
 ```
 
 - Choose your framework: `openclaw`, `cursor`, `claude-code`, `langchain`, `crewai`, `deerflow`, `n8n`
-- OpenClaw direct: `npx @aporthq/aport-agent-guardrails openclaw`
-- Hosted passport: `npx @aporthq/aport-agent-guardrails openclaw <agent_id>`
+- Claude Code direct: `npx @aporthq/aport-agent-guardrails claude-code`
+- Curl install URL: `curl -fsSL https://aport.io/install.sh | bash -s -- claude-code`
+- Existing hosted passport: `npx @aporthq/aport-agent-guardrails claude-code <agent_id>`
 - Reset a framework to a clean APort state: `npx @aporthq/aport-agent-guardrails reset claude-code --yes`
+
+When prompted for passport setup, the choices are:
+
+1. `Create hosted APort passport now` — recommended; creates a hosted passport and narrow setup key.
+2. `Use existing hosted passport ID` — paste an existing `agent_id`.
+3. `Create local passport file` — offline/local JSON passport.
+
+For a new hosted setup, choose option `1`. The installer creates a passport, creates a narrow setup key, writes the framework hook/config, and starts sending decisions to APort. For non-interactive installs:
+
+```bash
+npx --yes @aporthq/aport-agent-guardrails claude-code \
+  --quick-hosted \
+  --email you@example.com \
+  --non-interactive
+```
+
+Equivalent environment-variable form:
+
+```bash
+APORT_OWNER_EMAIL="you@example.com" \
+APORT_QUICK_HOSTED=1 \
+npx --yes @aporthq/aport-agent-guardrails claude-code --non-interactive
+```
 
 ### Why Developers and teams trust APort
 
@@ -159,11 +183,11 @@ aport setup --framework=langchain
 ```
 Then install the framework-specific Python package and follow the printed integration step for your framework.
 
-This runs the **passport wizard** and writes config for your framework. Follow the **next steps** printed at the end (e.g. restart Cursor; or for CrewAI: by default install `aport-agent-guardrails-crewai` for released CrewAI, or opt into native-provider mode if your CrewAI build supports it).
+This runs setup and writes config for your framework. Choose hosted setup for passport and setup-key creation, or local setup for an on-disk passport. Follow the **next steps** printed at the end (e.g. restart Cursor; or for CrewAI: by default install `aport-agent-guardrails-crewai` for released CrewAI, or opt into native-provider mode if your CrewAI build supports it).
 
 **Guardrail mode (local vs API)** — On the **Node** installer (`npx @aporthq/aport-agent-guardrails …` / `bin/agent-guardrails`), every framework accepts the same flags: `--mode=api` (with optional `--api-url`, default `https://api.aport.io`) or `--mode=local`, and an optional hosted `ap_<hex>` argument (API mode, no local passport). That flow writes `…/aport/guardrail-mode.env` where the hooks/generic installers need it. The **Python** `aport setup` CLI does not parse those flags yet; use the Node command above for API/local mode during setup, or set mode in your framework `config.yaml` per the framework doc.
 
-**2. Hosted passport (optional)** — If you already have an agent_id from [aport.io](https://aport.io), use it to skip the wizard: `npx @aporthq/aport-agent-guardrails openclaw <agent_id>`. See [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md).
+**2. Hosted passport (optional)** — The installer can create a hosted passport during setup. If you already have an agent_id from [aport.io](https://aport.io), use it to skip passport creation: `npx @aporthq/aport-agent-guardrails claude-code <agent_id>`. See [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md).
 
 **3. Test that policy runs** — After setup, the guardrail runs automatically when your agent uses tools (Cursor hook, LangChain callback, OpenClaw plugin, etc.). To try allow/deny from the command line (any framework), use the installed `aport-guardrail` command (Node) or call the evaluator from Python; both use your existing passport from the framework config dir (e.g. `~/.cursor/aport/`, `~/.aport/langchain/aport/`).
 
@@ -445,7 +469,7 @@ Use the framework-specific doc for where config and passport live and for any ex
 
 | Doc | Description |
 |-----|-------------|
-| [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md) | 5-minute OpenClaw setup |
+| [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md) | One-command OpenClaw setup |
 | [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md) | Use passport from aport.io — `npx ... openclaw <agent_id>` or choose hosted in wizard |
 | [Verification methods (local vs API)](docs/VERIFICATION_METHODS.md) | Deep dive: bash vs API evaluator |
 | [Quick Start Guide](docs/QUICKSTART.md) | Passport wizard, copy-paste option |

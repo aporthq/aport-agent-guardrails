@@ -56,7 +56,7 @@ const ids = ['deploy', 'enforce', 'uninstall'];
 const scripts = ids.map((id) => {
   const file = 'aport-device-' + id + '.bundled.sh';
   const sha = fs.readFileSync(path.join(dist, file + '.sha256'), 'utf8').trim();
-  return { id, filename: file, sha256: sha, download_path: '/api/enterprise/scripts/' + id };
+  return { id, filename: file, sha256: sha, download_path: '/enterprise/scripts/' + id };
 });
 const coreSha = require('crypto')
   .createHash('sha256')
@@ -66,7 +66,7 @@ scripts.push({
   id: 'core',
   filename: 'aport-device-core.mjs',
   sha256: coreSha,
-  download_path: '/api/enterprise/scripts/core',
+  download_path: '/enterprise/scripts/core',
 });
 fs.writeFileSync(
   path.join(dist, 'enterprise-scripts-manifest.json'),

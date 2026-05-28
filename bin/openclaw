@@ -27,6 +27,11 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# shellcheck source=lib/guardrail-mode.sh
+source "$SCRIPT_DIR/lib/guardrail-mode.sh"
+# shellcheck source=lib/quick-hosted.sh
+source "$SCRIPT_DIR/lib/quick-hosted.sh"
+
 APORT_PLUGIN_PATH="$REPO_ROOT/extensions/openclaw-aport"
 DEFAULT_CONFIG="${OPENCLAW_HOME:-$HOME/.openclaw}"
 
@@ -74,7 +79,16 @@ process.stdin.on("end", () => {
 
 # Parse command line arguments
 HOSTED_AGENT_ID=""
-if [ -n "$1" ]; then
+parse_guardrail_mode_args "$@"
+if [ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]; then
+	HOSTED_AGENT_ID="$APORT_HOSTED_AGENT_ID_CLI"
+fi
+if [ "${#APORT_FRAMEWORK_ARGS[@]}" -gt 0 ]; then
+	set -- "${APORT_FRAMEWORK_ARGS[@]}"
+else
+	set --
+fi
+if [ -n "${1:-}" ]; then
 	# Handle help flags
 	if [[ "$1" == "--help" || "$1" == "-h" ]]; then
 		echo "Usage: $0 [agent_id]"
@@ -196,27 +210,13 @@ elif [ -f "$PASSPORT_FILE" ]; then
 		run_local_passport_wizard
 	fi
 else
-	# No agent_id, no local passport - ask user
-	echo "  📋 Passport Options:"
-	echo "     1. Use hosted passport (agent_id from aport.io)"
-	echo "     2. Create new local passport (wizard)"
-	echo ""
-	read -p "  Choice [1/2]: " passport_choice
-
-	if [ "$passport_choice" = "1" ]; then
-		echo ""
-		read -p "  Enter agent_id from aport.io: " agent_id_input
-		# Validate format
-		if [[ ! "$agent_id_input" =~ ^ap_[a-f0-9]{32}$ ]]; then
-			echo "  ❌ Invalid agent_id format. Expected: ap_[32 hex characters]"
-			exit 1
-		fi
-		HOSTED_AGENT_ID="$agent_id_input"
+	# No agent_id, no local passport: create hosted passport, use existing hosted ID, or fall back to local wizard.
+	if aport_maybe_configure_hosted_passport "openclaw" "$CONFIG_DIR"; then
+		HOSTED_AGENT_ID="$APORT_AGENT_ID"
 		USE_HOSTED_PASSPORT=true
 		echo "  ✅ Using hosted passport (agent_id: $HOSTED_AGENT_ID)"
 		echo ""
 	else
-		# Create local passport
 		run_local_passport_wizard
 	fi
 fi
@@ -373,6 +373,11 @@ YAML
         # Hosted passport (agent_id only - no local file)
         agentId: $HOSTED_AGENT_ID
 YAML
+			if [ -n "${APORT_API_KEY:-}" ]; then
+				cat >>"$CONFIG_YAML" <<YAML
+        apiKey: $APORT_API_KEY
+YAML
+			fi
 		else
 			cat >>"$CONFIG_YAML" <<YAML
 
@@ -418,6 +423,7 @@ YAML
 				echo "        mode: $PLUGIN_MODE"
 				if [ "$USE_HOSTED_PASSPORT" = true ]; then
 					echo "        agentId: $HOSTED_AGENT_ID"
+					[ -n "${APORT_API_KEY:-}" ] && echo "        apiKey: $APORT_API_KEY"
 				else
 					echo "        passportFile: $PASSPORT_FILE"
 					echo "        guardrailScript: $CONFIG_DIR/.skills/aport-guardrail-bash.sh"
@@ -445,6 +451,7 @@ YAML
 			# Add passport configuration (hosted or local)
 			if [ "$USE_HOSTED_PASSPORT" = true ]; then
 				echo "        agentId: $HOSTED_AGENT_ID" >>"$CONFIG_YAML"
+				[ -n "${APORT_API_KEY:-}" ] && echo "        apiKey: $APORT_API_KEY" >>"$CONFIG_YAML"
 			else
 				echo "        passportFile: $PASSPORT_FILE" >>"$CONFIG_YAML"
 				echo "        guardrailScript: $CONFIG_DIR/.skills/aport-guardrail-bash.sh" >>"$CONFIG_YAML"
@@ -476,9 +483,10 @@ YAML
 			CONFIG_JSON=$(jq -n \
 				--arg mode "$PLUGIN_MODE" \
 				--arg agent_id "$HOSTED_AGENT_ID" \
+				--arg api_key "${APORT_API_KEY:-}" \
 				--arg api_url "$api_url_val" \
 				--arg allow_unmapped "$ALLOW_UNMAPPED" \
-				'{ mode: $mode, agentId: $agent_id, failClosed: true, allowUnmappedTools: ($allow_unmapped == "true") } + (if $mode == "api" then { apiUrl: $api_url } else {} end)')
+				'{ mode: $mode, agentId: $agent_id, failClosed: true, allowUnmappedTools: ($allow_unmapped == "true") } + (if $mode == "api" then { apiUrl: $api_url } else {} end) + (if $api_key != "" then { apiKey: $api_key } else {} end)')
 		else
 			# Local passport config (passportFile in aport/)
 			CONFIG_JSON=$(jq -n \
@@ -510,6 +518,8 @@ YAML
 			echo "  ✅ Removed stale source-linked OpenClaw plugin paths from $OPENCLAW_JSON"
 		fi
 	fi
+	chmod 600 "$CONFIG_YAML" 2>/dev/null || true
+	[ -f "${OPENCLAW_JSON:-}" ] && chmod 600 "$OPENCLAW_JSON" 2>/dev/null || true
 
 	echo ""
 	echo "  ✅ Plugin setup complete!"
@@ -575,8 +585,8 @@ print_smoke_guardrail_command() {
 	smoke_script="$(select_smoke_guardrail_script)"
 
 	if [ "$USE_HOSTED_PASSPORT" = true ]; then
-		printf 'APORT_AGENT_ID="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
-			"$HOSTED_AGENT_ID" "${api_url:-https://api.aport.io}" "$smoke_script"
+		printf 'APORT_AGENT_ID="%s" APORT_API_KEY="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
+			"$HOSTED_AGENT_ID" "${APORT_API_KEY:-}" "${api_url:-https://api.aport.io}" "$smoke_script"
 	elif [ "$PLUGIN_MODE" = "api" ]; then
 		printf 'OPENCLAW_PASSPORT_FILE="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
 			"$PASSPORT_FILE" "${api_url:-https://api.aport.io}" "$smoke_script"
@@ -591,7 +601,7 @@ run_smoke_guardrail_check() {
 	smoke_script="$(select_smoke_guardrail_script)"
 
 	if [ "$USE_HOSTED_PASSPORT" = true ]; then
-		APORT_AGENT_ID="$HOSTED_AGENT_ID" APORT_API_URL="${api_url:-https://api.aport.io}" \
+		APORT_AGENT_ID="$HOSTED_AGENT_ID" APORT_API_KEY="${APORT_API_KEY:-}" APORT_API_URL="${api_url:-https://api.aport.io}" \
 			"$smoke_script" system.command.execute '{"command":"node --version"}'
 	elif [ "$PLUGIN_MODE" = "api" ]; then
 		OPENCLAW_PASSPORT_FILE="$PASSPORT_FILE" APORT_API_URL="${api_url:-https://api.aport.io}" \

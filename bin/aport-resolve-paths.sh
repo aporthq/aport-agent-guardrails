@@ -73,19 +73,22 @@ resolve_aport_paths() {
             passport_path="$OPENCLAW_PASSPORT_FILE"
             data_dir="$(dirname "$OPENCLAW_PASSPORT_FILE")"
         fi
-    # 3) No env → probe framework-specific default paths (where each framework stores data), then OpenClaw legacy
+    # 3) Probe framework paths, or honor OPENCLAW_CONFIG_DIR (set by framework hooks before resolve).
     else
-        config_dir=""
-        for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.aport/deerflow" "$HOME/.n8n"; do
-            if [ -f "${candidate}/aport/passport.json" ]; then
-                config_dir="$candidate"
-                break
+        if [ -n "${OPENCLAW_CONFIG_DIR:-}" ]; then
+            config_dir="${OPENCLAW_CONFIG_DIR/#\~/$HOME}"
+        else
+            config_dir=""
+            for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.aport/deerflow" "$HOME/.n8n"; do
+                if [ -f "${candidate}/aport/passport.json" ]; then
+                    config_dir="$candidate"
+                    break
+                fi
+            done
+            if [ -z "$config_dir" ]; then
+                config_dir="$HOME/.openclaw"
             fi
-        done
-        if [ -z "$config_dir" ]; then
-            config_dir="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
         fi
-        config_dir="${config_dir/#\~/$HOME}"
         if [ -f "${config_dir}/aport/passport.json" ]; then
             passport_path="${config_dir}/aport/passport.json"
             data_dir="${config_dir}/aport"

@@ -14,6 +14,8 @@ source "$LIB/config.sh"
 source "$LIB/framework-setup.sh"
 # shellcheck source=../lib/guardrail-mode.sh
 source "$LIB/guardrail-mode.sh"
+# shellcheck source=../lib/quick-hosted.sh
+source "$LIB/quick-hosted.sh"
 
 run_setup() {
     parse_guardrail_mode_args "$@"
@@ -28,6 +30,9 @@ run_setup() {
     if [[ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
         hosted_agent_id="$APORT_HOSTED_AGENT_ID_CLI"
         export APORT_AGENT_ID="$hosted_agent_id"
+        log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
+    elif aport_maybe_configure_hosted_passport "cursor" "$config_dir"; then
+        hosted_agent_id="$APORT_AGENT_ID"
         log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
     else
         # Check AGENTS.md for enforcement config — skip wizard if already configured

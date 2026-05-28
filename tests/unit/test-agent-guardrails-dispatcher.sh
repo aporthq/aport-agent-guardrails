@@ -216,6 +216,75 @@ grep -q "Guardrail mode: api" "$out11" || {
 }
 echo "  ✅ --non-interactive flag works for hosted Claude setup"
 
+# 12. Non-interactive quick-hosted flags should pass through dispatcher to framework setup
+out12="$TEST_DIR/dispatcher-12.txt"
+CLAUDE_QUICK_DIR="$TEST_DIR/claude_quick_hosted"
+FAKE_BIN="$TEST_DIR/fake-bin-quick-hosted"
+QUICK_PAYLOAD_LOG="$TEST_DIR/quick-hosted-payload.json"
+mkdir -p "$CLAUDE_QUICK_DIR" "$FAKE_BIN"
+cat > "$FAKE_BIN/curl" << 'EOF'
+#!/bin/bash
+set -e
+payload=""
+output=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --data)
+            payload="$2"
+            shift 2
+            ;;
+        -o)
+            output="$2"
+            shift 2
+            ;;
+        -w)
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+printf '%s' "$payload" > "$APORT_TEST_QUICK_HOSTED_PAYLOAD"
+printf '{"agent_id":"ap_1234567890abcdef1234567890abcdef","api_key":"apk_runtime_test","api_key_id":"key_runtime"}' > "$output"
+printf '201'
+EOF
+chmod +x "$FAKE_BIN/curl"
+set +e
+PATH="$FAKE_BIN:$PATH" \
+    APORT_TEST_QUICK_HOSTED_PAYLOAD="$QUICK_PAYLOAD_LOG" \
+    APORT_CLAUDE_CODE_CONFIG_DIR="$CLAUDE_QUICK_DIR" \
+    "$DISPATCHER" claude-code --quick-hosted --email dev@example.com --issue-url https://aport.id/api/issue --non-interactive < /dev/null > "$out12" 2>&1
+e12=$?
+set -e
+[[ "$e12" -eq 0 ]] || {
+    echo "FAIL: quick-hosted flags should let hosted Claude setup finish without prompts" >&2
+    cat "$out12" >&2
+    exit 1
+}
+grep -q "Created hosted passport: ap_1234567890abcdef1234567890abcdef" "$out12" || {
+    echo "FAIL: expected quick-hosted passport creation through dispatcher" >&2
+    cat "$out12" >&2
+    exit 1
+}
+grep -q "Guardrail mode: api" "$out12" || {
+    echo "FAIL: expected quick-hosted setup to complete in api mode" >&2
+    cat "$out12" >&2
+    exit 1
+}
+node -e '
+const fs = require("fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (payload.email !== "dev@example.com") process.exit(1);
+if (payload.framework?.[0] !== "claude-code") process.exit(2);
+if (payload.showInGallery !== false) process.exit(3);
+' "$QUICK_PAYLOAD_LOG" || {
+    echo "FAIL: quick-hosted flags should send email/framework payload" >&2
+    cat "$QUICK_PAYLOAD_LOG" >&2
+    exit 1
+}
+echo "  ✅ quick-hosted flags pass through dispatcher for non-interactive hosted setup"
+
 echo ""
 echo "  All dispatcher tests passed."
 echo ""

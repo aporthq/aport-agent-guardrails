@@ -9,6 +9,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Anchor data paths to Claude Code config before resolve (hosted/API installs may have no passport.json).
+export OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-${APORT_CLAUDE_CODE_CONFIG_DIR:-$HOME/.claude}}"
+OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR/#\~/$HOME}"
+
 # Path resolver: probes ~/.claude, ~/.cursor, ~/.openclaw, etc.
 # shellcheck source=bin/aport-resolve-paths.sh
 . "$ROOT_DIR/bin/aport-resolve-paths.sh"

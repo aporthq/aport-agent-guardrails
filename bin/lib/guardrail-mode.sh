@@ -9,6 +9,9 @@ parse_guardrail_mode_args() {
     APORT_GUARDRAIL_MODE_CLI="${APORT_GUARDRAIL_MODE_CLI:-}"
     APORT_GUARDRAIL_API_URL_CLI="${APORT_GUARDRAIL_API_URL_CLI:-}"
     APORT_HOSTED_AGENT_ID_CLI="${APORT_HOSTED_AGENT_ID_CLI:-}"
+    APORT_QUICK_HOSTED_CLI="${APORT_QUICK_HOSTED_CLI:-}"
+    APORT_OWNER_EMAIL_CLI="${APORT_OWNER_EMAIL_CLI:-}"
+    APORT_ISSUE_URL_CLI="${APORT_ISSUE_URL_CLI:-}"
     APORT_FRAMEWORK_ARGS=()
 
     while [[ $# -gt 0 ]]; do
@@ -35,6 +38,31 @@ parse_guardrail_mode_args() {
                 APORT_GUARDRAIL_API_URL_CLI="$2"
                 shift
                 ;;
+            --quick-hosted | --hosted)
+                APORT_QUICK_HOSTED_CLI="1"
+                ;;
+            --email=* | --owner-email=*)
+                APORT_OWNER_EMAIL_CLI="${1#*=}"
+                ;;
+            --email | --owner-email)
+                if [[ -z "${2:-}" ]]; then
+                    echo "[aport] ERROR: $1 requires an email value" >&2
+                    return 1
+                fi
+                APORT_OWNER_EMAIL_CLI="$2"
+                shift
+                ;;
+            --issue-url=*)
+                APORT_ISSUE_URL_CLI="${1#*=}"
+                ;;
+            --issue-url)
+                if [[ -z "${2:-}" ]]; then
+                    echo "[aport] ERROR: --issue-url requires a value" >&2
+                    return 1
+                fi
+                APORT_ISSUE_URL_CLI="$2"
+                shift
+                ;;
             ap_[a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9])
                 APORT_HOSTED_AGENT_ID_CLI="$1"
                 ;;
@@ -46,6 +74,7 @@ parse_guardrail_mode_args() {
     done
 
     export APORT_GUARDRAIL_MODE_CLI APORT_GUARDRAIL_API_URL_CLI APORT_HOSTED_AGENT_ID_CLI
+    export APORT_QUICK_HOSTED_CLI APORT_OWNER_EMAIL_CLI APORT_ISSUE_URL_CLI
     return 0
 }
 
@@ -138,6 +167,9 @@ write_guardrail_mode_file() {
         fi
         if [[ -n "$hosted_agent_id" ]]; then
             echo "APORT_AGENT_ID=$hosted_agent_id"
+        fi
+        if [[ -n "${APORT_API_KEY:-}" ]]; then
+            echo "APORT_API_KEY=$APORT_API_KEY"
         fi
     } > "$mode_file"
     chmod 600 "$mode_file" 2> /dev/null || true
