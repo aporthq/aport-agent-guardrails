@@ -362,11 +362,11 @@ function loadState(cfg) {
   }
 }
 
-function persistState(cfg, agentId, runtimeApiKey, tenantRef) {
+function persistState(cfg, agentId, runtimeCredential, tenantRef) {
   fs.mkdirSync(cfg.stateDir, { recursive: true, mode: 0o700 });
   const body = [
     `APORT_AGENT_ID=${JSON.stringify(agentId)}`,
-    `APORT_RUNTIME_API_KEY=${JSON.stringify(runtimeApiKey)}`,
+    `APORT_RUNTIME_API_KEY=${JSON.stringify(runtimeCredential)}`,
     `APORT_API_URL=${JSON.stringify(cfg.apiUrl)}`,
     `APORT_TEMPLATE_ID=${JSON.stringify(cfg.templateId)}`,
     `APORT_FRAMEWORK=${JSON.stringify(cfg.framework)}`,
@@ -451,6 +451,10 @@ function createRuntimeSetupKey(cfg, agentId) {
   return key;
 }
 
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
 function isRoot() {
   try {
     return process.getuid() === 0;
@@ -459,7 +463,7 @@ function isRoot() {
   }
 }
 
-function npxInstall(cfg, user, home, agentId, runtimeApiKey) {
+function npxInstall(cfg, user, home, agentId, runtimeCredential) {
   const args = [
     '--yes',
     cfg.npxPackage,
@@ -474,7 +478,7 @@ function npxInstall(cfg, user, home, agentId, runtimeApiKey) {
     HOME: home,
     APORT_NONINTERACTIVE: '1',
     CI: '1',
-    APORT_API_KEY: runtimeApiKey,
+    APORT_API_KEY: runtimeCredential,
     APORT_AGENT_ID: agentId,
     APORT_API_URL: cfg.apiUrl,
   };
@@ -492,16 +496,16 @@ function npxInstall(cfg, user, home, agentId, runtimeApiKey) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-function writeRuntimeConfig(cfg, user, home, agentId, runtimeApiKey) {
+function writeRuntimeConfig(cfg, user, home, agentId, runtimeCredential) {
   const configDir = frameworkConfigDir(home, cfg.framework);
   const aportDir = path.join(configDir, 'aport');
   fs.mkdirSync(aportDir, { recursive: true });
   const modeFile = path.join(aportDir, 'guardrail-mode.env');
   const content = [
-    'APORT_GUARDRAIL_MODE=api',
-    `APORT_API_URL=${cfg.apiUrl}`,
-    `APORT_AGENT_ID=${agentId}`,
-    `APORT_API_KEY=${runtimeApiKey}`,
+    `APORT_GUARDRAIL_MODE=${shellQuote('api')}`,
+    `APORT_API_URL=${shellQuote(cfg.apiUrl)}`,
+    `APORT_AGENT_ID=${shellQuote(agentId)}`,
+    `APORT_API_KEY=${shellQuote(runtimeCredential)}`,
   ].join('\n');
   fs.writeFileSync(modeFile, `${content}\n`, { mode: 0o600 });
 
@@ -544,7 +548,7 @@ function installAction(cfg) {
 
   let state = loadState(cfg);
   let agentId = state.APORT_AGENT_ID || '';
-  let runtimeApiKey = state.APORT_RUNTIME_API_KEY || '';
+  let runtimeCredential = state.APORT_RUNTIME_API_KEY || '';
 
   if (!agentId) {
     agentId = findExistingInstance(cfg, tenantRef);
@@ -559,14 +563,14 @@ function installAction(cfg) {
   }
   assertSafePassportId(agentId, 'instance_id');
 
-  if (!runtimeApiKey) {
+  if (!runtimeCredential) {
     log(`Minting read-scoped runtime key for ${agentId}`);
-    runtimeApiKey = createRuntimeSetupKey(cfg, agentId);
+    runtimeCredential = createRuntimeSetupKey(cfg, agentId);
   }
 
-  persistState(cfg, agentId, runtimeApiKey, tenantRef);
-  npxInstall(cfg, user, home, agentId, runtimeApiKey);
-  writeRuntimeConfig(cfg, user, home, agentId, runtimeApiKey);
+  persistState(cfg, agentId, runtimeCredential, tenantRef);
+  npxInstall(cfg, user, home, agentId, runtimeCredential);
+  writeRuntimeConfig(cfg, user, home, agentId, runtimeCredential);
   log(`Install complete for ${cfg.framework} (${agentId})`);
 }
 

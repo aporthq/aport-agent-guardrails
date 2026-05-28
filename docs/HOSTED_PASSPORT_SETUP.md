@@ -31,13 +31,38 @@ You have two options when using APort guardrails with OpenClaw:
 
 **Step 2: Install Guardrails**
 
-**Option A — One command (if you have your agent_id):**
+**Option A — One command:**
+
+```bash
+npx @aporthq/aport-agent-guardrails openclaw
+```
+
+When prompted for passport setup, choose option `1`:
+
+1. `Create hosted APort passport now` — recommended; creates a hosted passport and narrow setup key.
+2. `Use existing hosted passport ID` — paste an existing `agent_id`.
+3. `Create local passport file` — offline/local JSON passport.
+
+The installer creates a passport, creates a narrow setup key, and configures the plugin to use hosted verification.
+
+Non-interactive hosted setup uses the same dispatcher:
+
+```bash
+npx --yes @aporthq/aport-agent-guardrails openclaw \
+  --quick-hosted \
+  --email you@example.com \
+  --non-interactive
+```
+
+Use `--api-url https://your-aport.example` for a private APort deployment; non-interactive OpenClaw setup uses defaults for config directory and strict mode.
+
+If you already have your agent_id, pass it directly:
 
 ```bash
 npx @aporthq/aport-agent-guardrails openclaw <agent_id>
 ```
 
-Example: `npx @aporthq/aport-agent-guardrails openclaw ap_fa2f6d53bb5b4c98b9af0124285b6e0f`. The CLI skips the passport wizard and configures the plugin to use your hosted passport.
+Example: `npx @aporthq/aport-agent-guardrails openclaw ap_fa2f6d53bb5b4c98b9af0124285b6e0f`. The CLI skips passport creation and configures the plugin to use your hosted passport.
 
 **Option B — Interactive:**
 
@@ -45,7 +70,7 @@ Example: `npx @aporthq/aport-agent-guardrails openclaw ap_fa2f6d53bb5b4c98b9af01
 npx @aporthq/aport-agent-guardrails
 ```
 
-When prompted for passport, choose "Use hosted passport (agent_id only)" and paste your `agent_id`. Config directory default: `~/.openclaw`. Plugin mode will be API (required for hosted).
+When prompted for passport, create a hosted passport or paste an existing `agent_id`. Config directory default: `~/.openclaw`. Plugin mode will be API (required for hosted).
 
 **Step 3: Start OpenClaw**
 
@@ -275,7 +300,7 @@ Ask your OpenClaw agent:
 4. Reinstall plugin:
    ```bash
    openclaw plugins uninstall openclaw-aport
-   npx @aporthq/aport-agent-guardrails
+   npx @aporthq/aport-agent-guardrails openclaw
    ```
 
 ### Passport Suspended But Agent Still Running

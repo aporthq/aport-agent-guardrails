@@ -19,6 +19,8 @@ source "$LIB/runtime.sh"
 source "$LIB/config.sh"
 # shellcheck source=../lib/guardrail-mode.sh
 source "$LIB/guardrail-mode.sh"
+# shellcheck source=../lib/quick-hosted.sh
+source "$LIB/quick-hosted.sh"
 
 framework="${APORT_FRAMEWORK:?APORT_FRAMEWORK must be set by the dispatcher}"
 crewai_integration_mode="${APORT_CREWAI_INTEGRATION_MODE:-compat}"
@@ -134,6 +136,9 @@ persist_python_framework_config() {
 
     if [[ "$selected_mode" == "api" ]]; then
         _config_replace_or_append "$config_file" "api_url" "$(_yaml_quote "${selected_api_url:-$DEFAULT_APORT_API_URL}")"
+        if [[ -n "${APORT_API_KEY:-}" ]]; then
+            _config_replace_or_append "$config_file" "api_key" "$(_yaml_quote "$APORT_API_KEY")"
+        fi
         if [[ -n "$hosted_id" ]]; then
             _config_replace_or_append "$config_file" "agent_id" "$(_yaml_quote "$hosted_id")"
             _config_remove_key "$config_file" "passport_path"
@@ -146,6 +151,7 @@ persist_python_framework_config() {
             _config_replace_or_append "$config_file" "passport_path" "$(_yaml_quote "$local_passport_path")"
         fi
         _config_remove_key "$config_file" "agent_id"
+        _config_remove_key "$config_file" "api_key"
     fi
 
     chmod 600 "$config_file" 2> /dev/null || true
@@ -165,6 +171,9 @@ run_setup() {
         log_info "CrewAI integration mode: $crewai_integration_mode"
     fi
     if [[ -n "$hosted_agent_id" ]]; then
+        log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
+    elif aport_maybe_configure_hosted_passport "$framework" "$config_dir"; then
+        hosted_agent_id="$APORT_AGENT_ID"
         log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
     elif ((${#FORWARD_ARGS[@]} > 0)); then
         run_passport_wizard "${FORWARD_ARGS[@]}"

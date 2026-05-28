@@ -38,6 +38,7 @@ enforcement:
 EOF
 
 # Clear env to ensure clean state
+unset APORT_PASSPORT_FILE APORT_DECISION_FILE APORT_AUDIT_LOG 2> /dev/null || true
 unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG 2> /dev/null || true
 unset PASSPORT_FILE DECISION_FILE AUDIT_LOG 2> /dev/null || true
 (
@@ -51,8 +52,8 @@ unset PASSPORT_FILE DECISION_FILE AUDIT_LOG 2> /dev/null || true
 )
 PASS=$((PASS + 1))
 
-# --- Test 2: OPENCLAW_PASSPORT_FILE overrides AGENTS.md ---
-echo "Test 2: Explicit env var overrides AGENTS.md"
+# --- Test 2: APORT_PASSPORT_FILE overrides AGENTS.md ---
+echo "Test 2: Explicit canonical env var overrides AGENTS.md"
 t="$TMPDIR_BASE/t2"
 mkdir -p "$t/.aport"
 echo '{"spec_version":"oap/1.0","status":"active"}' > "$t/.aport/passport.json"
@@ -68,11 +69,15 @@ EOF
 
 (
     cd "$t"
-    export OPENCLAW_PASSPORT_FILE="$t/override/passport.json"
-    unset OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG 2> /dev/null || true
+    export APORT_PASSPORT_FILE="$t/override/passport.json"
+    unset APORT_DECISION_FILE APORT_AUDIT_LOG OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG 2> /dev/null || true
     source "$SCRIPT_DIR/bin/aport-resolve-paths.sh"
     [ "$PASSPORT_FILE" = "$t/override/passport.json" ] || {
         echo "  ✗ Override failed: PASSPORT_FILE=$PASSPORT_FILE"
+        exit 1
+    }
+    [ "$OPENCLAW_PASSPORT_FILE" = "$APORT_PASSPORT_FILE" ] || {
+        echo "  ✗ Legacy alias not synced: OPENCLAW_PASSPORT_FILE=$OPENCLAW_PASSPORT_FILE"
         exit 1
     }
     echo "  ✓ Explicit env var takes precedence over AGENTS.md"
@@ -93,6 +98,7 @@ EOF
 
 (
     cd "$t"
+    unset APORT_PASSPORT_FILE APORT_DECISION_FILE APORT_AUDIT_LOG 2> /dev/null || true
     unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG APORT_AGENT_ID 2> /dev/null || true
     source "$SCRIPT_DIR/bin/aport-resolve-paths.sh"
     [ "$APORT_AGENT_ID" = "ap_test1234" ] || {
@@ -109,10 +115,33 @@ t="$TMPDIR_BASE/t4"
 mkdir -p "$t"
 (
     cd "$t"
-    unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG APORT_AGENT_ID 2> /dev/null || true
+    unset APORT_PASSPORT_FILE APORT_DECISION_FILE APORT_AUDIT_LOG APORT_CONFIG_DIR 2> /dev/null || true
+    unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG OPENCLAW_CONFIG_DIR APORT_AGENT_ID 2> /dev/null || true
     source "$SCRIPT_DIR/bin/aport-resolve-paths.sh"
     # Should fall through to default path probe — no AGENTS.md, no error
     echo "  ✓ No AGENTS.md — fell through to default resolution"
+)
+PASS=$((PASS + 1))
+
+# --- Test 5: APORT_CONFIG_DIR anchors hosted/API framework paths ---
+echo "Test 5: APORT_CONFIG_DIR anchors paths without passport.json"
+t="$TMPDIR_BASE/t5"
+mkdir -p "$t/.cursor"
+(
+    cd "$t"
+    export APORT_CONFIG_DIR="$t/.cursor"
+    unset APORT_PASSPORT_FILE APORT_DECISION_FILE APORT_AUDIT_LOG 2> /dev/null || true
+    unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG OPENCLAW_CONFIG_DIR 2> /dev/null || true
+    source "$SCRIPT_DIR/bin/aport-resolve-paths.sh"
+    [ "$APORT_PASSPORT_FILE" = "$t/.cursor/aport/passport.json" ] || {
+        echo "  ✗ APORT_CONFIG_DIR path failed: APORT_PASSPORT_FILE=$APORT_PASSPORT_FILE"
+        exit 1
+    }
+    [ "$OPENCLAW_PASSPORT_FILE" = "$APORT_PASSPORT_FILE" ] || {
+        echo "  ✗ Legacy passport alias not synced"
+        exit 1
+    }
+    echo "  ✓ APORT_CONFIG_DIR anchors framework paths"
 )
 PASS=$((PASS + 1))
 

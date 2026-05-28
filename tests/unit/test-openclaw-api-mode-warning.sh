@@ -52,11 +52,11 @@ SCRIPT
 chmod +x "$FAKE_BIN/openclaw"
 
 set +e
-printf '\nN\n2\nhttp://127.0.0.1:1\n\n' | env \
+printf '\nN\n2\n\n' | env \
     PATH="$FAKE_BIN:$NODE_DIR:/usr/bin:/bin" \
     OPENCLAW_HOME="$CONFIG_DIR" \
     APORT_FAKE_OPENCLAW_PLUGIN_VERSION="$PLUGIN_VERSION" \
-    "$REPO_ROOT/bin/openclaw" > "$LOG_FILE" 2>&1
+    "$REPO_ROOT/bin/openclaw" --api-url http://127.0.0.1:1 > "$LOG_FILE" 2>&1
 EXIT_CODE=$?
 set -e
 
@@ -92,6 +92,12 @@ grep -q "aport-guardrail-api.sh system.command.execute" "$LOG_FILE" || {
 
 grep -q "mode: api" "$CONFIG_DIR/config.yaml" || {
     echo "FAIL: expected config.yaml to use api mode" >&2
+    cat "$CONFIG_DIR/config.yaml" >&2
+    exit 1
+}
+
+grep -q "apiUrl: http://127.0.0.1:1" "$CONFIG_DIR/config.yaml" || {
+    echo "FAIL: expected config.yaml to use CLI-provided API URL" >&2
     cat "$CONFIG_DIR/config.yaml" >&2
     exit 1
 }

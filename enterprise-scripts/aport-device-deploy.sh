@@ -51,6 +51,15 @@ export DISABLE_DEVICE_INFO="${DISABLE_DEVICE_INFO:-}"
 # NO CHANGES NEEDED BELOW THIS LINE
 # ==============================================================================
 
+if [ -z "${BASH_SOURCE[0]+x}" ] || [ "${BASH_SOURCE[0]}" = "bash" ]; then
+    printf '%s\n' \
+        '[aport-device] ERROR: This file is not safe for "curl | bash".' \
+        '[aport-device] Use the bundled release script instead, e.g.:' \
+        '  curl -fsSL https://api.aport.io/enterprise/scripts/deploy | bash' \
+        '[aport-device] Or save the bundled script and run: bash aport-device-deploy.bundled.sh' >&2
+    exit 1
+fi
+
 _APORT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=enterprise-scripts/aport-device-lib.sh
 . "$_APORT_SCRIPT_DIR/aport-device-lib.sh"

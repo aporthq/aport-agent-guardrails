@@ -171,7 +171,10 @@ function loadPolicyPack(policyId) {
 function loadPassport(passportPath) {
   const defaultPath = path.join(process.env.HOME, ".openclaw", "passport.json");
   const filePath =
-    passportPath || process.env.OPENCLAW_PASSPORT_FILE || defaultPath;
+    passportPath ||
+    process.env.APORT_PASSPORT_FILE ||
+    process.env.OPENCLAW_PASSPORT_FILE ||
+    defaultPath;
 
   if (!fs.existsSync(filePath)) {
     throw new Error(`Passport file not found: ${filePath}`);
@@ -189,7 +192,10 @@ function loadPassport(passportPath) {
 function writeDecision(decision, decisionPath) {
   const defaultPath = path.join(process.env.HOME, ".openclaw", "decision.json");
   const filePath =
-    decisionPath || process.env.OPENCLAW_DECISION_FILE || defaultPath;
+    decisionPath ||
+    process.env.APORT_DECISION_FILE ||
+    process.env.OPENCLAW_DECISION_FILE ||
+    defaultPath;
 
   // Ensure directory exists
   const dir = path.dirname(filePath);
