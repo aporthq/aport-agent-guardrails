@@ -7,6 +7,7 @@
 | [QUICKSTART_OPENCLAW_PLUGIN.md](QUICKSTART_OPENCLAW_PLUGIN.md) | **OpenClaw plugin** — one-command setup, deterministic enforcement (RECOMMENDED) |
 | [**HOSTED_PASSPORT_SETUP.md**](HOSTED_PASSPORT_SETUP.md) | **Use passport from aport.io** — create hosted during setup or pass `npx @aporthq/aport-agent-guardrails openclaw <agent_id>` |
 | [QUICKSTART.md](QUICKSTART.md) | Interactive setup and step-by-step hosted/local passport options |
+| [ENTERPRISE_DEVICE_DEPLOYMENT.md](ENTERPRISE_DEVICE_DEPLOYMENT.md) | IT-managed deploy, enforce, and uninstall scripts |
 | [OPENCLAW_LOCAL_INTEGRATION.md](OPENCLAW_LOCAL_INTEGRATION.md) | Full OpenClaw setup: API, passport, policies, Python example |
 | [OPENCLAW_TOOLS_AND_POLICIES.md](OPENCLAW_TOOLS_AND_POLICIES.md) | exec, allowed_commands, unmapped tools, passport limits |
 | [TOOL_POLICY_MAPPING.md](TOOL_POLICY_MAPPING.md) | How tool names map to policy packs |

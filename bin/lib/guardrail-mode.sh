@@ -5,6 +5,10 @@
 
 DEFAULT_APORT_API_URL="${DEFAULT_APORT_API_URL:-https://api.aport.io}"
 
+is_aport_hosted_agent_id() {
+    [[ "${1:-}" =~ ^(ap|apt|agt_inst|agt_tmpl)_[A-Za-z0-9_-]+$ ]]
+}
+
 parse_guardrail_mode_args() {
     APORT_GUARDRAIL_MODE_CLI="${APORT_GUARDRAIL_MODE_CLI:-}"
     APORT_GUARDRAIL_API_URL_CLI="${APORT_GUARDRAIL_API_URL_CLI:-}"
@@ -66,7 +70,11 @@ parse_guardrail_mode_args() {
                 APORT_ISSUE_URL_CLI="$2"
                 shift
                 ;;
-            ap_[a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9])
+            ap_* | apt_* | agt_inst_* | agt_tmpl_*)
+                if ! is_aport_hosted_agent_id "$1"; then
+                    echo "[aport] ERROR: Invalid hosted passport ID format: $1" >&2
+                    return 1
+                fi
                 APORT_HOSTED_AGENT_ID_CLI="$1"
                 ;;
             *)
