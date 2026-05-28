@@ -13,6 +13,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Anchor data paths to Cursor config before resolve (hosted/API installs may have no passport.json).
+# shellcheck source=bin/lib/framework-hook-paths.sh
+. "$ROOT_DIR/bin/lib/framework-hook-paths.sh"
+aport_hook_prepare_framework_paths "cursor" "${APORT_CURSOR_CONFIG_DIR:-}" "$HOME/.cursor"
+
 # Passport/config: resolver probes ~/.cursor, ~/.openclaw, ~/.aport/*, etc.
 # shellcheck source=bin/aport-resolve-paths.sh
 . "$ROOT_DIR/bin/aport-resolve-paths.sh"
@@ -20,7 +25,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$ROOT_DIR/bin/lib/guardrail-mode.sh"
 # shellcheck source=bin/lib/hook-read-policy.sh
 . "$ROOT_DIR/bin/lib/hook-read-policy.sh"
-load_guardrail_mode_for_hooks "${OPENCLAW_CONFIG_DIR:-$HOME/.cursor}"
+load_guardrail_mode_for_hooks "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-$HOME/.cursor}}"
 
 GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-bash.sh"
 if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
@@ -164,9 +169,10 @@ else
 fi
 
 # Use a per-invocation decision file to avoid race conditions with concurrent tool calls
-HOOK_DECISION_FILE="${OPENCLAW_DECISION_FILE:-}"
+HOOK_DECISION_FILE="${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-}}"
 if [ -n "$HOOK_DECISION_FILE" ]; then
     HOOK_DECISION_FILE="${HOOK_DECISION_FILE%.json}-$$.json"
+    export APORT_DECISION_FILE="$HOOK_DECISION_FILE"
     export OPENCLAW_DECISION_FILE="$HOOK_DECISION_FILE"
 fi
 
@@ -202,7 +208,7 @@ if [ -n "$HOOK_DECISION_FILE" ] && [ -f "$HOOK_DECISION_FILE" ]; then
 fi
 # Fallback: try common config dirs
 if [ "$REASON" = "Policy denied this action." ]; then
-    for DEC in "${OPENCLAW_CONFIG_DIR:-$HOME/.cursor}/aport/decision.json" "$HOME/.cursor/aport/decision.json" "$HOME/.openclaw/aport/decision.json"; do
+    for DEC in "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-$HOME/.cursor}}/aport/decision.json" "$HOME/.cursor/aport/decision.json" "$HOME/.openclaw/aport/decision.json"; do
         if [ -f "$DEC" ]; then
             R="$(jq -r '.reasons[0].message // empty' "$DEC" 2> /dev/null)"
             [ -n "$R" ] && REASON="$R" && break

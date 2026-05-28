@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.28
+
+### Patch Changes
+
+- Improve hosted setup and hook path behavior, and harden enterprise script delivery for curl-based installs.
+
 ## 1.0.27
 
 ### Patch Changes

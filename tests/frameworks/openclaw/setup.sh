@@ -11,8 +11,32 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 DISPATCHER="$REPO_ROOT/bin/agent-guardrails"
 TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2> /dev/null || echo "$REPO_ROOT/tests/output")}"
 CONFIG_DIR="$TEST_DIR/.openclaw-integration"
+FAKE_BIN="$TEST_DIR/bin"
 rm -rf "$CONFIG_DIR"
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR" "$FAKE_BIN"
+
+cat > "$FAKE_BIN/openclaw" << 'EOF'
+#!/bin/bash
+set -e
+case "$*" in
+  "plugins list --json")
+    printf '{"plugins":[{"id":"openclaw-aport","version":"test"}]}'
+    ;;
+  "plugins list")
+    printf 'openclaw-aport test\n'
+    ;;
+  plugins\ install*)
+    exit 0
+    ;;
+  "gateway restart" | "gateway probe" | "gateway start")
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+chmod +x "$FAKE_BIN/openclaw"
 
 AGENT_ID="${APORT_TEST_OPENCLAW_AGENT_ID:-ap_8955f5450cd542fe8f67bbbf07c3e103}"
 
@@ -23,7 +47,7 @@ echo ""
 
 export OPENCLAW_HOME="$CONFIG_DIR"
 # Run dispatcher with --framework=openclaw and agent_id; pipe newlines for any prompts from openclaw
-printf '\n\n\n\n' | "$DISPATCHER" --framework=openclaw "$AGENT_ID" 2>&1 | tee "$TEST_DIR/openclaw-setup.log" || true
+printf '\n\n\n\n' | PATH="$FAKE_BIN:$PATH" "$DISPATCHER" --framework=openclaw "$AGENT_ID" 2>&1 | tee "$TEST_DIR/openclaw-setup.log" || true
 
 # Assert config files exist (same as test-openclaw-hosted-flow)
 if [[ ! -f "$CONFIG_DIR/config.yaml" ]]; then

@@ -14,6 +14,8 @@ source "$LIB/config.sh"
 source "$LIB/framework-setup.sh"
 # shellcheck source=../lib/guardrail-mode.sh
 source "$LIB/guardrail-mode.sh"
+# shellcheck source=../lib/quick-hosted.sh
+source "$LIB/quick-hosted.sh"
 
 run_setup() {
     parse_guardrail_mode_args "$@"
@@ -27,6 +29,9 @@ run_setup() {
     if [[ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
         hosted_agent_id="$APORT_HOSTED_AGENT_ID_CLI"
         export APORT_AGENT_ID="$hosted_agent_id"
+        log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
+    elif aport_maybe_configure_hosted_passport "claude-code" "$config_dir"; then
+        hosted_agent_id="$APORT_AGENT_ID"
         log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
     else
         # Check AGENTS.md for enforcement config — skip wizard if already configured
@@ -65,6 +70,11 @@ run_setup() {
     _write_claude_settings "$SETTINGS_FILE" "$HOOK_SCRIPT"
     chmod 600 "$SETTINGS_FILE"
 
+    # Audit log is appended by hooks; create empty file so the advertised path exists after install.
+    mkdir -p "$config_dir/aport"
+    : >> "$config_dir/aport/audit.log"
+    chmod 600 "$config_dir/aport/audit.log" 2> /dev/null || true
+
     echo ""
     echo "  Next steps (Claude Code):"
     echo "  ─────────────────────────"
@@ -78,7 +88,7 @@ run_setup() {
     echo "  5. Restart Claude Code so the PreToolUse hook is picked up."
     echo "  6. Tool use will be checked by APort policy (exit 2 = block)."
     echo ""
-    echo "  Audit log: $config_dir/aport/audit.log"
+    echo "  Audit log: $config_dir/aport/audit.log (entries added on each policy check)"
     echo ""
     echo "  Note: claude --dangerously-skip-permissions bypasses ALL hooks including APort."
     echo "  See: docs/frameworks/claude-code.md"

@@ -306,8 +306,8 @@ jobs:
 
           Auditable install (download, verify hash, run):
           \`\`\`bash
-          curl -fsSL https://api.aport.io/api/enterprise/scripts/deploy?version=$VERSION -o /tmp/aport-deploy.sh
-          # Compare sha256 with GET https://api.aport.io/api/enterprise/scripts
+          curl -fsSL https://api.aport.io/enterprise/scripts/deploy?version=$VERSION -o /tmp/aport-deploy.sh
+          # Compare sha256 with GET https://api.aport.io/enterprise/scripts
           bash /tmp/aport-deploy.sh   # macOS / Linux
           \`\`\`
           Windows: \`powershell -File aport-device-deploy.ps1\` with \`APORT_API_KEY\` / \`APORT_TEMPLATE_ID\` set.

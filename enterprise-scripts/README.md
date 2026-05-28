@@ -91,12 +91,18 @@ On each tag `v*`, CI produces self-contained Unix bundles and ships `aport-devic
 
 ### Download (auditable)
 
+The API serves **bundled** scripts (config header + inlined `aport-device-core.mjs`). They are safe for `curl | bash`.
+
+Do **not** pipe the thin repo scripts (`enterprise-scripts/aport-device-*.sh`) through bash; those require `aport-device-lib.sh` on disk.
+
 ```bash
-curl -fsSL "https://api.aport.io/api/enterprise/scripts?version=1.0.26"
-curl -fsSL "https://api.aport.io/api/enterprise/scripts/deploy?version=1.0.26" -o /tmp/aport-deploy.sh
+curl -fsSL "https://api.aport.io/enterprise/scripts?version=1.0.27"
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.27" -o /tmp/aport-deploy.sh
 shasum -a 256 -c <<< "<sha256>  /tmp/aport-deploy.sh"
 bash /tmp/aport-deploy.sh
 ```
+
+Set `APORT_API_KEY` (issue scope) and `APORT_TEMPLATE_ID` before running, or edit the config block in a saved copy of the bundled script.
 
 ### Local bundle (maintainers)
 

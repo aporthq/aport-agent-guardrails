@@ -14,7 +14,7 @@ Cursor and VS Code with GitHub Copilot support **config-driven hooks** that run 
 
 | Use case | What it is | When to use it |
 |----------|------------|----------------|
-| **Guardrails (CLI/setup)** | One-line installer: runs the **passport wizard**, writes **`~/.cursor/hooks.json`** with the path to the APort hook script. Does not run Cursor for you. | Getting started: create passport and install the hook so Cursor calls our script before the agent runs a command or tool. |
+| **Guardrails (CLI/setup)** | One-line installer: creates or selects a passport, writes **`~/.cursor/hooks.json`** with the path to the APort hook script. Does not run Cursor for you. | Getting started: create passport and install the hook so Cursor calls our script before the agent runs a command or tool. |
 | **Core (runtime)** | The **hook script** (`bin/aport-cursor-hook.sh`) and **evaluator** (bash or API): when the agent runs a command/tool, Cursor invokes the script; we verify and return allow/deny. Optionally, the **Node package** `@aporthq/aport-agent-guardrails-cursor` exposes `Evaluator` and `getHookPath()` if you need them in code. | Guardrails = after setup, the hook runs automatically. Use the Node package only if you're building tooling that needs the evaluator or hook path. |
 
 For Cursor, you almost always use **Guardrails (CLI)** once to install the hook; the **Core** behavior (the script + evaluator) then runs automatically whenever the agent uses the terminal or a tool.
@@ -39,7 +39,7 @@ npx @aporthq/aport-agent-guardrails cursor
 npx @aporthq/aport-agent-guardrails --framework=cursor
 ```
 
-This runs the **passport wizard** and writes **`~/.cursor/hooks.json`** with the path to the APort hook script. The wizard uses a **framework-specific default** for where to store the passport: for Cursor the default is **`~/.cursor/aport/passport.json`** (so passport and evaluation data live with Cursor’s own data). The **first question** in the wizard is “Passport file path [default]:” — press Enter to use that default or type a different path. In non-interactive mode you can pass **`--output /path/to/passport.json`** to choose the path. Restart Cursor (or reload the window) after setup so the hooks are loaded.
+This runs setup and writes **`~/.cursor/hooks.json`** with the path to the APort hook script. Choose hosted setup for passport and setup-key creation, or local setup to write a passport at the framework default path: **`~/.cursor/aport/passport.json`**. In non-interactive local mode you can pass **`--output /path/to/passport.json`** to choose the path. Restart Cursor (or reload the window) after setup so the hooks are loaded.
 
 ## Is it installed? How to check
 
@@ -47,10 +47,10 @@ This runs the **passport wizard** and writes **`~/.cursor/hooks.json`** with the
   ```bash
   npx @aporthq/aport-agent-guardrails cursor
   ```
-  (or `npx @aporthq/aport-agent-guardrails --framework=cursor`). The installer writes `~/.cursor/hooks.json` and runs the passport wizard.
+  (or `npx @aporthq/aport-agent-guardrails --framework=cursor`). The installer writes `~/.cursor/hooks.json` and configures hosted or local passport mode.
 - **Hooks file:** After installing, open `~/.cursor/hooks.json` (user-level) or `.cursor/hooks.json` (project). You should see `beforeShellExecution` and/or `preToolUse` entries whose `command` is the path to `aport-cursor-hook.sh`.
 - **Restart required:** Cursor loads hooks at startup. After installing, **restart Cursor** (or **Reload Window** from the command palette) so the new hooks are active.
-- **Passport:** The hook uses the passport created by the wizard. The default path for Cursor is **`~/.cursor/aport/passport.json`** (each framework has its own default; see [Default paths](#config) below). The resolver probes `~/.cursor`, then `~/.openclaw`, etc., so the hook finds the passport without extra config.
+- **Passport/config:** In hosted mode, the hook loads `~/.cursor/aport/guardrail-mode.env`. In local mode, it uses the passport created at **`~/.cursor/aport/passport.json`** by default (each framework has its own default; see [Default paths](#config) below).
 
 ## What the guardrail applies to (and what it doesn’t)
 

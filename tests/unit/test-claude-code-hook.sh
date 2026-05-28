@@ -239,6 +239,26 @@ EXIT13=$?
 }
 echo "  ✅ PowerShell: exit 0"
 
+# 14. Hosted-style install: no passport.json — resolver must not fall back to ~/.openclaw
+echo "  Test: OPENCLAW_CONFIG_DIR anchors paths without passport.json..."
+HOSTED_DIR="$TEST_DIR/hosted-no-passport"
+mkdir -p "$HOSTED_DIR/aport"
+RESOLVED_AUDIT="$(
+    bash -c '
+        export OPENCLAW_CONFIG_DIR="'"$HOSTED_DIR"'"
+        unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG
+        unset APORT_PASSPORT_FILE APORT_DECISION_FILE APORT_AUDIT_LOG
+        # shellcheck source=bin/aport-resolve-paths.sh
+        . "'"$REPO_ROOT"'/bin/aport-resolve-paths.sh"
+        printf "%s" "$AUDIT_LOG"
+    '
+)"
+[[ "$RESOLVED_AUDIT" == "$HOSTED_DIR/aport/audit.log" ]] || {
+    echo "FAIL: expected $HOSTED_DIR/aport/audit.log, got $RESOLVED_AUDIT" >&2
+    exit 1
+}
+echo "  ✅ Resolver uses OPENCLAW_CONFIG_DIR when no passport.json"
+
 echo ""
 echo "  All Claude Code hook unit tests passed."
 echo ""

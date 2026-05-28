@@ -63,6 +63,8 @@ if [ -n "$DEBUG_APORT" ]; then
 fi
 
 # Export environment variables for evaluator (APORT_API_URL, APORT_AGENT_ID, APORT_API_KEY passed through)
+export APORT_PASSPORT_FILE="$PASSPORT_FILE"
+export APORT_DECISION_FILE="$DECISION_FILE"
 export OPENCLAW_PASSPORT_FILE="$PASSPORT_FILE"
 export OPENCLAW_DECISION_FILE="$DECISION_FILE"
 

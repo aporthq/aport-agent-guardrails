@@ -1,6 +1,6 @@
 # Release process and version policy
 
-**Current release:** 1.0.27 (see [CHANGELOG.md](../CHANGELOG.md)).
+**Current release:** 1.0.28 (see [CHANGELOG.md](../CHANGELOG.md)).
 
 We keep **one version number** across all published packages (Node core, Python core, and every framework adapter). That avoids “core is 1.2 but CLI is 0.9” and keeps the story simple for users and support.
 
