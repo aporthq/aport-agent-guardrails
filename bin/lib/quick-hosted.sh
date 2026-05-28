@@ -146,7 +146,8 @@ aport_maybe_configure_hosted_passport() {
                 exit 1
             fi
             export APORT_AGENT_ID="$agent_id_input"
-            read -r -p "  APort setup API key [optional]: " api_key_input
+            read -r -s -p "  APort setup API key [optional]: " api_key_input
+            echo ""
             if [[ -n "$api_key_input" ]]; then
                 export APORT_API_KEY="$api_key_input"
             fi

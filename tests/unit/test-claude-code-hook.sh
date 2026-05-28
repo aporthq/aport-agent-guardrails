@@ -246,7 +246,8 @@ mkdir -p "$HOSTED_DIR/aport"
 RESOLVED_AUDIT="$(
     bash -c '
         export OPENCLAW_CONFIG_DIR="'"$HOSTED_DIR"'"
-        unset OPENCLAW_PASSPORT_FILE
+        unset OPENCLAW_PASSPORT_FILE OPENCLAW_DECISION_FILE OPENCLAW_AUDIT_LOG
+        unset APORT_PASSPORT_FILE APORT_DECISION_FILE APORT_AUDIT_LOG
         # shellcheck source=bin/aport-resolve-paths.sh
         . "'"$REPO_ROOT"'/bin/aport-resolve-paths.sh"
         printf "%s" "$AUDIT_LOG"

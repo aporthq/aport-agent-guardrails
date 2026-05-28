@@ -10,8 +10,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Anchor data paths to Claude Code config before resolve (hosted/API installs may have no passport.json).
-export OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-${APORT_CLAUDE_CODE_CONFIG_DIR:-$HOME/.claude}}"
-OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR/#\~/$HOME}"
+# shellcheck source=bin/lib/framework-hook-paths.sh
+. "$ROOT_DIR/bin/lib/framework-hook-paths.sh"
+aport_hook_prepare_framework_paths "claude-code" "${APORT_CLAUDE_CODE_CONFIG_DIR:-}" "$HOME/.claude"
 
 # Path resolver: probes ~/.claude, ~/.cursor, ~/.openclaw, etc.
 # shellcheck source=bin/aport-resolve-paths.sh
@@ -20,7 +21,7 @@ OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR/#\~/$HOME}"
 . "$ROOT_DIR/bin/lib/guardrail-mode.sh"
 # shellcheck source=bin/lib/hook-read-policy.sh
 . "$ROOT_DIR/bin/lib/hook-read-policy.sh"
-load_guardrail_mode_for_hooks "${OPENCLAW_CONFIG_DIR:-$HOME/.claude}"
+load_guardrail_mode_for_hooks "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-$HOME/.claude}}"
 
 GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-bash.sh"
 if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
@@ -140,9 +141,10 @@ case "$TOOL_NAME_NORM" in
 esac
 
 # Use a per-invocation decision file to avoid race conditions with concurrent tool calls
-HOOK_DECISION_FILE="${OPENCLAW_DECISION_FILE:-}"
+HOOK_DECISION_FILE="${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-}}"
 if [ -n "$HOOK_DECISION_FILE" ]; then
     HOOK_DECISION_FILE="${HOOK_DECISION_FILE%.json}-$$.json"
+    export APORT_DECISION_FILE="$HOOK_DECISION_FILE"
     export OPENCLAW_DECISION_FILE="$HOOK_DECISION_FILE"
 fi
 

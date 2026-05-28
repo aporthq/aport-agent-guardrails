@@ -19,7 +19,7 @@ This doc compares how policy is evaluated in **local mode** (bash guardrail scri
 
 | # | Method | How | Typical use |
 |---|--------|-----|-------------|
-| 1 | **Standalone bash** | `OPENCLAW_PASSPORT_FILE=... ./bin/aport-guardrail-bash.sh <tool> '<context_json>'` | Scripts, CI, manual checks |
+| 1 | **Standalone bash** | `APORT_PASSPORT_FILE=... ./bin/aport-guardrail-bash.sh <tool> '<context_json>'` | Scripts, CI, manual checks |
 | 2 | **Standalone API** | `./bin/aport-guardrail-api.sh <tool> '<context_json>'` with `APORT_API_URL` | Same as above, but evaluation in cloud |
 | 3 | **Plugin + local** | OpenClaw `before_tool_call` → plugin spawns `aport-guardrail-bash.sh` | OpenClaw with no API / offline |
 | 4 | **Plugin + API** | OpenClaw `before_tool_call` → plugin calls APort API | OpenClaw with full OAP (default) |

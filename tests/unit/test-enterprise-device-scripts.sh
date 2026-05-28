@@ -124,8 +124,9 @@ if grep -q 'apk_enrollment_test' "$STATE_FILE"; then
     echo "FAIL: state should not persist enrollment API key" >&2
     exit 1
 fi
-grep -q 'APORT_API_KEY=apk_runtime_test' "$MODE_FILE" || {
+grep -qE "^APORT_API_KEY=('|\")?apk_runtime_test" "$MODE_FILE" || {
     echo "FAIL: framework mode file should contain runtime setup key for hooks" >&2
+    cat "$MODE_FILE" >&2
     exit 1
 }
 grep -q 'APORT_API_KEY=apk_runtime_test' "$APORT_TEST_NPX_LOG" || {

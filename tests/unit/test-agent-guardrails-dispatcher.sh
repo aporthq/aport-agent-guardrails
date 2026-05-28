@@ -173,7 +173,10 @@ echo "  ✅ Non-interactive (multiple detected) -> exit 1 and show both options"
 out9="$TEST_DIR/dispatcher-9.txt"
 CLAUDE_TEST_DIR="$TEST_DIR/claude_install"
 mkdir -p "$CLAUDE_TEST_DIR"
-run_dispatcher "$out9" "" --framework=claude-code --output "$CLAUDE_TEST_DIR/aport/passport.json" --non-interactive
+set +e
+APORT_CLAUDE_CODE_CONFIG_DIR="$CLAUDE_TEST_DIR" "$DISPATCHER" --framework=claude-code --output "$CLAUDE_TEST_DIR/aport/passport.json" --non-interactive < /dev/null > "$out9" 2>&1
+DISPATCHER_EXIT=$?
+set -e
 # Installer may exit 0 or non-zero (e.g. wizard); we only require it's not "unknown framework"
 if grep -q "Unknown or unsupported framework" "$out9"; then
     echo "FAIL: claude-code should be supported" >&2
