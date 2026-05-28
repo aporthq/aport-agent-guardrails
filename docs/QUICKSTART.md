@@ -1,5 +1,5 @@
 # Quick Start Guide
-**Get started with APort Agent Guardrails in 5 minutes**
+**Get started with APort Agent Guardrails in one command**
 
 ---
 
@@ -9,7 +9,13 @@
 npx @aporthq/aport-agent-guardrails
 ```
 
-If you have an agent_id from aport.io, run `npx @aporthq/aport-agent-guardrails openclaw <agent_id>` to use a hosted passport (no local file). See [HOSTED_PASSPORT_SETUP.md](HOSTED_PASSPORT_SETUP.md).
+Choose a framework, then choose hosted setup to create a passport and setup key immediately. If you already have an agent_id from aport.io, run `npx @aporthq/aport-agent-guardrails openclaw <agent_id>` to use a hosted passport (no local file). See [HOSTED_PASSPORT_SETUP.md](HOSTED_PASSPORT_SETUP.md).
+
+Install URL alternative:
+
+```bash
+curl -fsSL https://aport.io/install.sh | bash -s -- claude-code
+```
 
 This uses the [npm package](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails): downloads the package, runs the setup wizard, installs the plugin and wrappers, and runs a smoke test.
 
@@ -28,7 +34,7 @@ Or:
 The script will:
 
 1. **Prompt for your OpenClaw config directory** — default `~/.openclaw`; you can use a different path (e.g. your project’s `.openclaw`).
-2. **Run the passport wizard** — guided by the OAP spec (`external/aport-spec`); you choose capabilities and limits.
+2. **Create or select a passport** — use hosted setup for a passport and setup key, or local setup for an on-disk OAP passport.
 3. **Install wrappers** in your config dir (`.skills/`) so OpenClaw can call the guardrail with the correct passport/decision paths.
 4. **Update your passport** — the installer sets `allowed_commands: ["*"]` automatically (no manual editing needed); then runs a self-check and exits with a clear error if the check is denied.
 5. **Install the APort skill** in `~/.openclaw/skills/aport-guardrail/` so OpenClaw loads it; the agent knows to call the guardrail before effectful actions.

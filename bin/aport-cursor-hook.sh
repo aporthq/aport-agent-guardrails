@@ -13,6 +13,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Anchor data paths to Cursor config before resolve (hosted/API installs may have no passport.json).
+export OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-${APORT_CURSOR_CONFIG_DIR:-$HOME/.cursor}}"
+OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR/#\~/$HOME}"
+
 # Passport/config: resolver probes ~/.cursor, ~/.openclaw, ~/.aport/*, etc.
 # shellcheck source=bin/aport-resolve-paths.sh
 . "$ROOT_DIR/bin/aport-resolve-paths.sh"
