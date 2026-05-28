@@ -96,6 +96,7 @@ npx --yes @aporthq/aport-agent-guardrails claude-code --non-interactive
 
 - **I need OpenClaw now:** [docs/QUICKSTART_OPENCLAW_PLUGIN.md](docs/QUICKSTART_OPENCLAW_PLUGIN.md)
 - **I already have agent_id:** [docs/HOSTED_PASSPORT_SETUP.md](docs/HOSTED_PASSPORT_SETUP.md)
+- **I’m deploying for an IT team:** [docs/ENTERPRISE_DEVICE_DEPLOYMENT.md](docs/ENTERPRISE_DEVICE_DEPLOYMENT.md)
 - **I need framework setup docs:** [docs/frameworks](docs/frameworks)
 - **I want Claude marketplace install:** [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md#marketplace-install-claude-plugins)
 
@@ -118,7 +119,7 @@ The security concern is that agent tools and skills can execute sensitive action
 
 **Two ways to use APort:** (1) **Guardrails (CLI/setup)** — run the installer to create your passport and config; (2) **Core (library)** — use the `OAPGuardrailProvider` ([docs/PROVIDER.md](docs/PROVIDER.md)) in your app so each tool call is verified. One provider per language (Python + TypeScript), works with any framework. Framework docs: [OpenClaw](docs/frameworks/openclaw.md), [Cursor](docs/frameworks/cursor.md), [Claude Code](docs/frameworks/claude-code.md), [LangChain](docs/frameworks/langchain.md), [CrewAI](docs/frameworks/crewai.md), [DeerFlow](docs/frameworks/deerflow.md), [n8n](docs/frameworks/n8n.md).
 
-**CLI-supported frameworks:** `openclaw`, `langchain`, `crewai`, `cursor`, `claude-code`, `deerflow`, `n8n`. OpenClaw/Cursor/Claude Code include runtime-specific integration scripts; DeerFlow/LangChain/CrewAI use framework docs plus generic setup output from the CLI. See [Deployment readiness](docs/DEPLOYMENT_READINESS.md).
+**CLI-supported frameworks:** `openclaw`, `langchain`, `crewai`, `cursor`, `claude-code`, `deerflow`, `n8n`. OpenClaw/Cursor/Claude Code include runtime-specific integration scripts; DeerFlow/LangChain/CrewAI use framework docs plus generic setup output from the CLI. For IT-managed device rollout, see [Enterprise device deployment](docs/ENTERPRISE_DEVICE_DEPLOYMENT.md).
 
 | Framework | Doc | Integration | Install |
 |-----------|-----|--------------|--------|

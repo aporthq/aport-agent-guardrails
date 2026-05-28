@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.29] - 2026-05-28
+
+### Fixed
+- Enterprise device deployment now supports template instances returned with legacy `agt_inst_*` passport IDs, preserving hosted/API mode instead of failing validation or falling back to local setup.
+- Enterprise script API failures now surface HTTP status and API error messages without raw Node stack traces.
+
+### Added
+- Public IT deployment guide for deploy, enforce, and uninstall scripts.
+
+## [1.0.28] - 2026-05-28
+
+### Fixed
+- Hosted setup and framework hook paths were hardened so tests and non-interactive setup stay isolated from real local Claude Code and Cursor configuration.
+- Enterprise script delivery was tightened for curl-based installs.
+
 ## [1.0.27] - 2026-05-21
 
 ### Security

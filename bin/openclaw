@@ -126,12 +126,12 @@ if [ -n "${1:-}" ]; then
 		echo "See: https://github.com/aporthq/aport-agent-guardrails/tree/main/docs"
 		exit 0
 	fi
-	# Validate agent_id format (ap_ followed by 32 hex chars)
-	if [[ "$1" =~ ^ap_[a-f0-9]{32}$ ]]; then
+	# Validate agent_id format.
+	if [[ "$1" =~ ^(ap|apt|agt_inst|agt_tmpl)_[A-Za-z0-9_-]+$ ]]; then
 		HOSTED_AGENT_ID="$1"
 	else
 		echo "❌ Invalid agent_id format: $1"
-		echo "   Expected: ap_[32 hex characters]"
+		echo "   Expected: ap_..., apt_..., agt_inst_..., or agt_tmpl_..."
 		echo "   Example: ap_fa2f6d53bb5b4c98b9af0124285b6e0f"
 		echo ""
 		echo "Run '$0 --help' for usage information."
