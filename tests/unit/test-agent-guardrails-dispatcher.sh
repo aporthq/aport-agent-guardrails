@@ -204,7 +204,7 @@ out11="$TEST_DIR/dispatcher-11.txt"
 CLAUDE_FLAG_DIR="$TEST_DIR/claude_noninteractive_flag"
 mkdir -p "$CLAUDE_FLAG_DIR"
 set +e
-APORT_CLAUDE_CODE_CONFIG_DIR="$CLAUDE_FLAG_DIR" "$DISPATCHER" --framework=claude-code ap_04c65c1dd7224160b36b756960e2cc48 --non-interactive < /dev/null > "$out11" 2>&1
+APORT_CLAUDE_CODE_CONFIG_DIR="$CLAUDE_FLAG_DIR" "$DISPATCHER" --framework=claude-code agt_inst_mppi38zb_ogxgbi --non-interactive < /dev/null > "$out11" 2>&1
 e11=$?
 set -e
 [[ "$e11" -eq 0 ]] || {
@@ -215,6 +215,11 @@ set -e
 grep -q "Guardrail mode: api" "$out11" || {
     echo "FAIL: expected Claude setup to complete in api mode" >&2
     cat "$out11" >&2
+    exit 1
+}
+grep -q 'APORT_AGENT_ID=agt_inst_mppi38zb_ogxgbi' "$CLAUDE_FLAG_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: expected legacy instance ID to be persisted as hosted agent ID" >&2
+    cat "$CLAUDE_FLAG_DIR/aport/guardrail-mode.env" >&2
     exit 1
 }
 echo "  ✅ --non-interactive flag works for hosted Claude setup"

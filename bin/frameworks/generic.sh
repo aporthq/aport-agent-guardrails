@@ -48,7 +48,11 @@ while [[ ${#remaining_args[@]} -gt 0 ]]; do
             crewai_integration_mode="${remaining_args[0]}"
             remaining_args=("${remaining_args[@]:1}")
             ;;
-        ap_[a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9])
+        ap_* | apt_* | agt_inst_* | agt_tmpl_*)
+            if ! is_aport_hosted_agent_id "$arg"; then
+                log_error "Invalid hosted passport ID format: $arg"
+                exit 1
+            fi
             hosted_agent_id="$arg"
             ;;
         *)
