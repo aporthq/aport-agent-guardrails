@@ -69,7 +69,11 @@ case "$*" in
         printf '{"exists":false}'
         ;;
     *"/api/passports/"*"/instances"*)
-        printf '{"instance_id":"ap_instance_1234567890abcdef1234567890abcdef"}'
+        if [ "${APORT_TEST_CREATE_INSTANCE_FORBIDDEN:-}" = "1" ]; then
+            printf '{"error":"Insufficient permissions to access this passport"}\n__APORT_HTTP_STATUS__:403'
+            exit 0
+        fi
+        printf '{"instance_id":"agt_inst_mppi38zb_ogxgbi"}'
         ;;
     *"/api/passports/"*"/setup-key"*)
         printf '{"key":"apk_runtime_test"}'
@@ -110,7 +114,7 @@ PATH="$FAKE_BIN:$PATH" \
 STATE_FILE="$STATE_DIR/state.env"
 MODE_FILE="$HOME_DIR/.claude/aport/guardrail-mode.env"
 
-grep -qE 'APORT_AGENT_ID=("|\047)?ap_instance_1234567890abcdef1234567890abcdef' "$STATE_FILE" || {
+grep -qE 'APORT_AGENT_ID=("|\047)?agt_inst_mppi38zb_ogxgbi' "$STATE_FILE" || {
     echo "FAIL: state should persist the created agent id" >&2
     cat "$STATE_FILE" >&2
     exit 1
@@ -133,7 +137,7 @@ grep -q 'APORT_API_KEY=apk_runtime_test' "$APORT_TEST_NPX_LOG" || {
     echo "FAIL: npx installer should receive runtime setup key" >&2
     exit 1
 }
-grep -q '/api/passports/ap_instance_1234567890abcdef1234567890abcdef/setup-key' "$APORT_TEST_CURL_LOG" || {
+grep -q '/api/passports/agt_inst_mppi38zb_ogxgbi/setup-key' "$APORT_TEST_CURL_LOG" || {
     echo "FAIL: install should mint runtime setup key for created instance" >&2
     exit 1
 }
@@ -234,6 +238,44 @@ fi
 if grep -q '/instances' "$APORT_TEST_CURL_LOG"; then
     echo "FAIL: install should not create an instance after lookup failure" >&2
     cat "$APORT_TEST_CURL_LOG" >&2
+    exit 1
+fi
+
+CREATE_FAIL_STATE_DIR="$TMP_DIR/create-fail-state"
+: > "$APORT_TEST_CURL_LOG"
+set +e
+PATH="$FAKE_BIN:$PATH" \
+    APORT_SKIP_USER_SWITCH=1 \
+    APORT_TARGET_USER="testuser" \
+    APORT_TARGET_HOME="$HOME_DIR" \
+    APORT_STATE_DIR="$CREATE_FAIL_STATE_DIR" \
+    APORT_DEVICE_ID="device-123" \
+    APORT_API_KEY="apk_enrollment_test" \
+    APORT_TEMPLATE_ID="ap_template_test" \
+    APORT_FRAMEWORK="claude-code" \
+    APORT_TEST_CREATE_INSTANCE_FORBIDDEN=1 \
+    bash "$SCRIPT" > "$LOG_DIR/create-fail.out" 2>&1
+CREATE_FAIL_EXIT=$?
+set -e
+
+if [ "$CREATE_FAIL_EXIT" -eq 0 ]; then
+    echo "FAIL: install should fail when instance create is forbidden" >&2
+    cat "$LOG_DIR/create-fail.out" >&2
+    exit 1
+fi
+grep -q 'Could not create passport instance' "$LOG_DIR/create-fail.out" || {
+    echo "FAIL: create forbidden error should explain the failed operation" >&2
+    cat "$LOG_DIR/create-fail.out" >&2
+    exit 1
+}
+grep -q 'HTTP 403: Insufficient permissions to access this passport' "$LOG_DIR/create-fail.out" || {
+    echo "FAIL: create forbidden error should include HTTP status and API message" >&2
+    cat "$LOG_DIR/create-fail.out" >&2
+    exit 1
+}
+if grep -q 'ModuleJob.run\|at curl (file:' "$LOG_DIR/create-fail.out"; then
+    echo "FAIL: create forbidden error should not show a raw Node stack" >&2
+    cat "$LOG_DIR/create-fail.out" >&2
     exit 1
 fi
 

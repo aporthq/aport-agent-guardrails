@@ -56,9 +56,13 @@ function assertSafeUsername(user) {
   }
 }
 
+function isSafeAportPassportId(id) {
+  return /^(ap|apt|agt_inst|agt_tmpl)_[a-zA-Z0-9_-]+$/.test(id);
+}
+
 function assertSafePassportId(id, label) {
-  if (!/^(ap|apt)_[a-zA-Z0-9_-]+$/.test(id)) {
-    die(`${label} must be a valid APort passport id (ap_... or apt_...)`);
+  if (!isSafeAportPassportId(id)) {
+    die(`${label} must be a valid APort passport id (ap_..., apt_..., agt_inst_..., or agt_tmpl_...)`);
   }
 }
 
@@ -150,13 +154,52 @@ function run(cmd, args, options = {}) {
   return result;
 }
 
+function formatHttpError(status, body) {
+  const trimmed = String(body || '').trim();
+  let message = trimmed;
+  try {
+    const parsed = JSON.parse(trimmed);
+    message =
+      parsed?.error?.message ||
+      parsed?.error ||
+      parsed?.message ||
+      parsed?.detail ||
+      JSON.stringify(parsed);
+  } catch {
+    /* Use raw body below. */
+  }
+  const suffix = message ? `: ${message}` : '';
+  return `HTTP ${status}${suffix}`;
+}
+
 function curl(args) {
-  const result = run('curl', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const marker = '\n__APORT_HTTP_STATUS__:';
+  const normalizedArgs = [];
+  for (const arg of args) {
+    if (arg === '-fsS') {
+      normalizedArgs.push('-sS');
+      continue;
+    }
+    if (arg === '-f' || arg === '--fail') continue;
+    normalizedArgs.push(arg);
+  }
+
+  const result = run('curl', ['-w', `${marker}%{http_code}`, ...normalizedArgs], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   if (result.status !== 0) {
     const err = (result.stderr || result.stdout || '').trim();
     throw new Error(err || `curl exited ${result.status}`);
   }
-  return result.stdout;
+  const stdout = result.stdout || '';
+  const idx = stdout.lastIndexOf(marker);
+  if (idx === -1) return stdout;
+  const body = stdout.slice(0, idx);
+  const status = Number(stdout.slice(idx + marker.length).trim());
+  if (Number.isFinite(status) && status >= 400) {
+    throw new Error(formatHttpError(status, body));
+  }
+  return body;
 }
 
 function targetUser(cfg) {
@@ -385,9 +428,9 @@ function findExistingInstance(cfg, tenantRef) {
   let response;
   try {
     response = curl(['-fsS', url]);
-  } catch {
+  } catch (error) {
     die(
-      'Could not verify whether this device already has a passport instance. Aborting to avoid duplicate issuance.'
+      `Could not verify whether this device already has a passport instance. Aborting to avoid duplicate issuance. ${error.message}`
     );
   }
   const data = JSON.parse(response);
@@ -414,18 +457,25 @@ function createInstance(cfg, tenantRef, user, deviceInfoJson) {
   };
   if (deviceInfoJson) body.device_info = JSON.parse(deviceInfoJson);
 
-  const response = curl([
-    '-fsS',
-    '-X',
-    'POST',
-    `${cfg.apiUrl}/api/passports/${cfg.templateId}/instances`,
-    '-H',
-    'Content-Type: application/json',
-    '-H',
-    `Authorization: Bearer ${cfg.apiKey}`,
-    '-d',
-    JSON.stringify(body),
-  ]);
+  let response;
+  try {
+    response = curl([
+      '-fsS',
+      '-X',
+      'POST',
+      `${cfg.apiUrl}/api/passports/${cfg.templateId}/instances`,
+      '-H',
+      'Content-Type: application/json',
+      '-H',
+      `Authorization: Bearer ${cfg.apiKey}`,
+      '-d',
+      JSON.stringify(body),
+    ]);
+  } catch (error) {
+    die(
+      `Could not create passport instance from template ${cfg.templateId}. Check that APORT_API_KEY has issue scope and belongs to the org that owns or can issue this template. ${error.message}`
+    );
+  }
   const data = JSON.parse(response);
   const agentId = jsonGet(data, 'instance_id') || jsonGet(data, 'data.instance_id');
   if (!agentId) die('Instance create response did not include instance_id');
@@ -433,18 +483,25 @@ function createInstance(cfg, tenantRef, user, deviceInfoJson) {
 }
 
 function createRuntimeSetupKey(cfg, agentId) {
-  const response = curl([
-    '-fsS',
-    '-X',
-    'POST',
-    `${cfg.apiUrl}/api/passports/${agentId}/setup-key`,
-    '-H',
-    'Content-Type: application/json',
-    '-H',
-    `Authorization: Bearer ${cfg.apiKey}`,
-    '-d',
-    JSON.stringify({ name: `${cfg.framework} device runtime key for ${agentId}` }),
-  ]);
+  let response;
+  try {
+    response = curl([
+      '-fsS',
+      '-X',
+      'POST',
+      `${cfg.apiUrl}/api/passports/${agentId}/setup-key`,
+      '-H',
+      'Content-Type: application/json',
+      '-H',
+      `Authorization: Bearer ${cfg.apiKey}`,
+      '-d',
+      JSON.stringify({ name: `${cfg.framework} device runtime key for ${agentId}` }),
+    ]);
+  } catch (error) {
+    die(
+      `Could not create runtime setup key for ${agentId}. Check that APORT_API_KEY can access this passport and has the required issue permission. ${error.message}`
+    );
+  }
   const data = JSON.parse(response);
   const key = jsonGet(data, 'key') || jsonGet(data, 'data.key');
   if (!key) die('Setup key response did not include a plaintext key');

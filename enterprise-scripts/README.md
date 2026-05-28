@@ -55,7 +55,7 @@ The setup-key API **always** creates `scopes: ["read"]` and does not accept cust
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `APORT_API_KEY` | Deploy/enforce | Org enrollment key with **`issue`** scope (`apk_…`); not the runtime setup key |
-| `APORT_TEMPLATE_ID` | Deploy/enforce | Template passport ID (`ap_…` / `apt_…`); script creates per-device **instances** (`ap_instance_…`) |
+| `APORT_TEMPLATE_ID` | Deploy/enforce | Template passport ID (`ap_…` / `apt_…`); script creates per-device **instances** (`agt_inst_…` / `ap_…`) |
 | `APORT_FRAMEWORK` | All | e.g. `claude-code`, `cursor` |
 | `APORT_TARGET_USER` | No | Account that runs the agent (auto-detected if unset) |
 | `APORT_TARGET_HOME` | No | Profile/home path (auto-detected if unset) |
@@ -96,8 +96,8 @@ The API serves **bundled** scripts (config header + inlined `aport-device-core.m
 Do **not** pipe the thin repo scripts (`enterprise-scripts/aport-device-*.sh`) through bash; those require `aport-device-lib.sh` on disk.
 
 ```bash
-curl -fsSL "https://api.aport.io/enterprise/scripts?version=1.0.27"
-curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.27" -o /tmp/aport-deploy.sh
+curl -fsSL "https://api.aport.io/enterprise/scripts?version=1.0.29"
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" -o /tmp/aport-deploy.sh
 shasum -a 256 -c <<< "<sha256>  /tmp/aport-deploy.sh"
 bash /tmp/aport-deploy.sh
 ```
