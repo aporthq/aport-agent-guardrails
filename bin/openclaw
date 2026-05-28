@@ -35,6 +35,25 @@ source "$SCRIPT_DIR/lib/quick-hosted.sh"
 APORT_PLUGIN_PATH="$REPO_ROOT/extensions/openclaw-aport"
 DEFAULT_CONFIG="${OPENCLAW_HOME:-$HOME/.openclaw}"
 
+is_noninteractive() {
+	[ -n "${APORT_NONINTERACTIVE:-${CI:-}}" ]
+}
+
+prompt_with_default() {
+	local __var="$1"
+	local prompt="$2"
+	local default="$3"
+	local input=""
+
+	if is_noninteractive; then
+		printf -v "$__var" '%s' "$default"
+		return 0
+	fi
+
+	read -r -p "$prompt" input || input=""
+	printf -v "$__var" '%s' "${input:-$default}"
+}
+
 read_local_plugin_version() {
 	if ! command -v node >/dev/null 2>&1; then
 		return 0
@@ -83,6 +102,7 @@ parse_guardrail_mode_args "$@"
 if [ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]; then
 	HOSTED_AGENT_ID="$APORT_HOSTED_AGENT_ID_CLI"
 fi
+CONFIGURED_API_URL="${APORT_GUARDRAIL_API_URL_CLI:-${APORT_API_URL:-$DEFAULT_APORT_API_URL}}"
 if [ "${#APORT_FRAMEWORK_ARGS[@]}" -gt 0 ]; then
 	set -- "${APORT_FRAMEWORK_ARGS[@]}"
 else
@@ -150,8 +170,7 @@ echo "  📁 OpenClaw config directory"
 echo "     Default: $DEFAULT_CONFIG"
 echo "     (Enter = default; or full path e.g. /Users/you/project/.openclaw or relative e.g. ../my-project)"
 echo ""
-read -p "  Config directory [$DEFAULT_CONFIG]: " CONFIG_DIR
-CONFIG_DIR="${CONFIG_DIR:-$DEFAULT_CONFIG}"
+prompt_with_default CONFIG_DIR "  Config directory [$DEFAULT_CONFIG]: " "$DEFAULT_CONFIG"
 CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
 # Resolve to absolute path
 if [ "${CONFIG_DIR#/}" = "$CONFIG_DIR" ]; then
@@ -188,6 +207,7 @@ elif [ -f "$CONFIG_DIR/passport.json" ]; then
 else
 	PASSPORT_FILE="$APORT_DIR/passport.json"
 fi
+export APORT_CONFIG_DIR="$CONFIG_DIR"
 export OPENCLAW_CONFIG_DIR="$CONFIG_DIR"
 USE_HOSTED_PASSPORT=false
 
@@ -203,7 +223,7 @@ if [ -n "$HOSTED_AGENT_ID" ]; then
 	USE_HOSTED_PASSPORT=true
 elif [ -f "$PASSPORT_FILE" ]; then
 	# Local passport exists
-	read -p "  Passport already exists. Run wizard again (overwrite)? [y/N]: " again
+	prompt_with_default again "  Passport already exists. Run wizard again (overwrite)? [y/N]: " "n"
 	if [ "$again" != "y" ] && [ "$again" != "Y" ]; then
 		echo "  Skipping passport creation."
 	else
@@ -246,8 +266,7 @@ if true; then
 		echo "     The plugin will be configured, but you'll need to install it manually:"
 		echo "     openclaw plugins install -l $APORT_PLUGIN_PATH"
 		echo ""
-		read -p "  Continue anyway? [Y/n]: " continue_anyway
-		continue_anyway=${continue_anyway:-y}
+		prompt_with_default continue_anyway "  Continue anyway? [Y/n]: " "y"
 		if [ "$continue_anyway" != "y" ] && [ "$continue_anyway" != "Y" ]; then
 			echo "  Skipping plugin installation."
 		fi
@@ -286,6 +305,7 @@ if true; then
 				echo "  ⚠️  Plugin installed but not showing in 'openclaw plugins list'"
 			fi
 			echo ""
+			export APORT_CONFIG_DIR="$CONFIG_DIR"
 			export OPENCLAW_CONFIG_DIR="$CONFIG_DIR"
 			# Restart only works when gateway is already running; else start in background.
 			# Never let gateway start/restart fail the APort installation.
@@ -295,7 +315,7 @@ if true; then
 				# Gateway was not running; start it in background so setup completes without blocking.
 				# Any failure here must not break APort installation (no exit 1).
 				mkdir -p "$CONFIG_DIR/logs" 2>/dev/null || true
-				(OPENCLAW_CONFIG_DIR="$CONFIG_DIR" nohup openclaw gateway start >>"$CONFIG_DIR/logs/gateway.log" 2>&1 &) 2>/dev/null || true
+				(APORT_CONFIG_DIR="$CONFIG_DIR" OPENCLAW_CONFIG_DIR="$CONFIG_DIR" nohup openclaw gateway start >>"$CONFIG_DIR/logs/gateway.log" 2>&1 &) 2>/dev/null || true
 				sleep 2
 				if openclaw gateway probe 2>/dev/null; then
 					echo "  ✅ Gateway started in background; plugin is active."
@@ -319,22 +339,19 @@ if true; then
 		PLUGIN_MODE="api"
 		echo ""
 		echo "  Plugin mode: api (required for hosted passport)"
-		read -p "  APort API URL [https://api.aport.io]: " api_url
-		api_url=${api_url:-https://api.aport.io}
+		prompt_with_default api_url "  APort API URL [$CONFIGURED_API_URL]: " "$CONFIGURED_API_URL"
 	else
 		echo ""
 		echo "  Plugin mode:"
 		echo "    1. local  - Use local guardrail script (privacy, offline)"
 		echo "    2. api    - Use APort cloud API (default; for traction and cloud features)"
 		echo ""
-		read -p "  Mode [1=local, 2=api]: " mode_choice
-		mode_choice=${mode_choice:-2}
+		prompt_with_default mode_choice "  Mode [1=local, 2=api]: " "2"
 
 		if [ "$mode_choice" = "2" ]; then
 			PLUGIN_MODE="api"
 			echo ""
-			read -p "  APort API URL [https://api.aport.io]: " api_url
-			api_url=${api_url:-https://api.aport.io}
+			prompt_with_default api_url "  APort API URL [$CONFIGURED_API_URL]: " "$CONFIGURED_API_URL"
 		else
 			PLUGIN_MODE="local"
 		fi
@@ -342,8 +359,7 @@ if true; then
 
 	echo ""
 	echo "  Strict mode (optional): block tools with no policy mapping."
-	read -p "  Enable strict mode? [y/N]: " strict_mode
-	strict_mode=${strict_mode:-n}
+	prompt_with_default strict_mode "  Enable strict mode? [y/N]: " "n"
 	if [ "$strict_mode" = "y" ] || [ "$strict_mode" = "Y" ]; then
 		ALLOW_UNMAPPED="false"
 	else
@@ -476,7 +492,7 @@ YAML
 	# So the default config (openclaw.json) has plugin mode/apiUrl - gateway often loads it, not config.yaml
 	OPENCLAW_JSON="$CONFIG_DIR/openclaw.json"
 	if [ -f "$OPENCLAW_JSON" ] && command -v jq &>/dev/null; then
-		api_url_val="${api_url:-https://api.aport.io}"
+		api_url_val="${api_url:-$CONFIGURED_API_URL}"
 
 		if [ "$USE_HOSTED_PASSPORT" = true ]; then
 			# Hosted passport config (agentId only)
@@ -542,9 +558,14 @@ write_wrapper() {
 CONFIG_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
 APORT_REPO_ROOT="\$(cat "\$CONFIG_DIR/.aport-repo" 2>/dev/null)"
 [ -z "\$APORT_REPO_ROOT" ] && { echo "Error: \$CONFIG_DIR/.aport-repo missing. Re-run bin/openclaw from the guardrails repo." >&2; exit 1; }
-export OPENCLAW_PASSPORT_FILE="\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}"
-export OPENCLAW_DECISION_FILE="\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/aport/decision.json}"
-export OPENCLAW_AUDIT_LOG="\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/aport/audit.log}"
+export APORT_CONFIG_DIR="\${APORT_CONFIG_DIR:-\${OPENCLAW_CONFIG_DIR:-\$CONFIG_DIR}}"
+export OPENCLAW_CONFIG_DIR="\$APORT_CONFIG_DIR"
+export APORT_PASSPORT_FILE="\${APORT_PASSPORT_FILE:-\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}}"
+export APORT_DECISION_FILE="\${APORT_DECISION_FILE:-\${OPENCLAW_DECISION_FILE:-\$CONFIG_DIR/aport/decision.json}}"
+export APORT_AUDIT_LOG="\${APORT_AUDIT_LOG:-\${OPENCLAW_AUDIT_LOG:-\$CONFIG_DIR/aport/audit.log}}"
+export OPENCLAW_PASSPORT_FILE="\$APORT_PASSPORT_FILE"
+export OPENCLAW_DECISION_FILE="\$APORT_DECISION_FILE"
+export OPENCLAW_AUDIT_LOG="\$APORT_AUDIT_LOG"
 exec "\$APORT_REPO_ROOT/bin/$name" "\$@"
 WRAP
 	chmod +x "$CONFIG_DIR/.skills/$name"
@@ -586,12 +607,12 @@ print_smoke_guardrail_command() {
 
 	if [ "$USE_HOSTED_PASSPORT" = true ]; then
 		printf 'APORT_AGENT_ID="%s" APORT_API_KEY="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
-			"$HOSTED_AGENT_ID" "${APORT_API_KEY:-}" "${api_url:-https://api.aport.io}" "$smoke_script"
+			"$HOSTED_AGENT_ID" "${APORT_API_KEY:-}" "${api_url:-$CONFIGURED_API_URL}" "$smoke_script"
 	elif [ "$PLUGIN_MODE" = "api" ]; then
-		printf 'OPENCLAW_PASSPORT_FILE="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
-			"$PASSPORT_FILE" "${api_url:-https://api.aport.io}" "$smoke_script"
+		printf 'APORT_PASSPORT_FILE="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
+			"$PASSPORT_FILE" "${api_url:-$CONFIGURED_API_URL}" "$smoke_script"
 	else
-		printf 'OPENCLAW_PASSPORT_FILE="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
+		printf 'APORT_PASSPORT_FILE="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
 			"$PASSPORT_FILE" "$smoke_script"
 	fi
 }
@@ -601,13 +622,13 @@ run_smoke_guardrail_check() {
 	smoke_script="$(select_smoke_guardrail_script)"
 
 	if [ "$USE_HOSTED_PASSPORT" = true ]; then
-		APORT_AGENT_ID="$HOSTED_AGENT_ID" APORT_API_KEY="${APORT_API_KEY:-}" APORT_API_URL="${api_url:-https://api.aport.io}" \
+		APORT_AGENT_ID="$HOSTED_AGENT_ID" APORT_API_KEY="${APORT_API_KEY:-}" APORT_API_URL="${api_url:-$CONFIGURED_API_URL}" \
 			"$smoke_script" system.command.execute '{"command":"node --version"}'
 	elif [ "$PLUGIN_MODE" = "api" ]; then
-		OPENCLAW_PASSPORT_FILE="$PASSPORT_FILE" APORT_API_URL="${api_url:-https://api.aport.io}" \
+		APORT_PASSPORT_FILE="$PASSPORT_FILE" APORT_API_URL="${api_url:-$CONFIGURED_API_URL}" \
 			"$smoke_script" system.command.execute '{"command":"node --version"}'
 	else
-		OPENCLAW_PASSPORT_FILE="$PASSPORT_FILE" \
+		APORT_PASSPORT_FILE="$PASSPORT_FILE" \
 			"$smoke_script" system.command.execute '{"command":"node --version"}'
 	fi
 }

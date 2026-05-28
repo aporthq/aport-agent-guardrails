@@ -80,4 +80,18 @@ grep -q '^APORT_API_KEY=apk_runtime_test$' "$MODE_FILE" || {
     exit 1
 }
 
+SENTINEL="$TEST_DIR/mode-file-source-executed"
+export APORT_API_KEY="apk runtime test \$(touch $SENTINEL)"
+MODE_FILE="$(write_guardrail_mode_file "$CONFIG_DIR" api "https://api.aport.io/with space" "$APORT_AGENT_ID")"
+bash -c 'source "$1"; [ "$APORT_API_KEY" = "$2" ] && [ "$APORT_API_URL" = "$3" ]' _ "$MODE_FILE" "$APORT_API_KEY" "https://api.aport.io/with space" || {
+    echo "FAIL: hosted mode file should be shell-safe when sourced" >&2
+    cat "$MODE_FILE" >&2
+    exit 1
+}
+[ ! -e "$SENTINEL" ] || {
+    echo "FAIL: sourcing hosted mode file executed API key contents" >&2
+    cat "$MODE_FILE" >&2
+    exit 1
+}
+
 echo "OK test-quick-hosted.sh"

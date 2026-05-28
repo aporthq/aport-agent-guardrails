@@ -54,6 +54,8 @@ npx --yes @aporthq/aport-agent-guardrails openclaw \
   --non-interactive
 ```
 
+Use `--api-url https://your-aport.example` for a private APort deployment; non-interactive OpenClaw setup uses defaults for config directory and strict mode.
+
 If you already have your agent_id, pass it directly:
 
 ```bash

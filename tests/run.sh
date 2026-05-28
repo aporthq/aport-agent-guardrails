@@ -8,13 +8,19 @@ set -e
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FAILED=0
 RUN=0
+RUN_ROOT="${APORT_TEST_RUN_ROOT:-$(mktemp -d 2> /dev/null || echo "$TESTS_DIR/output/run-home")}"
+mkdir -p "$RUN_ROOT"
 
 run_one() {
     local path="$1"
     [[ -f "$path" ]] || return 0
     RUN=$((RUN + 1))
     local name=$(basename "$path")
-    if bash "$path"; then
+    local safe_name="${path#$TESTS_DIR/}"
+    safe_name="${safe_name//\//_}"
+    local test_home="$RUN_ROOT/home-$safe_name"
+    mkdir -p "$test_home"
+    if HOME="$test_home" APORT_TEST_ISOLATED=1 bash "$path"; then
         echo "  OK $name"
     else
         echo "  FAIL $name"
@@ -48,7 +54,9 @@ run_one "$TESTS_DIR/frameworks/claude-code/setup.sh"
 # Node integration test (setup.test.mjs)
 if [[ -f "$TESTS_DIR/frameworks/openclaw/setup.test.mjs" ]]; then
     RUN=$((RUN + 1))
-    if node "$TESTS_DIR/frameworks/openclaw/setup.test.mjs" 2> /dev/null; then
+    node_home="$RUN_ROOT/home-frameworks_openclaw_setup.test.mjs"
+    mkdir -p "$node_home"
+    if HOME="$node_home" APORT_TEST_ISOLATED=1 node "$TESTS_DIR/frameworks/openclaw/setup.test.mjs" 2> /dev/null; then
         echo "  OK setup.test.mjs"
     else
         echo "  FAIL setup.test.mjs"

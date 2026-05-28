@@ -41,6 +41,9 @@ parse_guardrail_mode_args() {
             --quick-hosted | --hosted)
                 APORT_QUICK_HOSTED_CLI="1"
                 ;;
+            --non-interactive | --noninteractive)
+                export APORT_NONINTERACTIVE=1
+                ;;
             --email=* | --owner-email=*)
                 APORT_OWNER_EMAIL_CLI="${1#*=}"
                 ;;
@@ -76,6 +79,12 @@ parse_guardrail_mode_args() {
     export APORT_GUARDRAIL_MODE_CLI APORT_GUARDRAIL_API_URL_CLI APORT_HOSTED_AGENT_ID_CLI
     export APORT_QUICK_HOSTED_CLI APORT_OWNER_EMAIL_CLI APORT_ISSUE_URL_CLI
     return 0
+}
+
+write_env_assignment() {
+    local key="$1"
+    local value="$2"
+    printf '%s=%q\n' "$key" "$value"
 }
 
 select_guardrail_mode() {
@@ -161,15 +170,15 @@ write_guardrail_mode_file() {
     mkdir -p "$aport_dir"
 
     {
-        echo "APORT_GUARDRAIL_MODE=$mode"
+        write_env_assignment "APORT_GUARDRAIL_MODE" "$mode"
         if [[ "$mode" = "api" ]]; then
-            echo "APORT_API_URL=${api_url:-$DEFAULT_APORT_API_URL}"
+            write_env_assignment "APORT_API_URL" "${api_url:-$DEFAULT_APORT_API_URL}"
         fi
         if [[ -n "$hosted_agent_id" ]]; then
-            echo "APORT_AGENT_ID=$hosted_agent_id"
+            write_env_assignment "APORT_AGENT_ID" "$hosted_agent_id"
         fi
         if [[ -n "${APORT_API_KEY:-}" ]]; then
-            echo "APORT_API_KEY=$APORT_API_KEY"
+            write_env_assignment "APORT_API_KEY" "$APORT_API_KEY"
         fi
     } > "$mode_file"
     chmod 600 "$mode_file" 2> /dev/null || true

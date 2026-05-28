@@ -107,7 +107,7 @@ run_setup() {
     echo "  5. Restart Cursor (or reload window) so hooks are picked up."
     echo "  6. Shell commands and tool use will be checked by APort policy (exit 2 = block)."
     echo ""
-    echo "  Same script works for VS Code + Copilot. For Claude Code use the dedicated integration: docs/frameworks/claude-code.md"
+    echo "  For other frameworks like Claude Code, use the dedicated integration: docs/frameworks"
     echo ""
 }
 

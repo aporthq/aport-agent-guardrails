@@ -6,7 +6,7 @@
  */
 
 import { spawn } from 'child_process';
-import { mkdtempSync, mkdirSync, existsSync, readFileSync } from 'fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -19,12 +19,36 @@ const AGENT_ID = process.env.APORT_TEST_OPENCLAW_AGENT_ID || 'ap_8955f5450cd542f
 function run() {
   const testDir = mkdtempSync(join(tmpdir(), 'aport-openclaw-setup-'));
   const configDir = join(testDir, '.openclaw');
+  const fakeBin = join(testDir, 'bin');
   mkdirSync(configDir, { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  const fakeOpenClaw = join(fakeBin, 'openclaw');
+  writeFileSync(fakeOpenClaw, `#!/bin/bash
+set -e
+case "$*" in
+  "plugins list --json")
+    printf '{"plugins":[{"id":"openclaw-aport","version":"test"}]}'
+    ;;
+  "plugins list")
+    printf 'openclaw-aport test\\n'
+    ;;
+  plugins\\ install*)
+    exit 0
+    ;;
+  "gateway restart" | "gateway probe" | "gateway start")
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`);
+  chmodSync(fakeOpenClaw, 0o755);
 
   return new Promise((resolve, reject) => {
     const child = spawn(DISPATCHER, ['--framework=openclaw', AGENT_ID], {
       cwd: REPO_ROOT,
-      env: { ...process.env, OPENCLAW_HOME: configDir },
+      env: { ...process.env, OPENCLAW_HOME: configDir, PATH: `${fakeBin}:${process.env.PATH || ''}` },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     // Send newlines for any prompts

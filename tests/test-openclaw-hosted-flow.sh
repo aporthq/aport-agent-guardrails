@@ -12,8 +12,32 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2> /dev/null || echo "$REPO_ROOT/tests/output")}"
 mkdir -p "$TEST_DIR"
 CONFIG_DIR="$TEST_DIR/.openclaw-hosted-test"
+FAKE_BIN="$TEST_DIR/bin"
 rm -rf "$CONFIG_DIR"
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR" "$FAKE_BIN"
+
+cat > "$FAKE_BIN/openclaw" << 'EOF'
+#!/bin/bash
+set -e
+case "$*" in
+  "plugins list --json")
+    printf '{"plugins":[{"id":"openclaw-aport","version":"test"}]}'
+    ;;
+  "plugins list")
+    printf 'openclaw-aport test\n'
+    ;;
+  plugins\ install*)
+    exit 0
+    ;;
+  "gateway restart" | "gateway probe" | "gateway start")
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+chmod +x "$FAKE_BIN/openclaw"
 
 # Use a valid agent_id format (same as remote passport API test)
 AGENT_ID="${APORT_TEST_OPENCLAW_AGENT_ID:-ap_8955f5450cd542fe8f67bbbf07c3e103}"
@@ -40,7 +64,7 @@ echo "  ✅ Invalid agent_id rejected"
 #    We pipe newlines to accept defaults. Order: config dir (we pass our CONFIG_DIR via env), then if openclaw missing "Continue? Y", API URL, strict mode.
 export OPENCLAW_HOME="$CONFIG_DIR"
 # Pass multiple newlines for: config dir Enter, Continue anyway Y, API URL Enter, strict mode N
-printf '\n\n\n\n' | "$REPO_ROOT/bin/openclaw" "$AGENT_ID" 2>&1 | tee "$TEST_DIR/openclaw-hosted.log" || true
+printf '\n\n\n\n' | PATH="$FAKE_BIN:$PATH" "$REPO_ROOT/bin/openclaw" "$AGENT_ID" 2>&1 | tee "$TEST_DIR/openclaw-hosted.log" || true
 # Script may exit 0 or 1 (e.g. if openclaw not installed); we only care that config was written
 
 if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
