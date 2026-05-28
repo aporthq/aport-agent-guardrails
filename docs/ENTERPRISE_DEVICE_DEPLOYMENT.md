@@ -41,10 +41,23 @@ export APORT_API_KEY="apk_..."
 export APORT_TEMPLATE_ID="ap_..."
 export APORT_FRAMEWORK="claude-code"
 
-curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" | bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" | sudo -E bash
 ```
 
-If the script runs as `root`, set the developer account explicitly:
+Use `sudo -E` so the whole script runs with administrator permissions and receives the exported `APORT_*` variables. Do **not** use `sudo curl ... | bash`; that only runs `curl` as root while `bash` still runs as the current user.
+
+If `sudo -E` is restricted on the device, pass the variables through `sudo env`:
+
+```bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" | \
+  sudo env \
+    APORT_API_KEY="$APORT_API_KEY" \
+    APORT_TEMPLATE_ID="$APORT_TEMPLATE_ID" \
+    APORT_FRAMEWORK="$APORT_FRAMEWORK" \
+    bash
+```
+
+When running as `root`, set the developer account explicitly:
 
 ```bash
 export APORT_TARGET_USER="developer"
@@ -52,6 +65,13 @@ export APORT_TARGET_HOME="/Users/developer"
 ```
 
 For Linux, `APORT_TARGET_HOME` is usually `/home/<user>`.
+
+For a non-admin smoke test only, override `APORT_STATE_DIR` to a writable directory:
+
+```bash
+export APORT_STATE_DIR="$HOME/.aport/enterprise/claude-code"
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" | bash
+```
 
 ## Script Commands
 
