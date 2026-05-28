@@ -76,6 +76,18 @@ The setup-key API **always** creates `scopes: ["read"]` and does not accept cust
 
 If the script runs as **root** (Linux/macOS) or **Administrator** (Windows), set `APORT_TARGET_USER` and `APORT_TARGET_HOME` to the employee account that runs Claude Code or Cursor. On Unix, the core uses `sudo -u` for `npx` when appropriate; on Windows, run the script in a user context or use the `.ps1` launcher under that user.
 
+For `curl | bash` on Linux/macOS, run the **bash process** as root/admin:
+
+```bash
+export APORT_API_KEY="apk_..."
+export APORT_TEMPLATE_ID="ap_..."
+export APORT_FRAMEWORK="claude-code"
+
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" | sudo -E bash
+```
+
+Do **not** use `sudo curl ... | bash`; that only runs `curl` as root and leaves the installer running as the current user, which cannot write the default administrator-owned state directory.
+
 ## Release bundles
 
 On each tag `v*`, CI produces self-contained Unix bundles and ships `aport-device-core.mjs` plus PowerShell entrypoints:
@@ -99,7 +111,7 @@ Do **not** pipe the thin repo scripts (`enterprise-scripts/aport-device-*.sh`) t
 curl -fsSL "https://api.aport.io/enterprise/scripts?version=1.0.29"
 curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" -o /tmp/aport-deploy.sh
 shasum -a 256 -c <<< "<sha256>  /tmp/aport-deploy.sh"
-bash /tmp/aport-deploy.sh
+sudo -E bash /tmp/aport-deploy.sh
 ```
 
 Set `APORT_API_KEY` (issue scope) and `APORT_TEMPLATE_ID` before running, or edit the config block in a saved copy of the bundled script.
