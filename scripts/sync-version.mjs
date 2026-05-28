@@ -2,6 +2,8 @@
 // Sync version from the canonical fixed workspace package to the root CLI package,
 // all Node/Python packages, manifests, lockfiles, and release docs.
 
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join, relative } from "path";

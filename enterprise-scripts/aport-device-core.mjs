@@ -405,8 +405,35 @@ function loadState(cfg) {
   }
 }
 
+function stateDirPermissionHint(cfg) {
+  const defaultDir = defaultStateDir(cfg.framework);
+  const sudoExample =
+    'curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=<version>" | sudo -E bash';
+  const nonAdminExample = `APORT_STATE_DIR="${path.join(
+    os.homedir(),
+    '.aport',
+    'enterprise',
+    cfg.framework
+  )}"`;
+
+  if (cfg.stateDir === defaultDir) {
+    return `Default state directory ${cfg.stateDir} is administrator-owned on this OS. Run the whole script as root/admin, for example: ${sudoExample}. Do not use "sudo curl ... | bash" because that only runs curl as root. For a non-admin smoke test, set ${nonAdminExample}.`;
+  }
+
+  return `Set APORT_STATE_DIR to a writable directory, or run the whole script as root/admin. Do not use "sudo curl ... | bash" because that only runs curl as root.`;
+}
+
+function ensureStateDirWritable(cfg) {
+  try {
+    fs.mkdirSync(cfg.stateDir, { recursive: true, mode: 0o700 });
+    fs.accessSync(cfg.stateDir, fs.constants.W_OK);
+  } catch (error) {
+    die(`Cannot write APort state directory ${cfg.stateDir}: ${error.message}. ${stateDirPermissionHint(cfg)}`);
+  }
+}
+
 function persistState(cfg, agentId, runtimeCredential, tenantRef) {
-  fs.mkdirSync(cfg.stateDir, { recursive: true, mode: 0o700 });
+  ensureStateDirWritable(cfg);
   const body = [
     `APORT_AGENT_ID=${JSON.stringify(agentId)}`,
     `APORT_RUNTIME_API_KEY=${JSON.stringify(runtimeCredential)}`,
@@ -599,6 +626,7 @@ function installAction(cfg) {
   const user = targetUser(cfg);
   const home = homeForUser(cfg, user);
   if (!home) die(`Could not resolve home directory for ${user}`);
+  ensureStateDirWritable(cfg);
 
   const tenantRef = deriveTenantRef(cfg, user);
   const deviceInfoJson = collectDeviceInfo(cfg, user);

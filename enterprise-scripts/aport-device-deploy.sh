@@ -55,7 +55,7 @@ if [ -z "${BASH_SOURCE[0]+x}" ] || [ "${BASH_SOURCE[0]}" = "bash" ]; then
     printf '%s\n' \
         '[aport-device] ERROR: This file is not safe for "curl | bash".' \
         '[aport-device] Use the bundled release script instead, e.g.:' \
-        '  curl -fsSL https://api.aport.io/enterprise/scripts/deploy | bash' \
+        '  curl -fsSL https://api.aport.io/enterprise/scripts/deploy | sudo -E bash' \
         '[aport-device] Or save the bundled script and run: bash aport-device-deploy.bundled.sh' >&2
     exit 1
 fi

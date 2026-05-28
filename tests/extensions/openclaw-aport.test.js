@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import assert from "node:assert";
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";

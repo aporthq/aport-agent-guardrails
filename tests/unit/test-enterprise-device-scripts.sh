@@ -100,6 +100,49 @@ chmod +x "$FAKE_BIN/curl" "$FAKE_BIN/npx"
 export APORT_TEST_CURL_LOG="$LOG_DIR/curl.log"
 export APORT_TEST_NPX_LOG="$LOG_DIR/npx.log"
 
+BAD_STATE_PATH="$TMP_DIR/state-file"
+touch "$BAD_STATE_PATH"
+: > "$APORT_TEST_CURL_LOG"
+set +e
+PATH="$FAKE_BIN:$PATH" \
+    APORT_SKIP_USER_SWITCH=1 \
+    APORT_TARGET_USER="testuser" \
+    APORT_TARGET_HOME="$HOME_DIR" \
+    APORT_STATE_DIR="$BAD_STATE_PATH" \
+    APORT_DEVICE_ID="device-123" \
+    APORT_API_KEY="apk_enrollment_test" \
+    APORT_TEMPLATE_ID="ap_template_test" \
+    APORT_FRAMEWORK="claude-code" \
+    bash "$SCRIPT" > "$LOG_DIR/state-dir-fail.out" 2>&1
+STATE_DIR_FAIL_EXIT=$?
+set -e
+
+if [ "$STATE_DIR_FAIL_EXIT" -eq 0 ]; then
+    echo "FAIL: install should fail when state directory is not writable" >&2
+    cat "$LOG_DIR/state-dir-fail.out" >&2
+    exit 1
+fi
+grep -q 'Cannot write APort state directory' "$LOG_DIR/state-dir-fail.out" || {
+    echo "FAIL: state directory error should be operator-friendly" >&2
+    cat "$LOG_DIR/state-dir-fail.out" >&2
+    exit 1
+}
+grep -q 'Do not use "sudo curl ... | bash"' "$LOG_DIR/state-dir-fail.out" || {
+    echo "FAIL: state directory error should explain sudo pipeline behavior" >&2
+    cat "$LOG_DIR/state-dir-fail.out" >&2
+    exit 1
+}
+if grep -q '/api/' "$APORT_TEST_CURL_LOG"; then
+    echo "FAIL: install should not call the API before state directory is writable" >&2
+    cat "$APORT_TEST_CURL_LOG" >&2
+    exit 1
+fi
+if grep -q 'ModuleJob.run\|at persistState (file:' "$LOG_DIR/state-dir-fail.out"; then
+    echo "FAIL: state directory error should not show a raw Node stack" >&2
+    cat "$LOG_DIR/state-dir-fail.out" >&2
+    exit 1
+fi
+
 PATH="$FAKE_BIN:$PATH" \
     APORT_SKIP_USER_SWITCH=1 \
     APORT_TARGET_USER="testuser" \
