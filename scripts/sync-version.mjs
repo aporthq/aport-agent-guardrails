@@ -179,14 +179,20 @@ try {
 // --- Python packages ---
 const pyPackages = [
   { dir: "python/aport_guardrails", pyproject: "pyproject.toml", init: "__init__.py" },
-  { dir: "python/langchain_adapter", pyproject: "pyproject.toml" },
-  { dir: "python/crewai_adapter", pyproject: "pyproject.toml" },
+  { dir: "python/langchain_adapter", pyproject: "pyproject.toml", coreDependency: true },
+  { dir: "python/crewai_adapter", pyproject: "pyproject.toml", coreDependency: true },
 ];
 
 for (const p of pyPackages) {
   const pyprojectPath = join(root, p.dir, p.pyproject);
   let content = readFileSync(pyprojectPath, "utf8");
   content = content.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`);
+  if (p.coreDependency) {
+    content = content.replace(
+      /^(\s*)"aport-agent-guardrails[^"]*",\s*$/m,
+      `$1"aport-agent-guardrails>=${version},<2",`,
+    );
+  }
   writeFileSync(pyprojectPath, content);
   console.log(`Updated ${p.dir}/${p.pyproject} -> ${version}`);
 
@@ -197,6 +203,19 @@ for (const p of pyPackages) {
     writeFileSync(initPath, initContent);
     console.log(`Updated ${p.dir}/${p.init} -> ${version}`);
   }
+}
+
+// Keep the deprecated npm shim pointing at the current package line.
+const deprecatedShimPath = join(root, "packages", "deprecated-agent-guardrails", "package.json");
+try {
+  const deprecatedShim = readJson(deprecatedShimPath);
+  if (deprecatedShim.dependencies && deprecatedShim.dependencies["@aporthq/aport-agent-guardrails"]) {
+    deprecatedShim.dependencies["@aporthq/aport-agent-guardrails"] = `^${version}`;
+    writeJson(deprecatedShimPath, deprecatedShim);
+    console.log(`Updated packages/deprecated-agent-guardrails/package.json dependency -> ^${version}`);
+  }
+} catch (error) {
+  console.warn("sync-version: could not update deprecated npm shim dependency:", error.message);
 }
 
 // --- Lockfiles ---

@@ -1,6 +1,11 @@
 {
   "default": "system.command.execute.v1",
   "rules": [
+    {
+      "prefixes": ["release.", "repo.release.", "git.release"],
+      "substrings": ["release.publish", "release.create", "npm publish", "pnpm publish", "yarn npm publish", "gh release create"],
+      "pack": "code.release.publish.v1"
+    },
     { "prefixes": ["git."], "pack": "code.repository.merge.v1" },
     {
       "prefixes": [
@@ -9,8 +14,12 @@
         "bash",
         "shell",
         "command",
+        "run_terminal_cmd",
+        "runterminalcmd",
         "run_command",
         "execute_command",
+        "terminal",
+        "terminal_command",
         "gateway",
         "process",
         "powershell",
@@ -59,7 +68,13 @@
     {
       "prefixes": [
         "write_file",
+        "edit_file",
+        "create_file",
+        "delete_file",
+        "remove_file",
         "str_replace",
+        "strreplace",
+        "search_replace",
         "write",
         "edit",
         "multiedit",
@@ -74,9 +89,15 @@
     {
       "prefixes": [
         "read_file",
+        "grep_search",
+        "file_search",
+        "codebase_search",
+        "list_dir",
         "ls",
         "present_file",
+        "presentfile",
         "view_image",
+        "viewimage",
         "view",
         "sessions_list",
         "sessions_history",

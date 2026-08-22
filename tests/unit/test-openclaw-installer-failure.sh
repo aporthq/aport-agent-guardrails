@@ -5,8 +5,8 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d 2> /dev/null || echo "$REPO_ROOT/tests/output")}"
-FAKE_BIN="$TEST_DIR/bin"
-CONFIG_DIR="$TEST_DIR/.openclaw"
+FAKE_BIN="$TEST_DIR/bin-openclaw-installer-failure"
+CONFIG_DIR="$TEST_DIR/.openclaw-installer-failure"
 LOG_FILE="$TEST_DIR/openclaw-install-failure.log"
 AGENT_ID="ap_8955f5450cd542fe8f67bbbf07c3e103"
 

@@ -5,7 +5,7 @@ import { canonicalize } from "./decision.js";
 
 const REQUIRED_CAPABILITIES = {
   "system.command.execute.v1": ["system.command.execute"],
-  "code.repository.merge.v1": ["repo.pr.create", "repo.merge"],
+  "code.repository.merge.v1": [],
   "messaging.message.send.v1": ["messaging.send"],
   "data.file.read.v1": ["data.file.read"],
   "data.file.write.v1": ["data.file.write"],
@@ -14,6 +14,7 @@ const REQUIRED_CAPABILITIES = {
   "mcp.tool.execute.v1": ["mcp.tool.execute"],
   "agent.session.create.v1": ["agent.session.create"],
   "agent.tool.register.v1": ["agent.tool.register"],
+  "code.release.publish.v1": ["repo.release"],
   "finance.payment.refund.v1": ["finance.payment.refund"],
   "finance.payment.charge.v1": ["payments.charge"],
   "data.export.create.v1": ["data.export"],
@@ -40,6 +41,15 @@ function safePrefixMatch(string, prefix) {
   return String(string).startsWith(String(prefix));
 }
 
+function matchesSimpleGlob(value, pattern) {
+  if (pattern === "*") return true;
+  const escaped = String(pattern)
+    .replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")
+    .replace(/\\\*/g, ".*")
+    .replace(/\\\?/g, ".");
+  return new RegExp(`^${escaped}$`).test(String(value));
+}
+
 function getCapabilityIds(passport) {
   const capabilities = Array.isArray(passport.capabilities) ? passport.capabilities : [];
   return capabilities
@@ -51,15 +61,18 @@ function getCapabilityIds(passport) {
     .filter(Boolean);
 }
 
+function hasCapability(passport, capability) {
+  const granted = new Set(getCapabilityIds(passport));
+  if (granted.has(capability)) return true;
+  if (capability === "repo.release" && granted.has("release")) return true;
+  if (capability === "messaging.send" && granted.has("messaging.message.send")) return true;
+  return false;
+}
+
 function hasRequiredCapabilities(passport, policyId) {
   const required = REQUIRED_CAPABILITIES[policyId] || [];
   if (required.length === 0) return true;
-  const granted = new Set(getCapabilityIds(passport));
-  return required.every((capability) => {
-    if (granted.has(capability)) return true;
-    if (capability === "messaging.send" && granted.has("messaging.message.send")) return true;
-    return false;
-  });
+  return required.every((capability) => hasCapability(passport, capability));
 }
 
 function getLimits(passport, policyId) {
@@ -71,6 +84,19 @@ function getLimits(passport, policyId) {
       msgs_per_day: limits.msgs_per_day,
       allowed_recipients: limits.allowed_recipients,
       approval_required: limits.approval_required,
+    };
+  }
+  if (policyId === "code.release.publish.v1") {
+    return limits["code.release.publish"] || {
+      allowed_repos: limits.allowed_repos,
+      allowed_extensions: limits.allowed_extensions,
+    };
+  }
+  if (policyId === "mcp.tool.execute.v1") {
+    return limits["mcp.tool.execute"] || {
+      allowed_servers: limits.allowed_servers,
+      allowed_tools: limits.allowed_tools,
+      allowed_tool_prefixes: limits.allowed_tool_prefixes,
     };
   }
   return limits[policyBase] || {};
@@ -152,6 +178,26 @@ function allowByList(value, list, matcher) {
   return list.some((entry) => matcher(value, entry));
 }
 
+function toStringArray(value) {
+  if (Array.isArray(value)) return value.map((entry) => String(entry)).filter(Boolean);
+  if (typeof value === "string" && value) return [value];
+  return [];
+}
+
+function changedFilePaths(context) {
+  return [
+    ...toStringArray(context.files_changed),
+    ...toStringArray(context.files),
+    ...toStringArray(context.file_paths),
+    ...toStringArray(context.paths),
+  ];
+}
+
+function pathAllowedByPatterns(filePath, patterns) {
+  if (!Array.isArray(patterns) || patterns.length === 0) return true;
+  return patterns.some((pattern) => pattern === "*" || matchesSimpleGlob(filePath, pattern));
+}
+
 function isDefaultSensitiveReadPath(filePath) {
   const value = String(filePath).toLowerCase();
   return /(^|\/)\.env/.test(value) ||
@@ -163,6 +209,73 @@ function isDefaultSensitiveReadPath(filePath) {
     value.includes("password") ||
     /(^|\/)\.gnupg\//.test(value) ||
     /(^|\/)\.kube\//.test(value);
+}
+
+function assuranceRank(level) {
+  const ranks = { L0: 0, L1: 1, L2: 2, L3: 3, L4: 4, L5: 5 };
+  return ranks[level] ?? 0;
+}
+
+function meetsMinimumAssurance(actual, required) {
+  return assuranceRank(actual || "L0") >= assuranceRank(required);
+}
+
+function repositoryAction(context) {
+  const raw = String(context.action ?? context.operation ?? context.event_type ?? "").toLowerCase();
+  if (raw.includes("merge")) return "repo.merge";
+  if (raw.includes("push")) return "repo.push";
+  if (raw.includes("create") || raw.includes("open") || raw.includes("update")) return "repo.pr.create";
+  return "repo.pr.create";
+}
+
+function requiredRepoCapability(context) {
+  return repositoryAction(context) === "repo.merge" ? "repo.merge" : "repo.pr.create";
+}
+
+function isSensitiveReleaseFile(filePath) {
+  const value = String(filePath).toLowerCase();
+  return /(^|\/)\.env(\.|$)/.test(value) ||
+    /(^|\/)\.aws\//.test(value) ||
+    /(^|\/)\.ssh\//.test(value) ||
+    value.includes("credentials") ||
+    /(^|\/)id_(rsa|dsa|ecdsa|ed25519)/.test(value) ||
+    /\.(pem|key)$/.test(value);
+}
+
+function releaseFileAllowed(filePath, allowedPatterns) {
+  if (!Array.isArray(allowedPatterns) || allowedPatterns.length === 0) return true;
+  const file = String(filePath);
+  const lower = file.toLowerCase();
+  return allowedPatterns.some((pattern) => {
+    const normalized = String(pattern).toLowerCase();
+    if (normalized === "*") return true;
+    if (normalized.startsWith(".")) return lower.endsWith(normalized);
+    return matchesSimpleGlob(file, pattern);
+  });
+}
+
+function normalizeMcpServer(value) {
+  const server = String(value || "").trim();
+  return server.startsWith("mcp://") ? server.slice("mcp://".length) : server;
+}
+
+function mcpServerAllowed(server, allowedServers) {
+  if (!Array.isArray(allowedServers) || allowedServers.length === 0) return true;
+  const normalized = normalizeMcpServer(server);
+  return allowedServers.some((entry) => {
+    if (entry === "*") return true;
+    const allowed = normalizeMcpServer(entry);
+    return normalized === allowed || matchesSimpleGlob(normalized, allowed);
+  });
+}
+
+function mcpToolAllowed(tool, limits) {
+  const value = String(tool || "");
+  const allowedTools = Array.isArray(limits.allowed_tools) ? limits.allowed_tools : [];
+  const allowedPrefixes = Array.isArray(limits.allowed_tool_prefixes) ? limits.allowed_tool_prefixes : [];
+  if (allowedTools.length === 0 && allowedPrefixes.length === 0) return true;
+  if (allowedTools.some((entry) => entry === "*" || matchesSimpleGlob(value, entry))) return true;
+  return allowedPrefixes.some((entry) => entry === "*" || value.startsWith(String(entry)));
 }
 
 function makeDeny(baseParams, code, message) {
@@ -217,22 +330,90 @@ export function evaluateLocalDecision({ policyName, context, passportFile }) {
   const limits = getLimits(passport, policyName);
 
   if (policyName === "code.repository.merge.v1") {
-    const filesChanged = Array.isArray(context.files_changed)
-      ? context.files_changed.length
-      : Number(context.files_changed ?? context.files ?? 0);
-    const maxFiles = Number(limits.max_pr_size_kb ?? 500);
-    if (Number.isFinite(filesChanged) && filesChanged > maxFiles) {
-      return makeDeny(params, "oap.limit_exceeded", `PR size ${filesChanged} exceeds limit of ${maxFiles} files`);
+    const requiredCapability = requiredRepoCapability(context);
+    if (!hasCapability(passport, requiredCapability)) {
+      return makeDeny(params, "oap.unknown_capability", `Missing required capability: ${requiredCapability}`);
+    }
+
+    const maxSizeKb = Number(limits.max_pr_size_kb ?? 500);
+    const linesAdded = Number(context.lines_added ?? context.additions ?? 0);
+    const linesRemoved = Number(context.lines_removed ?? context.deletions ?? 0);
+    const totalLines =
+      (Number.isFinite(linesAdded) ? linesAdded : 0) +
+      (Number.isFinite(linesRemoved) ? linesRemoved : 0);
+    if (totalLines > 0) {
+      const estimatedSizeKb = Math.ceil(totalLines / 10);
+      if (estimatedSizeKb > maxSizeKb) {
+        return makeDeny(params, "oap.limit_exceeded", `PR size exceeds limit: ${estimatedSizeKb}KB > ${maxSizeKb}KB (${totalLines} lines)`);
+      }
+    } else {
+      const filesChanged = Array.isArray(context.files_changed)
+        ? context.files_changed.length
+        : Number(context.files_changed ?? context.files ?? 0);
+      if (Number.isFinite(filesChanged) && filesChanged > maxSizeKb) {
+        return makeDeny(params, "oap.limit_exceeded", `PR file count ${filesChanged} exceeds fallback limit of ${maxSizeKb}`);
+      }
     }
 
     const repo = String(context.repo ?? context.repository ?? "");
-    if (!allowByList(repo, limits.allowed_repos, (value, pattern) => value === pattern || value.endsWith(`/${pattern}`) || pattern === "*")) {
+    if (!allowByList(repo, limits.allowed_repos, matchesSimpleGlob)) {
       return makeDeny(params, "oap.repo_not_allowed", `Repository '${repo}' is not in allowed list`);
     }
 
-    const branch = String(context.branch ?? "");
-    if (!allowByList(branch, limits.allowed_base_branches, (value, pattern) => value === pattern || pattern === "*")) {
+    const branch = repositoryAction(context) === "repo.push"
+      ? String(context.branch ?? "")
+      : String(context.base_branch ?? context.branch ?? "");
+    if (!allowByList(branch, limits.allowed_base_branches, matchesSimpleGlob)) {
       return makeDeny(params, "oap.branch_not_allowed", `Branch '${branch}' is not in allowed list`);
+    }
+
+    const allowedPaths = Array.isArray(limits.allowed_paths) ? limits.allowed_paths : [];
+    if (allowedPaths.length > 0) {
+      const blockedPath = changedFilePaths(context).find((filePath) => !pathAllowedByPatterns(filePath, allowedPaths));
+      if (blockedPath) {
+        return makeDeny(params, "oap.path_not_allowed", `File path '${blockedPath}' is not in allowed list`);
+      }
+    }
+  }
+
+  if (policyName === "code.release.publish.v1") {
+    const assuranceLevel = passport.assurance_level || "L0";
+    if (!meetsMinimumAssurance(assuranceLevel, "L3")) {
+      return makeDeny(params, "oap.assurance_insufficient", `Required assurance level L3 not met (current: ${assuranceLevel})`);
+    }
+
+    const repository = String(context.repository ?? context.repo ?? "");
+    if (!repository) {
+      return makeDeny(params, "oap.missing_required_context", "Release context must include repository");
+    }
+
+    const version = String(context.version ?? "");
+    if (!version) {
+      return makeDeny(params, "oap.missing_required_context", "Release context must include version");
+    }
+    if (!/^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$/.test(version)) {
+      return makeDeny(params, "oap.format_unsupported", `Version '${version}' does not follow semantic versioning`);
+    }
+
+    const files = Array.isArray(context.files) ? context.files : [];
+    if (files.length === 0) {
+      return makeDeny(params, "oap.missing_required_context", "Release context must include at least one file");
+    }
+    const sensitiveFile = files.find((file) => isSensitiveReleaseFile(file));
+    if (sensitiveFile) {
+      return makeDeny(params, "oap.file_forbidden", `Release file '${sensitiveFile}' is sensitive and cannot be published by default`);
+    }
+
+    if (!allowByList(repository, limits.allowed_repos, matchesSimpleGlob)) {
+      return makeDeny(params, "oap.repo_not_allowed", `Repository '${repository}' is not in allowed release list`);
+    }
+
+    const allowedExtensions = Array.isArray(limits.allowed_extensions) ? limits.allowed_extensions : [];
+    if (allowedExtensions.length > 0) {
+      const blockedFile = files.find((file) => !releaseFileAllowed(file, allowedExtensions));
+      if (blockedFile) {
+        return makeDeny(params, "oap.file_forbidden", `Release file '${blockedFile}' has a forbidden extension`);
+      }
     }
   }
 
@@ -247,20 +428,20 @@ export function evaluateLocalDecision({ policyName, context, passportFile }) {
       return makeDeny(params, "oap.command_not_allowed", `Command '${command}' is not in allowed list`);
     }
 
-    if (/rm[[:space:]]+-[^[:space:]]*r[^[:space:]]*f[^[:space:]]*[[:space:]]+\/[[:space:]]*$/i.test(command) ||
-        /rm[[:space:]]+-[^[:space:]]*r[^[:space:]]*f[^[:space:]]+\/\*/i.test(command)) {
+    if (/rm\s+-[^\s]*r[^\s]*f[^\s]*\s+\/\s*$/i.test(command) ||
+        /rm\s+-[^\s]*r[^\s]*f[^\s]*\s+\/\*/i.test(command)) {
       return makeDeny(params, "oap.dangerous_operation", "Destructive file operation: rm -rf / or rm -rf /*");
     }
-    if (/dd[[:space:]]+if=\/dev\//i.test(command)) {
+    if (/dd\s+if=\/dev\//i.test(command)) {
       return makeDeny(params, "oap.dangerous_operation", "Dangerous disk operation: dd if=/dev/");
     }
     if (/mkfs\./i.test(command)) {
       return makeDeny(params, "oap.dangerous_operation", "Filesystem creation: mkfs");
     }
-    if (/(curl|wget)[[:space:]][^|]*\|[[:space:]]*(bash|sh|zsh|python|node)/i.test(command)) {
+    if (/(curl|wget)\s+[^|]*\|\s*(bash|sh|zsh|python|node)/i.test(command)) {
       return makeDeny(params, "oap.dangerous_operation", "Download-and-execute pattern detected");
     }
-    if (/:\(\)[[:space:]]*\{[[:space:]]*:[[:space:]]*\|[[:space:]]*:[[:space:]]*&[[:space:]]*\}/.test(command) || /fork\(\)/i.test(command)) {
+    if (/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}/.test(command) || /fork\(\)/i.test(command)) {
       return makeDeny(params, "oap.dangerous_operation", "Fork bomb detected");
     }
 
@@ -272,9 +453,21 @@ export function evaluateLocalDecision({ policyName, context, passportFile }) {
   }
 
   if (policyName === "messaging.message.send.v1") {
-    const recipient = String(context.recipient ?? context.to ?? "");
+    const recipient = String(context.recipient ?? context.to ?? context.channel_id ?? context.channel ?? context.target ?? "");
     if (!allowByList(recipient, limits.allowed_recipients, (value, pattern) => value === pattern || pattern === "*")) {
       return makeDeny(params, "oap.recipient_not_allowed", `Recipient '${recipient}' is not in allowed list`);
+    }
+  }
+
+  if (policyName === "mcp.tool.execute.v1") {
+    const server = String(context.server ?? context.mcp_server ?? "");
+    if (server && !mcpServerAllowed(server, limits.allowed_servers)) {
+      return makeDeny(params, "oap.mcp_server_not_allowed", `MCP server '${server}' is not in allowed list`);
+    }
+
+    const tool = String(context.tool ?? context.mcp_tool ?? "");
+    if (tool && !mcpToolAllowed(tool, limits)) {
+      return makeDeny(params, "oap.mcp_tool_not_allowed", `MCP tool '${tool}' is not in allowed list`);
     }
   }
 

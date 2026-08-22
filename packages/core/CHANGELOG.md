@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.30
+
+### Patch Changes
+
+- Add GitHub protection documentation and local evaluator parity for repository and release policy checks, including action-specific repo capabilities, changed-path allowlists, release semantic-version/file validation, hosted-mode hook behavior, quick-hosted reuse, stale hook cleanup, chained hook-bypass hardening, and framework reset/config hardening.
+
 ## 1.0.29
 
 ### Patch Changes

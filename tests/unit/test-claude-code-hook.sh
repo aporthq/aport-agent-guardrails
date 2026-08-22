@@ -1,5 +1,5 @@
 #!/bin/bash
-# Unit tests for Claude Code hook script: mock stdin (allow/deny), assert exit 0/2 and hookSpecificOutput format.
+# Unit tests for Claude Code hook script: mock stdin, assert allow and structured deny output.
 # Uses test passport and guardrail; hook reads tool_name + tool_input from JSON stdin.
 
 set -e
@@ -21,9 +21,28 @@ MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
 chmod +x "$HOOK_SCRIPT" 2> /dev/null || true
 
 echo ""
-echo "  Unit — Claude Code hook script (allow/deny, exit 0/2, hookSpecificOutput)"
+echo "  Unit — Claude Code hook script (allow/structured deny, hookSpecificOutput)"
 echo "  Hook: $HOOK_SCRIPT"
 echo ""
+
+# 0. Deny: empty stdin must fail closed
+echo "  Test: empty stdin -> structured deny..."
+OUT0="$TEST_DIR/claude-empty-input.txt"
+set +e
+OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+    OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" < /dev/null > "$OUT0" 2> /dev/null
+EXIT0=$?
+set -e
+[[ "$EXIT0" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for empty input, got $EXIT0" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT0" || {
+    echo "FAIL: expected structured deny payload for empty input" >&2
+    cat "$OUT0" >&2
+    exit 1
+}
+echo "  ✅ Empty input: structured deny"
 
 # 1. Allow: Read with allowed path (local evaluator)
 echo "  Test: Read tool -> allow (allowed path)..."
@@ -49,11 +68,16 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"/repo/.env.local"}}' \
         OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT1B" 2> /dev/null
 EXIT1B=$?
 set -e
-[[ "$EXIT1B" -eq 2 ]] || {
-    echo "FAIL: expected exit 2 for Read .env deny, got $EXIT1B" >&2
+[[ "$EXIT1B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Read .env, got $EXIT1B" >&2
     exit 1
 }
-echo "  ✅ Read sensitive path: exit 2"
+grep -q 'permissionDecision.*deny' "$OUT1B" || {
+    echo "FAIL: expected structured deny payload for Read .env" >&2
+    cat "$OUT1B" >&2
+    exit 1
+}
+echo "  ✅ Read sensitive path: structured deny"
 
 # 1c. API mode: Read calls guardrail (unreachable API -> deny)
 cat > "$MODE_FILE" << 'EOF'
@@ -68,14 +92,19 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/foo"}}' \
         OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT1C" 2> /dev/null
 EXIT1C=$?
 set -e
-[[ "$EXIT1C" -eq 2 ]] || {
-    echo "FAIL: expected exit 2 for Read in api mode, got $EXIT1C" >&2
+[[ "$EXIT1C" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Read in api mode, got $EXIT1C" >&2
     exit 1
 }
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
-echo "  ✅ Read API mode: exit 2 when API unreachable"
+grep -q 'permissionDecision.*deny' "$OUT1C" || {
+    echo "FAIL: expected structured deny payload for Read in api mode" >&2
+    cat "$OUT1C" >&2
+    exit 1
+}
+echo "  ✅ Read API mode: structured deny when API unreachable"
 
 # 2. Allow: Bash with allowed command (ls)
 echo "  Test: Bash allow (command in allowlist)..."
@@ -88,15 +117,15 @@ EXIT2=$?
 }
 echo "  ✅ Bash allow: exit 0"
 
-# 3. Deny: Bash with blocked pattern (rm -rf) -> exit 2, hookSpecificOutput
+# 3. Deny: Bash with blocked pattern (rm -rf) -> hookSpecificOutput
 echo "  Test: Bash deny (blocked pattern)..."
 OUT3="$TEST_DIR/claude-deny-bash.txt"
 set +e
 echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" "$HOOK_SCRIPT" > "$OUT3" 2> /dev/null
 EXIT3=$?
 set -e
-[[ "$EXIT3" -eq 2 ]] || {
-    echo "FAIL: expected exit 2 for deny, got $EXIT3 (output: $(cat "$OUT3"))" >&2
+[[ "$EXIT3" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny, got $EXIT3 (output: $(cat "$OUT3"))" >&2
     exit 1
 }
 grep -q 'hookSpecificOutput' "$OUT3" || {
@@ -109,7 +138,7 @@ grep -q 'permissionDecision.*deny' "$OUT3" || {
     cat "$OUT3" >&2
     exit 1
 }
-echo "  ✅ Deny: exit 2, hookSpecificOutput.permissionDecision deny"
+echo "  ✅ Deny: hookSpecificOutput.permissionDecision deny"
 
 # 4. Deny: Unknown tool (fail-closed)
 echo "  Test: Unknown tool -> deny (fail-closed)..."
@@ -118,8 +147,8 @@ set +e
 echo '{"tool_name":"UnknownTool","tool_input":{}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4" 2> /dev/null
 EXIT4=$?
 set -e
-[[ "$EXIT4" -eq 2 ]] || {
-    echo "FAIL: expected exit 2 for unknown tool, got $EXIT4" >&2
+[[ "$EXIT4" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for unknown tool, got $EXIT4" >&2
     exit 1
 }
 grep -q 'fail-closed' "$OUT4" || {
@@ -127,18 +156,7 @@ grep -q 'fail-closed' "$OUT4" || {
     cat "$OUT4" >&2
     exit 1
 }
-echo "  ✅ Unknown tool: exit 2, fail-closed"
-
-# 5. Empty stdin -> allow (fail-open)
-echo "  Test: empty stdin -> allow..."
-OUT5="$TEST_DIR/claude-empty.txt"
-printf '' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT5" 2> /dev/null
-EXIT5=$?
-[[ "$EXIT5" -eq 0 ]] || {
-    echo "FAIL: empty stdin should exit 0" >&2
-    exit 1
-}
-echo "  ✅ Empty stdin -> exit 0"
+echo "  ✅ Unknown tool: structured deny, fail-closed"
 
 # 6. Glob (read-family) -> allow without calling evaluator
 echo "  Test: Glob tool -> allow (read-family)..."
@@ -172,8 +190,8 @@ set +e
 echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT8" 2> /dev/null
 EXIT8=$?
 set -e
-[[ "$EXIT8" -eq 2 ]] || {
-    echo "FAIL: expected exit 2 in api mode with unreachable API, got $EXIT8" >&2
+[[ "$EXIT8" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny in api mode with unreachable API, got $EXIT8" >&2
     exit 1
 }
 grep -q 'permissionDecision.*deny' "$OUT8" || {
@@ -239,7 +257,26 @@ EXIT13=$?
 }
 echo "  ✅ PowerShell: exit 0"
 
-# 14. Hosted-style install: no passport.json — resolver must not fall back to ~/.openclaw
+# 14. Reentrant guardrail shortcut must not allow chained shell commands
+echo "  Test: guardrail self-check with chained command -> deny..."
+OUT14="$TEST_DIR/claude-deny-reentrant-chain.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"'"$REPO_ROOT"'/bin/aport-guardrail-bash.sh system.command.execute '\''{}'\''; sudo reboot"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" "$HOOK_SCRIPT" > "$OUT14" 2> /dev/null
+EXIT14=$?
+set -e
+[[ "$EXIT14" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for chained guardrail command, got $EXIT14" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT14" || {
+    echo "FAIL: expected structured deny payload for chained guardrail command" >&2
+    cat "$OUT14" >&2
+    exit 1
+}
+echo "  ✅ chained guardrail command denied"
+
+# 15. Hosted-style install: no passport.json — resolver must not fall back to ~/.openclaw
 echo "  Test: OPENCLAW_CONFIG_DIR anchors paths without passport.json..."
 HOSTED_DIR="$TEST_DIR/hosted-no-passport"
 mkdir -p "$HOSTED_DIR/aport"

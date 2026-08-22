@@ -1,6 +1,6 @@
 # Release process and version policy
 
-**Current release:** 1.0.29 (see [CHANGELOG.md](../CHANGELOG.md)).
+**Current release:** 1.0.30 (see [CHANGELOG.md](../CHANGELOG.md)).
 
 We keep **one version number** across all published packages (Node core, Python core, and every framework adapter). That avoids “core is 1.2 but CLI is 0.9” and keeps the story simple for users and support.
 
@@ -51,7 +51,7 @@ So: **root = CLI/setup**; **core = library**. We publish core so that (1) the ad
    git push origin v1.3.0
    ```
 5. **CI (`.github/workflows/release.yml`)**: on tag push `v*`:
-   - **publish-npm**: publishes the **root** package `@aporthq/aport-agent-guardrails` (CLI) and workspace packages `@aporthq/aport-agent-guardrails-core`, `-langchain`, `-crewai`, `-cursor`, `-claude-code`, and `@aporthq/openclaw-aport` to npm. The **n8n** package is not published yet (coming soon). Uses `NPM_TOKEN` secret.
+   - **publish-npm**: publishes the **root** package `@aporthq/aport-agent-guardrails` (CLI), workspace packages `@aporthq/aport-agent-guardrails-core`, `-langchain`, `-crewai`, `-cursor`, `-claude-code`, `@aporthq/openclaw-aport`, and the deprecated compatibility alias `@aporthq/agent-guardrails` to npm. The **n8n** package is not published yet (coming soon). Uses `NPM_TOKEN` secret.
    - **publish-python**: builds and publishes `aport-agent-guardrails`, `aport-agent-guardrails-langchain`, and `aport-agent-guardrails-crewai` to PyPI (uses `PYPI_TOKEN` secret). Uploads use `--skip-existing`, so reruns or recovery releases can still publish any missing Python artifacts for the same version.
    - **workflow_dispatch**: supports release recovery for an existing version after workflow fixes land on `main`.
    - **create-release**: creates the GitHub Release with install notes for both ecosystems.
