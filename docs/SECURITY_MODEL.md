@@ -294,7 +294,7 @@ APort uses secure defaults out of the box:
 
 ✅ `failClosed: true` - Block tools on errors (security over availability)
 ✅ `fail_open_on_api_error: false` - API infrastructure errors (4xx/5xx, network) also fail closed by default
-✅ `allowUnmappedTools: false` - Unmapped tools blocked (strict mode)
+✅ Strict mode available - set `allowUnmappedTools: false` to block unmapped OpenClaw tools
 ✅ API mode recommended for production
 ✅ Passport status checked first (suspended/revoked → deny all)
 

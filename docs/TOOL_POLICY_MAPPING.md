@@ -8,6 +8,7 @@ This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guard
 
 | Tool name (pattern) | Policy pack ID | Policy location |
 |---------------------|----------------|------------------|
+| `release.publish`, `git.release` | `code.release.publish.v1` | `external/aport-policies/code.release.publish.v1/` |
 | `git.create_pr`, `git.merge`, `git.push`, `git.*` | `code.repository.merge.v1` | `external/aport-policies/code.repository.merge.v1/` |
 | `exec.run`, `exec.*`, `system.command.*`, `system.*` | `system.command.execute.v1` | `local-overrides` or API |
 | `message.send`, `message.*`, `messaging.*` | `messaging.message.send.v1` | `external/aport-policies/messaging.message.send.v1/` |
@@ -35,14 +36,27 @@ This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guard
 3. The script maps `system.command.execute` → `system.command.execute.v1`, loads the passport and policy (or calls the API), and evaluates.
 4. Exit 0 = allow, exit 1 = deny. Decision details are in `~/.openclaw/decision.json` (or your configured path).
 
+## Local repository checks
+
+The local evaluator intentionally implements a small subset of hosted repository enforcement:
+
+- `pr.merge` requires `repo.merge`.
+- `pr.create`, `pr.update`, and `repo.push` require `repo.pr.create`.
+- PR actions check `base_branch` when present; push-like actions check `branch`.
+- `allowed_repos`, `allowed_base_branches`, and `allowed_paths` support simple glob patterns.
+
+Hosted verification remains the source of truth for GitHub OIDC, signed decisions, policy hashes, and Action-collected GitHub evidence.
+
+Shell commands such as `npm publish`, `pnpm publish`, and `gh release create` are evaluated as `system.command.execute.v1` when they arrive through Claude Code, Cursor, or another shell hook. The release policy applies when the integration supplies an explicit `release.publish` or `git.release` tool name, or when callers invoke the hosted verifier directly with `code.release.publish.v1`.
+
 ## Adding or changing mappings
 
-To add a new tool → policy mapping, edit the `case` block in:
+To add a new tool → policy mapping, edit the shared JSON source:
 
-- `bin/aport-guardrail-api.sh`
-- `bin/aport-guardrail-bash.sh`
+- `packages/core/src/core/tool-pack-mapping.json`
+- `python/aport_guardrails/core/tool-pack-mapping.json`
 
-and add a new pattern and policy pack ID. The policy pack must exist under `external/aport-policies/<pack_id>/` (or in local-overrides / API).
+Both copies must stay identical. The policy pack must exist under `external/aport-policies/<pack_id>/` (or in local-overrides / API).
 
 Per-framework host tool names and hook behavior: [FRAMEWORK_TOOL_MAPPING_AUDIT.md](FRAMEWORK_TOOL_MAPPING_AUDIT.md).
 

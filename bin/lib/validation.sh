@@ -170,23 +170,58 @@ validate_agent_id() {
 # Matching strategy:
 # - Multi-word patterns (e.g. "rm -rf"): substring match (grep -F)
 #   because word boundary alone would miss "rm -rf /"
-# - Single-word patterns (e.g. "sudo"): word boundary match (grep -w)
-#   to avoid false positives like "test_sudo_check" or "pseudocode"
+# - Glob patterns (contain *, ?, **): converted to regex using glob_to_regex,
+#   so config like ".env*", "*credentials*", "**/.ssh/**" actually match.
+# - Plain single-word patterns (e.g. "sudo"): word boundary match
+#   to avoid false positives like "test_sudo_check" or "pseudocode".
+#
+# Prior implementation escaped '*' to '\*' (literal asterisk in ERE),
+# silently breaking every glob pattern in DEFAULT_BLOCKED_PATTERNS such as
+# ".env*", "*credentials*", "**/.aws/**". This made the supposed defaults
+# inert. The glob branch below restores intent.
 safe_pattern_match() {
     local string="$1"
     local pattern="$2"
-    local pattern_escaped
 
-    # Escape regex metacharacters for safe ERE matching.
-    pattern_escaped="$(printf '%s' "$pattern" | sed -E 's/[][(){}.^$*+?|\\-]/\\&/g')"
-
-    if [[ "$pattern" == *" "* ]]; then
-        # Multi-word: case-insensitive substring match (the space makes it specific enough)
+    # Multi-word substring patterns (e.g. "rm -rf"): unchanged behavior.
+    if [[ "$pattern" == *" "* ]] && [[ "$pattern" != *"*"* ]] && [[ "$pattern" != *"?"* ]]; then
         echo "$string" | grep -qiF "$pattern"
-    else
-        # Single-word: case-insensitive boundary-aware regex (portable on GNU/BSD grep)
-        echo "$string" | grep -qiE "(^|[^[:alnum:]_])${pattern_escaped}([^[:alnum:]_]|$)"
+        return $?
     fi
+
+    # Glob patterns: convert to regex and substring-match (no word boundary,
+    # because globs like "*credentials*" inherently match within tokens).
+    if [[ "$pattern" == *"*"* ]] || [[ "$pattern" == *"?"* ]]; then
+        local regex
+        regex="$(glob_to_regex "$pattern")"
+        echo "$string" | grep -qiE "$regex"
+        return $?
+    fi
+
+    # Plain single-word patterns (e.g. "sudo"): boundary-aware match.
+    # Escape regex metacharacters EXCEPT we've already excluded * and ?.
+    local pattern_escaped
+    pattern_escaped="$(printf '%s' "$pattern" | sed -E 's/[][(){}.^$+|\\-]/\\&/g')"
+    echo "$string" | grep -qiE "(^|[^[:alnum:]_])${pattern_escaped}([^[:alnum:]_]|$)"
+}
+
+# Convert a glob pattern (with * ** ?) to an extended-regex pattern.
+# Rules:
+#   ** -> .*    (matches any path including slashes)
+#   *  -> [^/]* (matches anything except path separator)
+#   ?  -> .     (single char)
+# Other regex metacharacters are escaped so the pattern matches literally.
+glob_to_regex() {
+    local g="$1"
+    # First escape regex metachars EXCEPT *, ?, /
+    local out
+    out="$(printf '%s' "$g" | sed -E 's/[][(){}.^$+|\\-]/\\&/g')"
+    # Replace ** with a sentinel, then *, then restore sentinel as .*
+    out="${out//\*\*/__APORT_GLOBSTAR__}"
+    out="${out//\*/[^/]*}"
+    out="${out//__APORT_GLOBSTAR__/.*}"
+    out="${out//\?/.}"
+    printf '%s' "$out"
 }
 
 # Safe prefix matching (for allowed commands)

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.30] - 2026-08-21
+
+### Added
+- **GitHub protection documentation:** Added a public GitHub Protection guide covering hosted/OIDC verification, report-only rollout, passport capabilities, repository limits, release checks, and local smoke tests.
+- **Git provenance helper:** Added `aport-git-trailers.sh` to print or append `APort-Session`, `APort-Decision`, and `APort-Agent` commit trailers from the latest local decision.
+- **Hook runtime helper:** Added shared hook runtime support for bounded stdin reads and consistent hook behavior across Claude Code and Cursor.
+
+### Changed
+- **Local repository policy parity:** Local evaluation for `code.repository.merge.v1` now supports action-specific repo capabilities, changed-path allowlists, branch/repository allowlists, and lightweight GitHub integration allowlists when those values are present in context.
+- **Local release policy parity:** Local evaluation now maps release/publish actions to `code.release.publish.v1`, checks release capability aliases, validates semantic versions, and applies release repository allowlists.
+- **Hosted hook behavior:** Claude Code and Cursor hooks now preserve hosted/API mode without requiring local passport JSON, surface clearer deny responses, and avoid overlapping framework config paths.
+- **Quick-hosted setup:** Hosted setup can reuse an existing hosted framework config on the same machine instead of issuing a duplicate passport for repeat installs.
+- **Enterprise release assets:** Release workflow and enterprise script docs now include bundled PowerShell scripts alongside bundled macOS/Linux scripts.
+- **Release packaging hygiene:** npm package contents now exclude nested extension dependencies and launch-planning docs; Python adapters and the deprecated npm alias are pinned to the current core package line during release sync.
+
+### Fixed
+- **Hook bypass hardening:** Claude Code and Cursor no longer treat chained guardrail self-check commands as automatic allow, and Cursor now emits fail-closed JSON for malformed hook input or internal hook errors.
+- **Framework reset/config safety:** Reset and setup paths preserve unrelated user hooks/config where possible and avoid overwriting invalid or custom framework hook files.
+- **OpenClaw mapping alignment:** OpenClaw tool mapping now includes release/publish and repository policy aliases consistently across docs, plugin mapping, local tool-pack manifests, and local plugin evaluation.
+
 ## [1.0.29] - 2026-05-28
 
 ### Fixed

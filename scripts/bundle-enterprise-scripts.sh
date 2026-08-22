@@ -15,6 +15,14 @@ header_through_config() {
     sed -n "1,${line}p" "$script"
 }
 
+header_before_ps1_core() {
+    local script="$1"
+    local line
+    line="$(grep -n '^\$Core =' "$script" | head -1 | cut -d: -f1)"
+    line="$((line - 1))"
+    sed -n "1,${line}p" "$script"
+}
+
 bundle_entry() {
     local entry="$1"
     local command="$2"
@@ -33,11 +41,41 @@ bundle_entry() {
     shasum -a 256 "$out" | awk '{print $1}' > "${out}.sha256"
 }
 
+bundle_ps1_entry() {
+    local entry="$1"
+    local command="$2"
+    local out="$3"
+    {
+        header_before_ps1_core "$entry"
+        printf '$env:APORT_PACKAGE_VERSION = "%s"\n' "$VERSION"
+        printf '$env:APORT_DEVICE_COMMAND = "%s"\n' "$command"
+        printf '# Bundled from aport-agent-guardrails v%s - do not edit below.\n' "$VERSION"
+        printf '$AportDeviceCore = @'"'"'\n'
+        cat "$CORE"
+        printf '\n'"'"'@\n'
+        cat << 'PS1'
+$CoreFile = Join-Path ([System.IO.Path]::GetTempPath()) ("aport-device-core-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+try {
+    Set-Content -LiteralPath $CoreFile -Value $AportDeviceCore -Encoding UTF8
+    & node $CoreFile $env:APORT_DEVICE_COMMAND
+    exit $LASTEXITCODE
+}
+finally {
+    Remove-Item -LiteralPath $CoreFile -Force -ErrorAction SilentlyContinue
+}
+PS1
+    } > "$out"
+    shasum -a 256 "$out" | awk '{print $1}' > "${out}.sha256"
+}
+
 mkdir -p "$DIST"
 
 bundle_entry "$ENT/aport-device-deploy.sh" "install" "$DIST/aport-device-deploy.bundled.sh"
 bundle_entry "$ENT/aport-device-enforce.sh" "enforce" "$DIST/aport-device-enforce.bundled.sh"
 bundle_entry "$ENT/aport-device-uninstall.sh" "uninstall" "$DIST/aport-device-uninstall.bundled.sh"
+bundle_ps1_entry "$ENT/aport-device-deploy.ps1" "install" "$DIST/aport-device-deploy.bundled.ps1"
+bundle_ps1_entry "$ENT/aport-device-enforce.ps1" "enforce" "$DIST/aport-device-enforce.bundled.ps1"
+bundle_ps1_entry "$ENT/aport-device-uninstall.ps1" "uninstall" "$DIST/aport-device-uninstall.bundled.ps1"
 
 cp "$CORE" "$DIST/aport-device-core.mjs"
 shasum -a 256 "$DIST/aport-device-core.mjs" | awk '{print $1}' > "$DIST/aport-device-core.mjs.sha256"
@@ -45,6 +83,7 @@ cp "$ENT"/aport-device-*.ps1 "$DIST/" 2> /dev/null || true
 for f in "$DIST"/aport-device-*.ps1; do
     [ -f "$f" ] || continue
     printf '%s\n' "$VERSION" > "${f}.version"
+    shasum -a 256 "$f" | awk '{print $1}' > "${f}.sha256"
 done
 
 DIST="$DIST" VERSION="$VERSION" node << 'NODE'
@@ -58,6 +97,18 @@ const scripts = ids.map((id) => {
   const sha = fs.readFileSync(path.join(dist, file + '.sha256'), 'utf8').trim();
   return { id, filename: file, sha256: sha, download_path: '/enterprise/scripts/' + id };
 });
+for (const id of ids) {
+  const file = 'aport-device-' + id + '.bundled.ps1';
+  const shaPath = path.join(dist, file + '.sha256');
+  if (!fs.existsSync(shaPath)) continue;
+  const sha = fs.readFileSync(shaPath, 'utf8').trim();
+  scripts.push({
+    id: id + '.ps1',
+    filename: file,
+    sha256: sha,
+    download_path: '/enterprise/scripts/' + id + '.ps1',
+  });
+}
 const coreSha = require('crypto')
   .createHash('sha256')
   .update(fs.readFileSync(path.join(dist, 'aport-device-core.mjs')))

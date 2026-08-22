@@ -56,6 +56,15 @@ export function mapToolToPolicy(toolName, params) {
   const rawTool = String(toolName ?? "").trim();
   const tool = rawTool.toLowerCase();
 
+  if (
+    tool.startsWith("release.") ||
+    tool.startsWith("repo.release.") ||
+    tool === "git.release" ||
+    tool.includes("release.publish") ||
+    tool.includes("release.create")
+  ) {
+    return "code.release.publish.v1";
+  }
   if (tool.match(/git\.(create_pr|merge|push|commit)/)) return "code.repository.merge.v1";
   if (tool.startsWith("git.")) return "code.repository.merge.v1";
 

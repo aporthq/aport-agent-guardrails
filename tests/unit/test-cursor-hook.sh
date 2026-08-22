@@ -26,6 +26,25 @@ echo "  Unit — Cursor hook script (all hook events)"
 echo "  Hook: $HOOK_SCRIPT"
 echo ""
 
+# Empty stdin must fail closed. This catches broken host pipes or direct hook
+# invocation without a tool-call payload.
+OUT0="$TEST_DIR/cursor-empty-input.txt"
+set +e
+OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+    OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" < /dev/null > "$OUT0" 2> /dev/null
+EXIT0=$?
+set -e
+[[ "$EXIT0" -eq 2 ]] || {
+    echo "FAIL: empty stdin should deny with exit 2, got $EXIT0 (output: $(cat "$OUT0"))" >&2
+    exit 1
+}
+jq -e '.permission == "deny" and .allowed == false' "$OUT0" > /dev/null || {
+    echo "FAIL: empty stdin should return Cursor deny JSON" >&2
+    cat "$OUT0" >&2
+    exit 1
+}
+echo "  ✅ empty stdin: fail-closed deny"
+
 # Helper: run hook with input, check exit code and output
 run_hook() {
     local desc="$1" input="$2" expect_exit="$3" expect_field="$4"
@@ -37,6 +56,10 @@ run_hook() {
     set -e
     if [[ "$actual_exit" -ne "$expect_exit" ]]; then
         echo "FAIL: $desc — expected exit $expect_exit, got $actual_exit (output: $(cat "$out"))" >&2
+        exit 1
+    fi
+    if ! jq -e . "$out" > /dev/null 2>&1; then
+        echo "FAIL: $desc — hook stdout must be valid JSON: $(cat "$out")" >&2
         exit 1
     fi
     if [ -n "$expect_field" ] && ! grep -q "$expect_field" "$out"; then
@@ -57,6 +80,9 @@ run_hook "beforeShellExecution: deny (rm -rf)" \
 run_hook "preToolUse Shell: allow (ls)" \
     '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
 
+run_hook "preToolUse run_terminal_cmd: allow (ls)" \
+    '{"tool_name":"run_terminal_cmd","tool_input":{"args":{"command":"ls -la"}}}' 0 '"permission":"allow"'
+
 run_hook "preToolUse Shell: deny (sudo)" \
     '{"tool_name":"Shell","tool_input":{"command":"sudo reboot"}}' 2 '"permission":"deny"'
 
@@ -64,16 +90,25 @@ run_hook "preToolUse Shell: deny (sudo)" \
 run_hook "preToolUse Read: allow (allowed path)" \
     '{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
 
+run_hook "preToolUse read_file: allow (args path)" \
+    '{"tool_name":"read_file","tool_input":{"args":{"path":"/tmp/test.txt"}}}' 0 '"permission":"allow"'
+
 run_hook "preToolUse Read: deny (.env sensitive path)" \
     '{"tool_name":"Read","tool_input":{"file_path":"/repo/.env.local"}}' 2 '"permission":"deny"'
 
 # --- preToolUse: Grep (allow without evaluator) ---
 run_hook "preToolUse Grep: allow (no evaluator)" \
-    '{"tool_name":"Grep","tool_input":{"pattern":"TODO"}}' 0 ''
+    '{"tool_name":"Grep","tool_input":{"pattern":"TODO"}}' 0 '"permission":"allow"'
+
+run_hook "preToolUse grep_search: allow (no evaluator)" \
+    '{"tool_name":"grep_search","tool_input":{"pattern":"TODO"}}' 0 '"permission":"allow"'
 
 # --- preToolUse: Write ---
 run_hook "preToolUse Write: allow" \
     '{"tool_name":"Write","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
+
+run_hook "preToolUse edit_file: allow (args path)" \
+    '{"tool_name":"edit_file","tool_input":{"args":{"path":"/tmp/test.txt"}}}' 0 '"permission":"allow"'
 
 # --- preToolUse: Delete ---
 run_hook "preToolUse Delete: allow" \
@@ -113,9 +148,12 @@ run_hook "subagentStart: allow" \
 run_hook "Copilot-style: allow (npm install)" \
     '{"tool":"runTerminalCommand","input":{"command":"npm install"}}' 0 '"permission":"allow"'
 
-# --- Empty stdin -> fail-open ---
-run_hook "Empty stdin: allow (fail-open)" \
-    '' 0 '"allowed":true'
+run_hook "Guardrail self-check with chained command: deny" \
+    '{"command":"'"$REPO_ROOT"'/bin/aport-guardrail-bash.sh system.command.execute '\''{}'\''; sudo reboot"}' 2 '"permission":"deny"'
+
+# --- Invalid JSON -> fail-closed with Cursor JSON ---
+run_hook "Invalid JSON: deny (fail-closed)" \
+    '{"tool_name":"Shell","tool_input":' 2 '"permission":"deny"'
 
 # --- mode selection: local vs api ---
 MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"

@@ -5,10 +5,12 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d)}"
-FAKE_BIN="$TEST_DIR/bin"
-OPENCLAW_HOME="$TEST_DIR/.openclaw"
+FAKE_BIN="$TEST_DIR/bin-openclaw-noninteractive"
+OPENCLAW_HOME="$TEST_DIR/.openclaw-noninteractive"
 LOG_FILE="$TEST_DIR/openclaw.log"
 mkdir -p "$FAKE_BIN" "$OPENCLAW_HOME"
+mkdir -p "$OPENCLAW_HOME/aport"
+printf '{"passport_id":"local-existing"}\n' > "$OPENCLAW_HOME/aport/passport.json"
 
 cat > "$FAKE_BIN/openclaw" << 'EOF'
 #!/bin/bash
@@ -54,7 +56,8 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
-printf '{"agent_id":"ap_1234567890abcdef1234567890abcdef","api_key":"apk_runtime_test","api_key_id":"key_runtime"}' > "$output"
+agent_id="${APORT_TEST_ISSUE_AGENT_ID:-ap_1234567890abcdef1234567890abcdef}"
+printf '{"agent_id":"%s","api_key":"apk_runtime_test","api_key_id":"key_runtime"}' "$agent_id" > "$output"
 printf '201'
 EOF
 chmod +x "$FAKE_BIN/curl"
@@ -87,6 +90,12 @@ grep -q '^        agentId: ap_1234567890abcdef1234567890abcdef$' "$CONFIG_YAML" 
     exit 1
 }
 
+if grep -q 'passportFile:' "$CONFIG_YAML"; then
+    echo "FAIL: quick-hosted OpenClaw setup should prefer hosted mode over an existing local passport" >&2
+    cat "$CONFIG_YAML" >&2
+    exit 1
+fi
+
 grep -q '^        apiUrl: http://127.0.0.1:9$' "$CONFIG_YAML" || {
     echo "FAIL: config.yaml should honor --api-url" >&2
     cat "$CONFIG_YAML" >&2
@@ -95,6 +104,34 @@ grep -q '^        apiUrl: http://127.0.0.1:9$' "$CONFIG_YAML" || {
 
 grep -q '^        allowUnmappedTools: true$' "$CONFIG_YAML" || {
     echo "FAIL: non-interactive strict mode default should allow unmapped tools" >&2
+    cat "$CONFIG_YAML" >&2
+    exit 1
+}
+
+PATH="$FAKE_BIN:$PATH" \
+    OPENCLAW_HOME="$OPENCLAW_HOME" \
+    APORT_NONINTERACTIVE=1 \
+    APORT_TEST_ISSUE_AGENT_ID="ap_fedcba9876543210fedcba9876543210" \
+    "$REPO_ROOT/bin/openclaw" \
+    --quick-hosted \
+    --email dev@example.com \
+    --issue-url http://issue.local/api/issue \
+    --api-url http://127.0.0.1:10 \
+    --non-interactive \
+    < /dev/null >> "$LOG_FILE" 2>&1 || {
+    echo "FAIL: OpenClaw hosted rerun failed" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+}
+
+grep -q '^        agentId: "ap_fedcba9876543210fedcba9876543210"$' "$CONFIG_YAML" || {
+    echo "FAIL: existing config.yaml should update hosted agent id on rerun" >&2
+    cat "$CONFIG_YAML" >&2
+    exit 1
+}
+
+grep -q '^        apiUrl: "http://127.0.0.1:10"$' "$CONFIG_YAML" || {
+    echo "FAIL: existing config.yaml should update API URL on rerun" >&2
     cat "$CONFIG_YAML" >&2
     exit 1
 }
