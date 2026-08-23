@@ -459,6 +459,17 @@ const readConfigValue = (key) => {
   }
   return "";
 };
+const readScalar = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed == null ? "" : String(parsed);
+  } catch {
+    return raw.replace(/^['"]|['"]$/g, "");
+  }
+};
+const apiKey = process.env.APORT_YAML_API_KEY || readScalar(readConfigValue("apiKey"));
 const block = [
   `${indent}openclaw-aport:`,
   `${indent}  enabled: true`,
@@ -467,8 +478,8 @@ const block = [
 ];
 if (hosted) {
   block.push(`${indent}    agentId: ${q(process.env.APORT_YAML_AGENT_ID)}`);
-  if (process.env.APORT_YAML_API_KEY) {
-    block.push(`${indent}    apiKey: ${q(process.env.APORT_YAML_API_KEY)}`);
+  if (apiKey) {
+    block.push(`${indent}    apiKey: ${q(apiKey)}`);
   }
 } else {
   block.push(`${indent}    passportFile: ${q(process.env.APORT_YAML_PASSPORT_FILE)}`);

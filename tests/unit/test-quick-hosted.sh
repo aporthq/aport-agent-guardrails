@@ -99,12 +99,12 @@ EXISTING_CONFIG_DIR="$TEST_DIR/existing-hosted"
 mkdir -p "$EXISTING_CONFIG_DIR/aport"
 cat > "$EXISTING_CONFIG_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=api
-APORT_API_URL=https://api.aport.io
+APORT_API_URL=https://private.aport.example
 APORT_AGENT_ID=agt_inst_existing123
 APORT_API_KEY=apk_existing_runtime
 EOF
 : > "$LOG_FILE"
-unset APORT_AGENT_ID APORT_API_KEY
+unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
 aport_maybe_configure_hosted_passport "claude-code" "$EXISTING_CONFIG_DIR" || {
     echo "FAIL: expected existing hosted mode file to be reused" >&2
     exit 1
@@ -115,6 +115,14 @@ aport_maybe_configure_hosted_passport "claude-code" "$EXISTING_CONFIG_DIR" || {
 }
 [ "$APORT_API_KEY" = "apk_existing_runtime" ] || {
     echo "FAIL: expected existing hosted runtime key to be loaded" >&2
+    exit 1
+}
+[ "$APORT_API_URL" = "https://private.aport.example" ] || {
+    echo "FAIL: expected existing hosted API URL to be loaded" >&2
+    exit 1
+}
+[ "$APORT_SELECTED_API_URL" = "https://private.aport.example" ] || {
+    echo "FAIL: expected selected API URL to use existing hosted API URL" >&2
     exit 1
 }
 [ ! -s "$LOG_FILE" ] || {

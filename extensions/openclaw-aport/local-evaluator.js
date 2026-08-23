@@ -178,6 +178,18 @@ function allowByList(value, list, matcher) {
   return list.some((entry) => matcher(value, entry));
 }
 
+function repoAllowedByList(repo, list) {
+  if (!Array.isArray(list) || list.length === 0) return true;
+  const value = String(repo || "");
+  const repoName = value.split("/").pop() || value;
+  return list.some((entry) => {
+    const pattern = String(entry || "");
+    if (pattern === "*") return true;
+    if (matchesSimpleGlob(value, pattern)) return true;
+    return !pattern.includes("/") && !pattern.includes("*") && !pattern.includes("?") && repoName === pattern;
+  });
+}
+
 function toStringArray(value) {
   if (Array.isArray(value)) return value.map((entry) => String(entry)).filter(Boolean);
   if (typeof value === "string" && value) return [value];
@@ -373,7 +385,7 @@ export function evaluateLocalDecision({ policyName, toolName, context, passportF
     }
 
     const repo = String(context.repo ?? context.repository ?? "");
-    if (!allowByList(repo, limits.allowed_repos, matchesSimpleGlob)) {
+    if (!repoAllowedByList(repo, limits.allowed_repos)) {
       return makeDeny(params, "oap.repo_not_allowed", `Repository '${repo}' is not in allowed list`);
     }
 
@@ -385,8 +397,12 @@ export function evaluateLocalDecision({ policyName, toolName, context, passportF
     }
 
     const allowedPaths = Array.isArray(limits.allowed_paths) ? limits.allowed_paths : [];
-    if (allowedPaths.length > 0) {
-      const blockedPath = changedFilePaths(context).find((filePath) => !pathAllowedByPatterns(filePath, allowedPaths));
+    if (hasRestrictiveList(allowedPaths)) {
+      const changedPaths = changedFilePaths(context);
+      if (changedPaths.length === 0) {
+        return makeDeny(params, "oap.missing_required_context", "Repository policy requires changed-file path evidence");
+      }
+      const blockedPath = changedPaths.find((filePath) => !pathAllowedByPatterns(filePath, allowedPaths));
       if (blockedPath) {
         return makeDeny(params, "oap.path_not_allowed", `File path '${blockedPath}' is not in allowed list`);
       }
@@ -421,7 +437,7 @@ export function evaluateLocalDecision({ policyName, toolName, context, passportF
       return makeDeny(params, "oap.file_forbidden", `Release file '${sensitiveFile}' is sensitive and cannot be published by default`);
     }
 
-    if (!allowByList(repository, limits.allowed_repos, matchesSimpleGlob)) {
+    if (!repoAllowedByList(repository, limits.allowed_repos)) {
       return makeDeny(params, "oap.repo_not_allowed", `Repository '${repository}' is not in allowed release list`);
     }
 

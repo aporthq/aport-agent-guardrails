@@ -145,4 +145,42 @@ grep -q '^        mapExecToPolicy: false$' "$CONFIG_YAML" || {
     exit 1
 }
 
+grep -q '^        apiKey: "apk_runtime_test"$' "$CONFIG_YAML" || {
+    echo "FAIL: quick-hosted rerun should write the newly issued runtime key" >&2
+    cat "$CONFIG_YAML" >&2
+    exit 1
+}
+
+perl -0pi -e 's/apiKey: "apk_runtime_test"/apiKey: apk_existing_config_key/' "$CONFIG_YAML"
+PATH="$FAKE_BIN:$PATH" \
+    OPENCLAW_HOME="$OPENCLAW_HOME" \
+    APORT_NONINTERACTIVE=1 \
+    "$REPO_ROOT/bin/openclaw" \
+    ap_11111111111111111111111111111111 \
+    --api-url http://127.0.0.1:11 \
+    --non-interactive \
+    < /dev/null >> "$LOG_FILE" 2>&1 || {
+    echo "FAIL: OpenClaw direct hosted rerun failed" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+}
+
+grep -q '^        agentId: "ap_11111111111111111111111111111111"$' "$CONFIG_YAML" || {
+    echo "FAIL: direct hosted rerun should update hosted agent id" >&2
+    cat "$CONFIG_YAML" >&2
+    exit 1
+}
+
+grep -q '^        apiUrl: "http://127.0.0.1:11"$' "$CONFIG_YAML" || {
+    echo "FAIL: direct hosted rerun should update API URL" >&2
+    cat "$CONFIG_YAML" >&2
+    exit 1
+}
+
+grep -q '^        apiKey: "apk_existing_config_key"$' "$CONFIG_YAML" || {
+    echo "FAIL: existing config.yaml should preserve apiKey on rerun when no replacement is supplied" >&2
+    cat "$CONFIG_YAML" >&2
+    exit 1
+}
+
 echo "OK test-openclaw-noninteractive.sh"
