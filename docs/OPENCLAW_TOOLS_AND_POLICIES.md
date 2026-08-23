@@ -10,7 +10,11 @@ How the APort plugin maps OpenClaw tools to policies and where limits live (pass
 2. **Passport** holds **capabilities** (what the agent is allowed to do at a high level) and **limits** (per-policy constraints). There is **no global “tool allowlist”** in the passport for OpenClaw tool names. Control is per policy:
    - **exec** → policy **system.command.execute.v1** → passport **limits.system.command.execute** (e.g. `allowed_commands`, `blocked_patterns`).
    - **message** / **messaging.*** → policy **messaging.message.send.v1** → passport **limits.messaging** (e.g. `msgs_per_min`, `msgs_per_day`).
-   - **read**, **write**, **edit**, **browser**, **cron**, etc. → **no mapping** in this plugin → treated as unmapped (allowed by default when `allowUnmappedTools: true`).
+   - **read** → policy **data.file.read.v1** → passport **limits.data.file.read** (allowed paths plus default sensitive-file blocks).
+   - **write** / **edit** / **multiedit** → policy **data.file.write.v1** → passport **limits.data.file.write**.
+   - **web_fetch** / **web_search** → policy **web.fetch.v1** → passport **limits.web.fetch**.
+   - **browser** / **browser.*** → policy **web.browser.v1** → passport **limits.web.browser**.
+   - **ask user**, plan-mode, and other explicitly unsupported tools → **no mapping** in this plugin → treated as unmapped (allowed by default when `allowUnmappedTools: true`).
 3. **OAP spec:** The passport schema has **limits** per policy and, for MCP, **mcp.servers** / **mcp.tools**. It does not define a single “allowed OpenClaw tools” list; the plugin decides which tools are mapped and which are unmapped.
 
 ---
@@ -38,7 +42,11 @@ Per the **Open Agent Passport (OAP) spec**, the passport has a **limits** object
   - `limits.data.file.read.blocked_patterns` - Array of patterns to block (e.g. `["**/.ssh/**", "**/.env"]`)
   - `limits.data.file.write.allowed_paths` - Array of allowed write paths
   - `limits.data.file.write.blocked_paths` - Array of system directories to block (e.g. `["/etc/**", "/bin/**"]`)
-- Other tools like **edit**, **apply_patch**, **browser**, **cron**, **gateway**, **sessions_***, **nodes**, **image**, **web_search**, **web_fetch** remain **unmapped** and **allowed** by default (when `allowUnmappedTools: true`).
+- Other tools like **ask_user_question**, **enter_plan_mode**, **exit_plan_mode**,
+  **nodes**, and **image** remain **unmapped** and **allowed** by default when
+  `allowUnmappedTools: true`. Tools such as **edit**, **browser**,
+  **web_search**, **web_fetch**, **gateway**, **process**, **sessions_***, and
+  **cron*** are mapped by the current plugin.
 
 ---
 
@@ -65,11 +73,14 @@ When `allowed_paths` is set and the command references one of those paths, overr
 |--------------------------|---------------------------|------------------------------------------|
 | exec                     | system.command.execute.v1 | limits.system.command.execute            |
 | message, messaging.*     | messaging.message.send.v1 | limits.messaging                         |
+| release.publish, git.release | code.release.publish.v1 | limits.code.release.publish              |
 | git.*                    | code.repository.merge.v1  | limits.code.repository.merge             |
 | read                     | data.file.read.v1         | limits.data.file.read                    |
 | write                    | data.file.write.v1        | limits.data.file.write                   |
 | mcp.*                    | mcp.tool.execute.v1       | (API / MCP limits)                       |
-| edit, browser, etc.      | *(none)*                  | *(unmapped, allowed by default)*         |
+| web_fetch, web_search    | web.fetch.v1              | limits.web.fetch                         |
+| browser, browser.*       | web.browser.v1            | limits.web.browser                       |
+| ask_user_question, plan-mode, image, nodes | *(none)* | *(unmapped, allowed by default)*         |
 
 ---
 

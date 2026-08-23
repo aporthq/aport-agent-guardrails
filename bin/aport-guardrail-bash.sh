@@ -5,6 +5,27 @@
 
 set -e
 
+# Trap unexpected exits so the caller never sees a silent failure. Writes a
+# minimal decision file (best-effort) and emits the reason on stderr so the
+# Claude Code / Cursor hook can include it in the user-facing deny message.
+# shellcheck disable=SC2317
+__aport_bash_crash_handler() {
+    local exit_code="$?"
+    local line_no="$1"
+    local script_name
+    script_name="$(basename "${BASH_SOURCE[0]:-aport-guardrail-bash}")"
+    local message="APort local evaluator crashed (exit=${exit_code} at ${script_name}:${line_no})."
+    echo "$message" >&2
+    if [ -n "${DECISION_FILE:-}" ] && command -v jq > /dev/null 2>&1; then
+        local fallback
+        fallback="$(jq -n --arg msg "$message" \
+            '{decision_id:"local-crash",allow:false,reasons:[{code:"oap.evaluator_crash",message:$msg}]}' 2> /dev/null)"
+        [ -n "$fallback" ] && printf '%s' "$fallback" > "$DECISION_FILE" 2> /dev/null || true
+    fi
+    exit 1
+}
+trap '__aport_bash_crash_handler "$LINENO"' ERR
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Resolve paths: config_dir/aport/ (new) or config_dir (legacy)
 # shellcheck source=bin/aport-resolve-paths.sh
@@ -267,8 +288,27 @@ fi
 # Load policy definition
 POLICY_DEF=$(load_policy "$(echo "$POLICY_ID" | sed 's/\.v[0-9]*$//')")
 
-# Check if all required capabilities exist in passport
-REQUIRED_CAPS=$(echo "$POLICY_DEF" | jq -r '.requires_capabilities[]? // empty')
+# Check required capabilities. Repository policy is action-dependent: merge
+# requires repo.merge, while create/update/push use repo.pr.create. The local
+# evaluator stays simple and mirrors hosted semantics without implementing the
+# full hosted verifier.
+if [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
+    _repo_action="$(echo "$CONTEXT_JSON" | jq -r '.action // ""' 2> /dev/null || true)"
+    if [ -z "$_repo_action" ]; then
+        case "$TOOL_NAME" in
+            git.push | *.git.push | *push*) _repo_action="repo.push" ;;
+            git.merge | *.git.merge | *merge*) _repo_action="pr.merge" ;;
+            *update*) _repo_action="pr.update" ;;
+            *) _repo_action="pr.create" ;;
+        esac
+    fi
+    case "$_repo_action" in
+        pr.merge | pr.merged | repo.merge) REQUIRED_CAPS="repo.merge" ;;
+        *) REQUIRED_CAPS="repo.pr.create" ;;
+    esac
+else
+    REQUIRED_CAPS=$(echo "$POLICY_DEF" | jq -r '.requires_capabilities[]? // empty')
+fi
 PASSPORT_CAPS=$(echo "$PASSPORT" | jq -r '.capabilities[]?.id // empty')
 
 # If policy has required capabilities, check them all
@@ -285,6 +325,10 @@ if [ -n "$REQUIRED_CAPS" ]; then
                 HAS_CAP=true
                 break
             fi
+            if [ "$req_cap" = "repo.release" ] && [ "$passport_cap" = "release" ]; then
+                HAS_CAP=true
+                break
+            fi
         done
         if [ "$HAS_CAP" = false ]; then
             write_decision false "$POLICY_ID" "oap.unknown_capability" "Passport does not have required capability '$req_cap' for policy '$POLICY_ID'"
@@ -297,6 +341,10 @@ POLICY_BASE=$(echo "$POLICY_ID" | sed 's/\.v[0-9]*$//')
 # Messaging: API/verifier use flat keys at limits top level; accept nested limits["messaging.message.send"] or flat
 if [[ "$POLICY_ID" == "messaging.message.send"* ]]; then
     LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["messaging.message.send"] then .["messaging.message.send"] else {msgs_per_min, msgs_per_day, allowed_recipients, approval_required} end')
+elif [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["code.repository.merge"] then .["code.repository.merge"] else {max_prs_per_day, max_merges_per_day, max_pr_size_kb, allowed_repos, allowed_base_branches, allowed_paths, require_review, daily_repo_pushes} end')
+elif [[ "$POLICY_ID" == "code.release.publish"* ]]; then
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["code.release.publish"] then .["code.release.publish"] else {allowed_repos, allowed_extensions} end')
 else
     LIMITS=$(echo "$PASSPORT" | jq ".limits.\"$POLICY_BASE\" // {}")
 fi
@@ -312,47 +360,281 @@ is_default_sensitive_read_path() {
     return 1
 }
 
+safe_glob_match_full() {
+    local pattern="$1"
+    local value="$2"
+    local regex
+
+    [ "$pattern" = "*" ] && return 0
+    [ -z "$pattern" ] && return 1
+    [ -z "$value" ] && return 1
+
+    regex="$(glob_to_regex "$pattern")"
+    printf '%s\n' "$value" | grep -qE "^${regex}$"
+}
+
+repo_allowed_by_patterns() {
+    local repo="$1"
+    local patterns_json="$2"
+    local repo_name="${repo##*/}"
+    local pattern
+
+    while IFS= read -r pattern; do
+        [ -z "$pattern" ] && continue
+        if safe_glob_match_full "$pattern" "$repo"; then
+            return 0
+        fi
+        case "$pattern" in
+            */* | *\** | *\?*) ;;
+            *)
+                if [ "$repo_name" = "$pattern" ]; then
+                    return 0
+                fi
+                ;;
+        esac
+    done < <(echo "$patterns_json" | jq -r '.[]? // empty' 2> /dev/null)
+
+    return 1
+}
+
+context_repo_action() {
+    local action
+    action="$(echo "$CONTEXT_JSON" | jq -r '.action // ""' 2> /dev/null || true)"
+    case "$action" in
+        repo.push | push | branch.create | branch.delete)
+            echo "repo.push"
+            ;;
+        pr.merge | pr.merged | repo.merge)
+            echo "pr.merge"
+            ;;
+        pr.update | pull_request.update)
+            echo "pr.update"
+            ;;
+        pr.create | pull_request.create)
+            echo "pr.create"
+            ;;
+        "")
+            case "$TOOL_NAME" in
+                git.push | *.git.push | *push*) echo "repo.push" ;;
+                git.merge | *.git.merge | *merge*) echo "pr.merge" ;;
+                *update*) echo "pr.update" ;;
+                *) echo "pr.create" ;;
+            esac
+            ;;
+        *)
+            echo "pr.create"
+            ;;
+    esac
+}
+
+json_array_length_or_number() {
+    local key1="$1"
+    local key2="$2"
+    echo "$CONTEXT_JSON" | jq -r --arg key1 "$key1" --arg key2 "$key2" '
+        .[$key1] as $primary
+        | .[$key2] as $secondary
+        | if ($primary | type) == "array" then ($primary | length)
+          elif ($secondary | type) == "array" then ($secondary | length)
+          else ($primary // $secondary // 0)
+          end
+    ' 2> /dev/null || echo "0"
+}
+
+is_allowed_by_patterns() {
+    local value="$1"
+    local patterns_json="$2"
+    local pattern
+
+    while IFS= read -r pattern; do
+        [ -z "$pattern" ] && continue
+        if safe_glob_match_full "$pattern" "$value"; then
+            return 0
+        fi
+    done < <(echo "$patterns_json" | jq -r '.[]? // empty' 2> /dev/null)
+
+    return 1
+}
+
+pattern_count() {
+    echo "$1" | jq -r 'if type == "array" then length else 0 end' 2> /dev/null || echo "0"
+}
+
+has_restrictive_patterns() {
+    echo "$1" | jq -e 'type == "array" and length > 0 and (index("*") == null)' > /dev/null 2>&1
+}
+
+assurance_rank() {
+    case "${1:-L0}" in
+        L0) echo 0 ;;
+        L1) echo 1 ;;
+        L2) echo 2 ;;
+        L3) echo 3 ;;
+        L4) echo 4 ;;
+        L5) echo 5 ;;
+        *) echo 0 ;;
+    esac
+}
+
+passport_meets_assurance() {
+    local actual required
+    actual="$(jq -r '.assurance_level // "L0"' "$PASSPORT_FILE")"
+    required="$1"
+    [ "$(assurance_rank "$actual")" -ge "$(assurance_rank "$required")" ]
+}
+
+is_sensitive_release_file() {
+    local value
+    value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$value" in
+        .env | .env.* | */.env | */.env.* | .aws/* | */.aws/* | .ssh/* | */.ssh/* | *credentials* | *id_rsa* | *id_dsa* | *id_ecdsa* | *id_ed25519* | *.pem | *.key)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 # Evaluate policy-specific limits
 if [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
-    FILES_CHANGED=$(echo "$CONTEXT_JSON" | jq -r '.files_changed // .files // 0')
-    MAX_FILES=$(echo "$LIMITS" | jq -r '.max_pr_size_kb // 500')
-
-    if [ "$FILES_CHANGED" -gt "$MAX_FILES" ]; then
-        write_decision false "$POLICY_ID" "oap.limit_exceeded" "PR size $FILES_CHANGED exceeds limit of $MAX_FILES files"
+    REPO_ACTION="$(context_repo_action)"
+    FILES_CHANGED=$(json_array_length_or_number "files_changed" "files")
+    MAX_PR_SIZE_KB=$(echo "$LIMITS" | jq -r '.max_pr_size_kb // 500')
+    LINES_ADDED=$(echo "$CONTEXT_JSON" | jq -r '.lines_added // .additions // 0' 2> /dev/null || echo "0")
+    LINES_REMOVED=$(echo "$CONTEXT_JSON" | jq -r '.lines_removed // .deletions // 0' 2> /dev/null || echo "0")
+    case "$LINES_ADDED" in '' | *[!0-9]*) LINES_ADDED=0 ;; esac
+    case "$LINES_REMOVED" in '' | *[!0-9]*) LINES_REMOVED=0 ;; esac
+    case "$MAX_PR_SIZE_KB" in '' | *[!0-9]*) MAX_PR_SIZE_KB=500 ;; esac
+    TOTAL_LINES=$((LINES_ADDED + LINES_REMOVED))
+    if [ "$TOTAL_LINES" -gt 0 ] 2> /dev/null; then
+        ESTIMATED_SIZE_KB=$(((TOTAL_LINES + 9) / 10))
+        if [ "$ESTIMATED_SIZE_KB" -gt "$MAX_PR_SIZE_KB" ]; then
+            write_decision false "$POLICY_ID" "oap.limit_exceeded" "PR size exceeds limit: ${ESTIMATED_SIZE_KB}KB > ${MAX_PR_SIZE_KB}KB (${TOTAL_LINES} lines)"
+        fi
+    elif [ "$FILES_CHANGED" -gt "$MAX_PR_SIZE_KB" ]; then
+        write_decision false "$POLICY_ID" "oap.limit_exceeded" "PR file count $FILES_CHANGED exceeds fallback limit of $MAX_PR_SIZE_KB"
     fi
 
-    # Check allowed repos (use while-read to avoid glob expansion when pattern is *)
+    # Check allowed repos
     REPO=$(echo "$CONTEXT_JSON" | jq -r '.repo // .repository // ""')
     if [ -n "$REPO" ]; then
-        REPO_ALLOWED=false
-        while IFS= read -r pattern; do
-            [ -z "$pattern" ] && continue
-            if [[ "$REPO" == "$pattern" ]] || [[ "$REPO" == */$pattern ]] || [[ "$pattern" == "*" ]]; then
-                REPO_ALLOWED=true
-                break
-            fi
-        done < <(echo "$LIMITS" | jq -r '.allowed_repos[]? // empty')
-        HAS_ALLOWED_REPOS=$(echo "$LIMITS" | jq -r '.allowed_repos | length')
-        if [ "$REPO_ALLOWED" = false ] && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2> /dev/null; then
+        ALLOWED_REPOS_JSON=$(echo "$LIMITS" | jq -c '.allowed_repos // []')
+        HAS_ALLOWED_REPOS=$(pattern_count "$ALLOWED_REPOS_JSON")
+        if ! repo_allowed_by_patterns "$REPO" "$ALLOWED_REPOS_JSON" && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.repo_not_allowed" "Repository '$REPO' is not in allowed list"
         fi
     fi
 
-    # Check allowed branches (use while-read to avoid glob expansion when pattern is *)
-    BRANCH=$(echo "$CONTEXT_JSON" | jq -r '.branch // ""')
+    # Check allowed branches. PR actions evaluate base_branch when present;
+    # repo.push evaluates the target branch.
+    if [ "$REPO_ACTION" = "repo.push" ]; then
+        BRANCH=$(echo "$CONTEXT_JSON" | jq -r '.branch // ""')
+    else
+        BRANCH=$(echo "$CONTEXT_JSON" | jq -r '.base_branch // .branch // ""')
+    fi
     if [ -n "$BRANCH" ]; then
-        BRANCH_ALLOWED=false
-        while IFS= read -r pattern; do
-            [ -z "$pattern" ] && continue
-            if [[ "$BRANCH" == "$pattern" ]] || [[ "$pattern" == "*" ]]; then
-                BRANCH_ALLOWED=true
-                break
-            fi
-        done < <(echo "$LIMITS" | jq -r '.allowed_base_branches[]? // empty')
-        HAS_ALLOWED_BRANCHES=$(echo "$LIMITS" | jq -r '.allowed_base_branches | length')
-        if [ "$BRANCH_ALLOWED" = false ] && [ "$HAS_ALLOWED_BRANCHES" -gt 0 ] 2> /dev/null; then
+        ALLOWED_BRANCHES_JSON=$(echo "$LIMITS" | jq -c '.allowed_base_branches // []')
+        HAS_ALLOWED_BRANCHES=$(pattern_count "$ALLOWED_BRANCHES_JSON")
+        if ! is_allowed_by_patterns "$BRANCH" "$ALLOWED_BRANCHES_JSON" && [ "$HAS_ALLOWED_BRANCHES" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.branch_not_allowed" "Branch '$BRANCH' is not in allowed list"
         fi
+    fi
+
+    # Check allowed changed paths when configured.
+    ALLOWED_PATHS_JSON=$(echo "$LIMITS" | jq -c '.allowed_paths // []')
+    if has_restrictive_patterns "$ALLOWED_PATHS_JSON"; then
+        CHANGED_PATHS_JSON=$(echo "$CONTEXT_JSON" | jq -c '
+            [
+              (.files_changed // []),
+              (.files // []),
+              (.file_paths // []),
+              (.paths // [])
+            ]
+            | map(if type == "array" then .[] elif type == "string" then . else empty end)
+        ' 2> /dev/null || echo "[]")
+        CHANGED_PATH_COUNT=$(echo "$CHANGED_PATHS_JSON" | jq -r 'length' 2> /dev/null || echo "0")
+        if [ "${CHANGED_PATH_COUNT:-0}" -eq 0 ] 2> /dev/null; then
+            write_decision false "$POLICY_ID" "oap.missing_required_context" "Repository policy requires changed-file path evidence"
+        fi
+        while IFS= read -r changed_path; do
+            [ -z "$changed_path" ] && continue
+            if ! is_allowed_by_patterns "$changed_path" "$ALLOWED_PATHS_JSON"; then
+                write_decision false "$POLICY_ID" "oap.path_not_allowed" "File path '$changed_path' is not in allowed list"
+            fi
+        done < <(echo "$CHANGED_PATHS_JSON" | jq -r '.[]? // empty' 2> /dev/null)
+    fi
+
+    # Lightweight local GitHub integration allowlists. Hosted OIDC and server
+    # facts remain hosted-only; local mode only enforces explicit context values.
+    GITHUB_CFG=$(echo "$PASSPORT" | jq -c '.integrations.github // {}')
+    GITHUB_ACTOR=$(echo "$CONTEXT_JSON" | jq -r '.github_actor // .actor // ""')
+    GITHUB_APP=$(echo "$CONTEXT_JSON" | jq -r '.github_app // .github_app_slug // .github_app_id // ""')
+    WORKFLOW_REF=$(echo "$CONTEXT_JSON" | jq -r '.workflow_ref // ""')
+    JOB_WORKFLOW_REF=$(echo "$CONTEXT_JSON" | jq -r '.job_workflow_ref // ""')
+
+    for check in \
+        "allowed_repositories:$REPO:oap.repo_not_allowed:Repository '$REPO' is not allowed by GitHub integration settings" \
+        "allowed_actors:$GITHUB_ACTOR:oap.actor_not_allowed:GitHub actor '$GITHUB_ACTOR' is not allowed" \
+        "allowed_apps:$GITHUB_APP:oap.app_not_allowed:GitHub app '$GITHUB_APP' is not allowed" \
+        "allowed_workflow_refs:$WORKFLOW_REF:oap.workflow_not_allowed:GitHub workflow_ref '$WORKFLOW_REF' is not allowed" \
+        "allowed_job_workflow_refs:$JOB_WORKFLOW_REF:oap.workflow_not_allowed:GitHub job_workflow_ref '$JOB_WORKFLOW_REF' is not allowed"; do
+        IFS=':' read -r key value code message <<< "$check"
+        [ -z "$value" ] && continue
+        PATTERNS_JSON=$(echo "$GITHUB_CFG" | jq -c --arg key "$key" '.[$key] // []')
+        HAS_PATTERNS=$(pattern_count "$PATTERNS_JSON")
+        if ! is_allowed_by_patterns "$value" "$PATTERNS_JSON" && [ "$HAS_PATTERNS" -gt 0 ] 2> /dev/null; then
+            write_decision false "$POLICY_ID" "$code" "$message"
+        fi
+    done
+fi
+
+if [[ "$POLICY_ID" == "code.release.publish"* ]]; then
+    if ! passport_meets_assurance "L3"; then
+        CURRENT_ASSURANCE="$(jq -r '.assurance_level // "L0"' "$PASSPORT_FILE")"
+        write_decision false "$POLICY_ID" "oap.assurance_insufficient" "Required assurance level L3 not met (current: $CURRENT_ASSURANCE)"
+    fi
+
+    REPO=$(echo "$CONTEXT_JSON" | jq -r '.repo // .repository // ""')
+    if [ -z "$REPO" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Release context must include repository"
+    fi
+
+    VERSION=$(echo "$CONTEXT_JSON" | jq -r '.version // ""')
+    if [ -z "$VERSION" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Release context must include version"
+    fi
+    if ! printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$'; then
+        write_decision false "$POLICY_ID" "oap.format_unsupported" "Version '$VERSION' does not follow semantic versioning"
+    fi
+
+    RELEASE_FILE_COUNT=$(echo "$CONTEXT_JSON" | jq -r 'if (.files | type) == "array" then (.files | length) else 0 end' 2> /dev/null || echo "0")
+    if [ "${RELEASE_FILE_COUNT:-0}" -eq 0 ] 2> /dev/null; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Release context must include at least one file"
+    fi
+    while IFS= read -r release_file; do
+        [ -z "$release_file" ] && continue
+        if is_sensitive_release_file "$release_file"; then
+            write_decision false "$POLICY_ID" "oap.file_forbidden" "Release file '$release_file' is sensitive and cannot be published by default"
+        fi
+    done < <(echo "$CONTEXT_JSON" | jq -r '(.files // []) | if type == "array" then .[] else empty end' 2> /dev/null)
+
+    ALLOWED_REPOS_JSON=$(echo "$LIMITS" | jq -c '.allowed_repos // []')
+    HAS_ALLOWED_REPOS=$(pattern_count "$ALLOWED_REPOS_JSON")
+    if ! repo_allowed_by_patterns "$REPO" "$ALLOWED_REPOS_JSON" && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2> /dev/null; then
+        write_decision false "$POLICY_ID" "oap.repo_not_allowed" "Repository '$REPO' is not in allowed release list"
+    fi
+
+    ALLOWED_EXTENSIONS_JSON=$(echo "$LIMITS" | jq -c '.allowed_extensions // []')
+    HAS_ALLOWED_EXTENSIONS=$(pattern_count "$ALLOWED_EXTENSIONS_JSON")
+    if [ "$HAS_ALLOWED_EXTENSIONS" -gt 0 ] 2> /dev/null; then
+        while IFS= read -r release_file; do
+            [ -z "$release_file" ] && continue
+            file_ext=""
+            case "$release_file" in
+                *.*) file_ext=".${release_file##*.}" ;;
+            esac
+            if { [ -z "$file_ext" ] || ! is_allowed_by_patterns "$file_ext" "$ALLOWED_EXTENSIONS_JSON"; } && ! is_allowed_by_patterns "$release_file" "$ALLOWED_EXTENSIONS_JSON"; then
+                write_decision false "$POLICY_ID" "oap.file_forbidden" "Release file '$release_file' has a forbidden extension"
+            fi
+        done < <(echo "$CONTEXT_JSON" | jq -r '(.files // []) | if type == "array" then .[] else empty end' 2> /dev/null)
     fi
 fi
 

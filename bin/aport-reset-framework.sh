@@ -8,6 +8,8 @@ source "$LIB/common.sh"
 # shellcheck source=./lib/config.sh
 source "$LIB/config.sh"
 
+APORT_HOOK_MARKER="__aport_hook"
+
 framework="${1:-}"
 shift || true
 
@@ -92,7 +94,14 @@ cleanup_claude_settings() {
 
     local tmpfile
     tmpfile="$(mktemp "${settings_file}.XXXXXX")"
-    if jq '
+    if ! jq -e . "$settings_file" > /dev/null 2>&1; then
+        log_warn "Invalid Claude settings JSON; leaving file intact at $settings_file"
+        return 0
+    fi
+
+    if jq --arg marker "$APORT_HOOK_MARKER" '
+        def is_aport_claude_hook:
+            (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-claude-code-hook\\.sh($|[[:space:]])"));
         if (.hooks.PreToolUse? // null) == null then
             .
         else
@@ -104,7 +113,7 @@ cleanup_claude_settings() {
                     else
                         .hooks = (
                             (.hooks // [])
-                            | map(select((((.command // "") | test("aport-(cursor-hook|claude-code-hook)\\.sh$")) | not)))
+                            | map(select(is_aport_claude_hook | not))
                         )
                     end
                 )
@@ -135,9 +144,16 @@ cleanup_cursor_hooks() {
 
     local tmpfile
     tmpfile="$(mktemp "${hooks_file}.XXXXXX")"
-    if jq '
+    if ! jq -e . "$hooks_file" > /dev/null 2>&1; then
+        log_warn "Invalid Cursor hooks JSON; leaving file intact at $hooks_file"
+        return 0
+    fi
+
+    if jq --arg marker "$APORT_HOOK_MARKER" '
+        def is_aport_cursor_hook:
+            (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-cursor-hook\\.sh($|[[:space:]])"));
         def strip_aport_hooks:
-            (. // []) | map(select((((.command // "") | test("aport-(cursor-hook|claude-code-hook)\\.sh$")) | not)));
+            (. // []) | map(select(is_aport_cursor_hook | not));
         .hooks.beforeShellExecution = ((.hooks.beforeShellExecution // []) | strip_aport_hooks) |
         .hooks.preToolUse = ((.hooks.preToolUse // []) | strip_aport_hooks) |
         .hooks.beforeMCPExecution = ((.hooks.beforeMCPExecution // []) | strip_aport_hooks) |

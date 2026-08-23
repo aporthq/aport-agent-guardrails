@@ -26,11 +26,14 @@ export default definePluginEntry({
 
   register(api) {
     const config = api.pluginConfig || {};
-    const mode = config.mode === "api" ? "api" : "local";
-    const agentId = typeof config.agentId === "string" && config.agentId ? config.agentId : null;
+    const envAgentId = typeof process.env.APORT_AGENT_ID === "string" && process.env.APORT_AGENT_ID
+      ? process.env.APORT_AGENT_ID
+      : null;
+    const mode = config.mode === "api" || (!config.mode && envAgentId) ? "api" : "local";
+    const agentId = typeof config.agentId === "string" && config.agentId ? config.agentId : envAgentId;
     const passportFile = expandPath(config.passportFile || "~/.openclaw/aport/passport.json");
-    const apiUrl = config.apiUrl || "https://api.aport.io";
-    const apiKey = config.apiKey || undefined;
+    const apiUrl = config.apiUrl || process.env.APORT_API_URL || "https://api.aport.io";
+    const apiKey = config.apiKey || process.env.APORT_API_KEY || undefined;
     const failClosed = config.failClosed !== false;
     const allowUnmappedTools = config.allowUnmappedTools !== false;
     const mapExecToPolicy = config.mapExecToPolicy !== false;
@@ -105,6 +108,7 @@ export default definePluginEntry({
               })
             : evaluateLocalDecision({
                 policyName: effectivePolicyName,
+                toolName: effectiveToolName,
                 context: requestContext,
                 passportFile,
               });

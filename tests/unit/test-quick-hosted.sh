@@ -66,7 +66,8 @@ const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 if (payload.email !== "dev@example.com") process.exit(1);
 if (payload.framework?.[0] !== "claude-code") process.exit(2);
 if (payload.showInGallery !== false) process.exit(3);
-if ("name" in payload || "description" in payload) process.exit(4);
+if ("tenant_ref" in payload || "platform_id" in payload || "device_info" in payload) process.exit(4);
+if ("name" in payload || "description" in payload) process.exit(5);
 ' "$LOG_FILE" || {
     echo "FAIL: quick hosted payload should contain only email/framework install inputs" >&2
     cat "$LOG_FILE" >&2
@@ -93,5 +94,72 @@ bash -c 'source "$1"; [ "$APORT_API_KEY" = "$2" ] && [ "$APORT_API_URL" = "$3" ]
     cat "$MODE_FILE" >&2
     exit 1
 }
+
+EXISTING_CONFIG_DIR="$TEST_DIR/existing-hosted"
+mkdir -p "$EXISTING_CONFIG_DIR/aport"
+cat > "$EXISTING_CONFIG_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=https://private.aport.example
+APORT_AGENT_ID=agt_inst_existing123
+APORT_API_KEY=apk_existing_runtime
+EOF
+: > "$LOG_FILE"
+unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
+aport_maybe_configure_hosted_passport "claude-code" "$EXISTING_CONFIG_DIR" || {
+    echo "FAIL: expected existing hosted mode file to be reused" >&2
+    exit 1
+}
+[ "$APORT_AGENT_ID" = "agt_inst_existing123" ] || {
+    echo "FAIL: expected existing hosted agent id to be loaded" >&2
+    exit 1
+}
+[ "$APORT_API_KEY" = "apk_existing_runtime" ] || {
+    echo "FAIL: expected existing hosted runtime key to be loaded" >&2
+    exit 1
+}
+[ "$APORT_API_URL" = "https://private.aport.example" ] || {
+    echo "FAIL: expected existing hosted API URL to be loaded" >&2
+    exit 1
+}
+[ "$APORT_SELECTED_API_URL" = "https://private.aport.example" ] || {
+    echo "FAIL: expected selected API URL to use existing hosted API URL" >&2
+    exit 1
+}
+[ ! -s "$LOG_FILE" ] || {
+    echo "FAIL: existing hosted config should not call issue endpoint" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+}
+
+for valid_id in ap_1234567890abcdef1234567890abcdef apt_template_123 agt_inst_existing123 agt_tmpl_existing123; do
+    aport_quick_hosted_is_valid_agent_id "$valid_id" || {
+        echo "FAIL: expected hosted ID to be accepted: $valid_id" >&2
+        exit 1
+    }
+done
+
+unset APORT_AGENT_ID APORT_API_KEY
+APORT_GUARDRAIL_MODE_CLI=local
+if aport_maybe_configure_hosted_passport "claude-code" "$EXISTING_CONFIG_DIR"; then
+    echo "FAIL: explicit local mode should not silently reuse hosted config" >&2
+    exit 1
+fi
+[ -z "${APORT_AGENT_ID:-}" ] || {
+    echo "FAIL: explicit local mode should not export hosted agent id" >&2
+    exit 1
+}
+unset APORT_GUARDRAIL_MODE_CLI
+
+APORT_GUARDRAIL_MODE_CLI=local
+if select_guardrail_mode "claude-code" "agt_inst_existing123" > "$TEST_DIR/mode-conflict.out" 2>&1; then
+    echo "FAIL: --mode=local with hosted agent id should fail with a conflict" >&2
+    exit 1
+fi
+grep -q 'mode=local cannot be combined' "$TEST_DIR/mode-conflict.out" || {
+    echo "FAIL: mode conflict should produce a clear error" >&2
+    cat "$TEST_DIR/mode-conflict.out" >&2
+    exit 1
+}
+unset APORT_GUARDRAIL_MODE_CLI
 
 echo "OK test-quick-hosted.sh"

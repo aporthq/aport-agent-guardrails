@@ -52,7 +52,7 @@ SCRIPT
 chmod +x "$FAKE_BIN/openclaw"
 
 set +e
-printf '\nN\n2\n\n' | env \
+printf '\n3\nN\n2\n\n' | env \
     PATH="$FAKE_BIN:$NODE_DIR:/usr/bin:/bin" \
     OPENCLAW_HOME="$CONFIG_DIR" \
     APORT_FAKE_OPENCLAW_PLUGIN_VERSION="$PLUGIN_VERSION" \
