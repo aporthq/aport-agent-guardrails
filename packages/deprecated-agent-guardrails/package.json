@@ -24,7 +24,7 @@
     "directory": "packages/deprecated-agent-guardrails"
   },
   "dependencies": {
-    "@aporthq/aport-agent-guardrails": "^1.0.30"
+    "@aporthq/aport-agent-guardrails": ">=1.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

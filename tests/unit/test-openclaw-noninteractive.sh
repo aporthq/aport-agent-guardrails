@@ -108,6 +108,9 @@ grep -q '^        allowUnmappedTools: true$' "$CONFIG_YAML" || {
     exit 1
 }
 
+awk '{ print; if ($0 == "        allowUnmappedTools: true") print "        mapExecToPolicy: false" }' "$CONFIG_YAML" > "$CONFIG_YAML.tmp"
+mv "$CONFIG_YAML.tmp" "$CONFIG_YAML"
+
 PATH="$FAKE_BIN:$PATH" \
     OPENCLAW_HOME="$OPENCLAW_HOME" \
     APORT_NONINTERACTIVE=1 \
@@ -132,6 +135,12 @@ grep -q '^        agentId: "ap_fedcba9876543210fedcba9876543210"$' "$CONFIG_YAML
 
 grep -q '^        apiUrl: "http://127.0.0.1:10"$' "$CONFIG_YAML" || {
     echo "FAIL: existing config.yaml should update API URL on rerun" >&2
+    cat "$CONFIG_YAML" >&2
+    exit 1
+}
+
+grep -q '^        mapExecToPolicy: false$' "$CONFIG_YAML" || {
+    echo "FAIL: existing config.yaml should preserve mapExecToPolicy on rerun" >&2
     cat "$CONFIG_YAML" >&2
     exit 1
 }

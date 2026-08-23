@@ -451,6 +451,14 @@ for (; end < lines.length; end += 1) {
 const q = (value) => JSON.stringify(String(value || ""));
 const mode = process.env.APORT_YAML_MODE || "api";
 const hosted = process.env.APORT_YAML_USE_HOSTED === "true";
+const readConfigValue = (key) => {
+  const pattern = new RegExp(`^${indent}    ${key}:\\s*(.*)$`);
+  for (let i = start + 1; i < end; i += 1) {
+    const match = lines[i].match(pattern);
+    if (match) return match[1].trim();
+  }
+  return "";
+};
 const block = [
   `${indent}openclaw-aport:`,
   `${indent}  enabled: true`,
@@ -471,6 +479,10 @@ if (mode === "api") {
 }
 block.push(`${indent}    failClosed: true`);
 block.push(`${indent}    allowUnmappedTools: ${process.env.APORT_YAML_ALLOW_UNMAPPED === "true" ? "true" : "false"}`);
+const mapExecToPolicy = readConfigValue("mapExecToPolicy");
+if (mapExecToPolicy) {
+  block.push(`${indent}    mapExecToPolicy: ${mapExecToPolicy}`);
+}
 lines.splice(start, end - start, ...block);
 fs.writeFileSync(file, lines.join("\n"), "utf8");
 NODE

@@ -302,6 +302,14 @@ describe("local evaluator", () => {
     assert.strictEqual(forbiddenFileDecision.allow, false);
     assert.strictEqual(forbiddenFileDecision.reasons[0].code, "oap.file_forbidden");
 
+    const extensionlessFileDecision = evaluateLocalDecision({
+      policyName: "code.release.publish.v1",
+      context: { repository: "aporthq/pkg", version: "1.2.3", files: ["dist/payload"] },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(extensionlessFileDecision.allow, false);
+    assert.strictEqual(extensionlessFileDecision.reasons[0].code, "oap.file_forbidden");
+
     const sensitiveFileDecision = evaluateLocalDecision({
       policyName: "code.release.publish.v1",
       context: { repository: "aporthq/pkg", version: "1.2.3", files: [".env"] },
@@ -387,6 +395,20 @@ describe("local evaluator", () => {
     });
     assert.strictEqual(mergeDecision.allow, false);
     assert.strictEqual(mergeDecision.reasons[0].code, "oap.unknown_capability");
+
+    const mergeToolDecision = evaluateLocalDecision({
+      policyName: "code.repository.merge.v1",
+      toolName: "git.merge",
+      context: {
+        repository: "aporthq/repo",
+        branch: "main",
+        lines_added: 10,
+        lines_removed: 0,
+      },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(mergeToolDecision.allow, false);
+    assert.strictEqual(mergeToolDecision.reasons[0].code, "oap.unknown_capability");
 
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -519,6 +541,22 @@ describe("local evaluator", () => {
     });
     assert.strictEqual(mcpDeny.allow, false);
     assert.strictEqual(mcpDeny.reasons[0].code, "oap.mcp_server_not_allowed");
+
+    const mcpMissingServer = evaluateLocalDecision({
+      policyName: "mcp.tool.execute.v1",
+      context: { tool: "issues.list" },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(mcpMissingServer.allow, false);
+    assert.strictEqual(mcpMissingServer.reasons[0].code, "oap.missing_required_context");
+
+    const mcpMissingTool = evaluateLocalDecision({
+      policyName: "mcp.tool.execute.v1",
+      context: { server: "mcp://github" },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(mcpMissingTool.allow, false);
+    assert.strictEqual(mcpMissingTool.reasons[0].code, "oap.missing_required_context");
 
     await rm(tempDir, { recursive: true, force: true });
   });

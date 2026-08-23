@@ -220,16 +220,25 @@ function meetsMinimumAssurance(actual, required) {
   return assuranceRank(actual || "L0") >= assuranceRank(required);
 }
 
-function repositoryAction(context) {
-  const raw = String(context.action ?? context.operation ?? context.event_type ?? "").toLowerCase();
+function repositoryAction(context, toolName) {
+  const raw = String(
+    toolName ??
+      context.tool_name ??
+      context.toolName ??
+      context.tool ??
+      context.action ??
+      context.operation ??
+      context.event_type ??
+      "",
+  ).toLowerCase();
   if (raw.includes("merge")) return "repo.merge";
   if (raw.includes("push")) return "repo.push";
   if (raw.includes("create") || raw.includes("open") || raw.includes("update")) return "repo.pr.create";
   return "repo.pr.create";
 }
 
-function requiredRepoCapability(context) {
-  return repositoryAction(context) === "repo.merge" ? "repo.merge" : "repo.pr.create";
+function requiredRepoCapability(context, toolName) {
+  return repositoryAction(context, toolName) === "repo.merge" ? "repo.merge" : "repo.pr.create";
 }
 
 function isSensitiveReleaseFile(filePath) {
@@ -278,6 +287,14 @@ function mcpToolAllowed(tool, limits) {
   return allowedPrefixes.some((entry) => entry === "*" || value.startsWith(String(entry)));
 }
 
+function hasRestrictiveList(value) {
+  return Array.isArray(value) && value.length > 0 && !value.includes("*");
+}
+
+function hasRestrictiveMcpToolLimits(limits) {
+  return hasRestrictiveList(limits.allowed_tools) || hasRestrictiveList(limits.allowed_tool_prefixes);
+}
+
 function makeDeny(baseParams, code, message) {
   return buildDecision({ allow: false, code, message, ...baseParams });
 }
@@ -291,7 +308,7 @@ function makeAllow(baseParams) {
   });
 }
 
-export function evaluateLocalDecision({ policyName, context, passportFile }) {
+export function evaluateLocalDecision({ policyName, toolName, context, passportFile }) {
   const dataDir = dirname(passportFile || ".");
   const baseParams = {
     policyId: policyName || "unknown",
@@ -330,7 +347,7 @@ export function evaluateLocalDecision({ policyName, context, passportFile }) {
   const limits = getLimits(passport, policyName);
 
   if (policyName === "code.repository.merge.v1") {
-    const requiredCapability = requiredRepoCapability(context);
+    const requiredCapability = requiredRepoCapability(context, toolName);
     if (!hasCapability(passport, requiredCapability)) {
       return makeDeny(params, "oap.unknown_capability", `Missing required capability: ${requiredCapability}`);
     }
@@ -360,7 +377,7 @@ export function evaluateLocalDecision({ policyName, context, passportFile }) {
       return makeDeny(params, "oap.repo_not_allowed", `Repository '${repo}' is not in allowed list`);
     }
 
-    const branch = repositoryAction(context) === "repo.push"
+    const branch = repositoryAction(context, toolName) === "repo.push"
       ? String(context.branch ?? "")
       : String(context.base_branch ?? context.branch ?? "");
     if (!allowByList(branch, limits.allowed_base_branches, matchesSimpleGlob)) {
@@ -461,11 +478,17 @@ export function evaluateLocalDecision({ policyName, context, passportFile }) {
 
   if (policyName === "mcp.tool.execute.v1") {
     const server = String(context.server ?? context.mcp_server ?? "");
+    if (!server && hasRestrictiveList(limits.allowed_servers)) {
+      return makeDeny(params, "oap.missing_required_context", "MCP server is required when allowed_servers is restricted");
+    }
     if (server && !mcpServerAllowed(server, limits.allowed_servers)) {
       return makeDeny(params, "oap.mcp_server_not_allowed", `MCP server '${server}' is not in allowed list`);
     }
 
     const tool = String(context.tool ?? context.mcp_tool ?? "");
+    if (!tool && hasRestrictiveMcpToolLimits(limits)) {
+      return makeDeny(params, "oap.missing_required_context", "MCP tool is required when allowed_tools or allowed_tool_prefixes is restricted");
+    }
     if (tool && !mcpToolAllowed(tool, limits)) {
       return makeDeny(params, "oap.mcp_tool_not_allowed", `MCP tool '${tool}' is not in allowed list`);
     }

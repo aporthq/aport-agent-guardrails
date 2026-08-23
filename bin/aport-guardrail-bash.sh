@@ -591,8 +591,7 @@ if [[ "$POLICY_ID" == "code.release.publish"* ]]; then
             case "$release_file" in
                 *.*) file_ext=".${release_file##*.}" ;;
             esac
-            [ -z "$file_ext" ] && continue
-            if ! is_allowed_by_patterns "$file_ext" "$ALLOWED_EXTENSIONS_JSON" && ! is_allowed_by_patterns "$release_file" "$ALLOWED_EXTENSIONS_JSON"; then
+            if { [ -z "$file_ext" ] || ! is_allowed_by_patterns "$file_ext" "$ALLOWED_EXTENSIONS_JSON"; } && ! is_allowed_by_patterns "$release_file" "$ALLOWED_EXTENSIONS_JSON"; then
                 write_decision false "$POLICY_ID" "oap.file_forbidden" "Release file '$release_file' has a forbidden extension"
             fi
         done < <(echo "$CONTEXT_JSON" | jq -r '(.files // []) | if type == "array" then .[] else empty end' 2> /dev/null)
