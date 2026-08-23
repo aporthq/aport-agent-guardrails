@@ -16,6 +16,55 @@ aport_quick_hosted_git_email() {
     fi
 }
 
+aport_quick_hosted_mode_file_value() {
+    local file="$1"
+    local key="$2"
+    awk -F= -v k="$key" '
+$1 == k {
+  v = substr($0, length(k) + 2)
+  if (v ~ /^"[^"]*"$/ || v ~ /^\047[^\047]*\047$/) {
+    v = substr(v, 2, length(v) - 2)
+  }
+  print v
+  exit
+}
+' "$file"
+}
+
+aport_quick_hosted_is_valid_agent_id() {
+    if command -v is_aport_hosted_agent_id > /dev/null 2>&1; then
+        is_aport_hosted_agent_id "$1"
+        return $?
+    fi
+    [[ "${1:-}" =~ ^(ap|apt|agt_inst|agt_tmpl)_[A-Za-z0-9_-]+$ ]]
+}
+
+aport_try_reuse_existing_hosted_config() {
+    local config_dir="$1"
+    local mode_file="$config_dir/aport/guardrail-mode.env"
+    [[ -r "$mode_file" ]] || return 1
+
+    local mode agent_id api_key api_url
+    mode="$(aport_quick_hosted_mode_file_value "$mode_file" "APORT_GUARDRAIL_MODE")"
+    agent_id="$(aport_quick_hosted_mode_file_value "$mode_file" "APORT_AGENT_ID")"
+    api_key="$(aport_quick_hosted_mode_file_value "$mode_file" "APORT_API_KEY")"
+    api_url="$(aport_quick_hosted_mode_file_value "$mode_file" "APORT_API_URL")"
+
+    [[ "$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]')" = "api" ]] || return 1
+    aport_quick_hosted_is_valid_agent_id "$agent_id" || return 1
+
+    export APORT_AGENT_ID="$agent_id"
+    if [[ -n "$api_key" ]]; then
+        export APORT_API_KEY="$api_key"
+    fi
+    if [[ -n "$api_url" ]]; then
+        export APORT_API_URL="$api_url"
+        export APORT_SELECTED_API_URL="$api_url"
+    fi
+    log_info "Found existing hosted passport in $mode_file"
+    return 0
+}
+
 aport_quick_hosted_issue_passport() {
     local framework="$1"
     local config_dir="$2"
@@ -103,6 +152,12 @@ aport_maybe_configure_hosted_passport() {
     local noninteractive="${APORT_NONINTERACTIVE:-${CI:-}}"
     local selected_mode="${APORT_GUARDRAIL_MODE_CLI:-${APORT_GUARDRAIL_MODE:-}}"
 
+    local selected_mode_lower
+    selected_mode_lower="$(printf '%s' "$selected_mode" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$selected_mode_lower" = "local" ]]; then
+        return 1
+    fi
+
     if [[ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
         export APORT_AGENT_ID="$APORT_HOSTED_AGENT_ID_CLI"
         return 0
@@ -112,8 +167,8 @@ aport_maybe_configure_hosted_passport() {
         return 0
     fi
 
-    if [[ "$(printf '%s' "$selected_mode" | tr '[:upper:]' '[:lower:]')" = "local" ]]; then
-        return 1
+    if aport_try_reuse_existing_hosted_config "$config_dir"; then
+        return 0
     fi
 
     if [[ -n "$noninteractive" ]]; then
@@ -141,8 +196,8 @@ aport_maybe_configure_hosted_passport() {
         2)
             local agent_id_input api_key_input
             read -r -p "  Enter hosted agent_id from aport.io: " agent_id_input
-            if [[ ! "$agent_id_input" =~ ^ap_[a-f0-9]{32}$ ]]; then
-                log_error "Invalid agent_id format. Expected ap_[32 hex characters]."
+            if ! aport_quick_hosted_is_valid_agent_id "$agent_id_input"; then
+                log_error "Invalid agent_id format. Expected ap_..., apt_..., agt_inst_..., or agt_tmpl_..."
                 exit 1
             fi
             export APORT_AGENT_ID="$agent_id_input"

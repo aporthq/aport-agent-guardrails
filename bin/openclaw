@@ -221,6 +221,11 @@ if [ -n "$HOSTED_AGENT_ID" ]; then
 	echo "     Skipping local passport creation."
 	echo ""
 	USE_HOSTED_PASSPORT=true
+elif aport_maybe_configure_hosted_passport "openclaw" "$CONFIG_DIR"; then
+	HOSTED_AGENT_ID="$APORT_AGENT_ID"
+	USE_HOSTED_PASSPORT=true
+	echo "  ✅ Using hosted passport (agent_id: $HOSTED_AGENT_ID)"
+	echo ""
 elif [ -f "$PASSPORT_FILE" ]; then
 	# Local passport exists
 	prompt_with_default again "  Passport already exists. Run wizard again (overwrite)? [y/N]: " "n"
@@ -230,15 +235,7 @@ elif [ -f "$PASSPORT_FILE" ]; then
 		run_local_passport_wizard
 	fi
 else
-	# No agent_id, no local passport: create hosted passport, use existing hosted ID, or fall back to local wizard.
-	if aport_maybe_configure_hosted_passport "openclaw" "$CONFIG_DIR"; then
-		HOSTED_AGENT_ID="$APORT_AGENT_ID"
-		USE_HOSTED_PASSPORT=true
-		echo "  ✅ Using hosted passport (agent_id: $HOSTED_AGENT_ID)"
-		echo ""
-	else
-		run_local_passport_wizard
-	fi
+	run_local_passport_wizard
 fi
 
 # 3. Install OpenClaw Plugin (Deterministic Enforcement)
@@ -426,7 +423,85 @@ YAML
 	else
 		# Config exists - check if plugin section already present
 		if grep -q "openclaw-aport:" "$CONFIG_YAML" 2>/dev/null; then
-			echo "  ✅ Plugin configuration already present in $CONFIG_YAML"
+			api_url_val="${api_url:-$CONFIGURED_API_URL}"
+			if command -v node >/dev/null 2>&1 &&
+				APORT_YAML_MODE="$PLUGIN_MODE" \
+					APORT_YAML_USE_HOSTED="$USE_HOSTED_PASSPORT" \
+					APORT_YAML_AGENT_ID="$HOSTED_AGENT_ID" \
+					APORT_YAML_API_KEY="${APORT_API_KEY:-}" \
+					APORT_YAML_API_URL="$api_url_val" \
+					APORT_YAML_PASSPORT_FILE="$PASSPORT_FILE" \
+					APORT_YAML_GUARDRAIL_SCRIPT="$CONFIG_DIR/.skills/aport-guardrail-bash.sh" \
+					APORT_YAML_ALLOW_UNMAPPED="$ALLOW_UNMAPPED" \
+					node - "$CONFIG_YAML" <<'NODE'; then
+const fs = require("node:fs");
+const file = process.argv[2];
+const input = fs.readFileSync(file, "utf8");
+const lines = input.split(/\n/);
+const start = lines.findIndex((line) => /^\s*openclaw-aport:\s*$/.test(line));
+if (start < 0) process.exit(2);
+const indent = (lines[start].match(/^\s*/) || [""])[0];
+let end = start + 1;
+for (; end < lines.length; end += 1) {
+  const line = lines[end];
+  if (!line.trim()) continue;
+  const currentIndent = (line.match(/^\s*/) || [""])[0].length;
+  if (currentIndent <= indent.length) break;
+}
+const q = (value) => JSON.stringify(String(value || ""));
+const mode = process.env.APORT_YAML_MODE || "api";
+const hosted = process.env.APORT_YAML_USE_HOSTED === "true";
+const readConfigValue = (key) => {
+  const pattern = new RegExp(`^${indent}    ${key}:\\s*(.*)$`);
+  for (let i = start + 1; i < end; i += 1) {
+    const match = lines[i].match(pattern);
+    if (match) return match[1].trim();
+  }
+  return "";
+};
+const readScalar = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed == null ? "" : String(parsed);
+  } catch {
+    return raw.replace(/^['"]|['"]$/g, "");
+  }
+};
+const apiKey = process.env.APORT_YAML_API_KEY || readScalar(readConfigValue("apiKey"));
+const block = [
+  `${indent}openclaw-aport:`,
+  `${indent}  enabled: true`,
+  `${indent}  config:`,
+  `${indent}    mode: ${q(mode)}`,
+];
+if (hosted) {
+  block.push(`${indent}    agentId: ${q(process.env.APORT_YAML_AGENT_ID)}`);
+  if (apiKey) {
+    block.push(`${indent}    apiKey: ${q(apiKey)}`);
+  }
+} else {
+  block.push(`${indent}    passportFile: ${q(process.env.APORT_YAML_PASSPORT_FILE)}`);
+  block.push(`${indent}    guardrailScript: ${q(process.env.APORT_YAML_GUARDRAIL_SCRIPT)}`);
+}
+if (mode === "api") {
+  block.push(`${indent}    apiUrl: ${q(process.env.APORT_YAML_API_URL)}`);
+}
+block.push(`${indent}    failClosed: true`);
+block.push(`${indent}    allowUnmappedTools: ${process.env.APORT_YAML_ALLOW_UNMAPPED === "true" ? "true" : "false"}`);
+const mapExecToPolicy = readConfigValue("mapExecToPolicy");
+if (mapExecToPolicy) {
+  block.push(`${indent}    mapExecToPolicy: ${mapExecToPolicy}`);
+}
+lines.splice(start, end - start, ...block);
+fs.writeFileSync(file, lines.join("\n"), "utf8");
+NODE
+				echo "  ✅ Updated plugin configuration in $CONFIG_YAML"
+			else
+				echo "  ⚠️  Plugin configuration already present in $CONFIG_YAML, but automatic update failed."
+				echo "     Verify mode, agentId/passportFile, apiUrl, and allowUnmappedTools before starting OpenClaw."
+			fi
 		elif grep -qE '^[[:space:]]*plugins:[[:space:]]*$' "$CONFIG_YAML" 2>/dev/null; then
 			# Safety: avoid writing a duplicate top-level "plugins:" key in existing YAML.
 			# Without a YAML-aware merger (yq), provide a merge-ready snippet instead.
@@ -606,8 +681,8 @@ print_smoke_guardrail_command() {
 	smoke_script="$(select_smoke_guardrail_script)"
 
 	if [ "$USE_HOSTED_PASSPORT" = true ]; then
-		printf 'APORT_AGENT_ID="%s" APORT_API_KEY="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
-			"$HOSTED_AGENT_ID" "${APORT_API_KEY:-}" "${api_url:-$CONFIGURED_API_URL}" "$smoke_script"
+		printf 'APORT_AGENT_ID="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
+			"$HOSTED_AGENT_ID" "${api_url:-$CONFIGURED_API_URL}" "$smoke_script"
 	elif [ "$PLUGIN_MODE" = "api" ]; then
 		printf 'APORT_PASSPORT_FILE="%s" APORT_API_URL="%s" %s system.command.execute '\''{"command":"node --version"}'\''' \
 			"$PASSPORT_FILE" "${api_url:-$CONFIGURED_API_URL}" "$smoke_script"
@@ -734,6 +809,7 @@ echo
 cat <<'TABLE'
 	   Tool name (examples)              → Policy pack
 	   ------------------------------------------------
+	   release.publish, git.release      → code.release.publish.v1
 	   git.create_pr, git.merge, git.*   → code.repository.merge.v1
 	   exec.run, system.command.*        → system.command.execute.v1
 	   message + send/reply/broadcast    → messaging.message.send.v1

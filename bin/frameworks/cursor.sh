@@ -17,6 +17,9 @@ source "$LIB/guardrail-mode.sh"
 # shellcheck source=../lib/quick-hosted.sh
 source "$LIB/quick-hosted.sh"
 
+APORT_HOOK_MARKER="__aport_hook"
+APORT_HOOK_TIMEOUT=10
+
 run_setup() {
     parse_guardrail_mode_args "$@"
 
@@ -68,27 +71,34 @@ run_setup() {
     CURSOR_HOOKS_FILE="$CURSOR_HOOKS_DIR/hooks.json"
     mkdir -p "$CURSOR_HOOKS_DIR"
 
-    # Merge with existing hooks.json if present; otherwise create new
-    if [ -f "$CURSOR_HOOKS_FILE" ] && command -v jq &> /dev/null; then
-        EXISTING=$(cat "$CURSOR_HOOKS_FILE")
-        if echo "$EXISTING" | jq -e '.hooks' &> /dev/null; then
-            # Add APort hook to all supported lifecycle events.
-            # Replace stale APort entries (old npx paths), preserve non-APort hooks.
-            NEW_HOOKS=$(echo "$EXISTING" | jq -c --arg cmd "$HOOK_SCRIPT" '
-        def is_aport_cmd:
-          (.command? // "") | test("aport-(cursor-hook|claude-code-hook)\\.sh$");
+    # Merge with existing hooks.json if present; otherwise create new.
+    if [ -f "$CURSOR_HOOKS_FILE" ]; then
+        if ! command -v jq &> /dev/null; then
+            log_error "Cannot merge existing Cursor hooks without jq: $CURSOR_HOOKS_FILE"
+            exit 1
+        fi
+        if ! jq -e . "$CURSOR_HOOKS_FILE" > /dev/null 2>&1; then
+            log_error "Refusing to overwrite invalid Cursor hooks JSON: $CURSOR_HOOKS_FILE"
+            exit 1
+        fi
+        # Add APort hook to all supported lifecycle events.
+        # Replace marker-owned or legacy APort entries, preserve non-APort hooks.
+        NEW_HOOKS=$(jq -c --arg cmd "$HOOK_SCRIPT" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" '
+        def aport_hook($cmd; $marker; $timeout):
+          { "command": $cmd, ($marker): true, "timeout": $timeout };
+        def is_aport_cursor_hook:
+          (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-cursor-hook\\.sh($|[[:space:]])"));
         def upsert_hook:
-          map(select((.command != $cmd) and (is_aport_cmd | not))) | . + [{ "command": $cmd }];
+          (. // []) | map(select(is_aport_cursor_hook | not)) | . + [aport_hook($cmd; $marker; $timeout)];
+        .version = (.version // 1) |
+        .hooks = (.hooks // {}) |
         .hooks.beforeShellExecution = ((.hooks.beforeShellExecution // []) | upsert_hook) |
         .hooks.preToolUse = ((.hooks.preToolUse // []) | upsert_hook) |
         .hooks.beforeMCPExecution = ((.hooks.beforeMCPExecution // []) | upsert_hook) |
         .hooks.subagentStart = ((.hooks.subagentStart // []) | upsert_hook)
-      ')
-            [ -f "$CURSOR_HOOKS_FILE" ] && cp "$CURSOR_HOOKS_FILE" "${CURSOR_HOOKS_FILE}.bak"
-            echo "$NEW_HOOKS" > "$CURSOR_HOOKS_FILE"
-        else
-            _write_cursor_hooks_file "$CURSOR_HOOKS_FILE" "$HOOK_SCRIPT"
-        fi
+      ' "$CURSOR_HOOKS_FILE")
+        cp "$CURSOR_HOOKS_FILE" "${CURSOR_HOOKS_FILE}.bak"
+        echo "$NEW_HOOKS" > "$CURSOR_HOOKS_FILE"
     else
         _write_cursor_hooks_file "$CURSOR_HOOKS_FILE" "$HOOK_SCRIPT"
     fi
@@ -115,13 +125,13 @@ _write_cursor_hooks_file() {
     local file="$1"
     local cmd="$2"
     if command -v jq &> /dev/null; then
-        jq -n -c --arg cmd "$cmd" '{
+        jq -n -c --arg cmd "$cmd" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" '{
       version: 1,
       hooks: {
-        beforeShellExecution: [{ command: $cmd }],
-        preToolUse: [{ command: $cmd }],
-        beforeMCPExecution: [{ command: $cmd }],
-        subagentStart: [{ command: $cmd }]
+        beforeShellExecution: [{ command: $cmd, ($marker): true, timeout: $timeout }],
+        preToolUse: [{ command: $cmd, ($marker): true, timeout: $timeout }],
+        beforeMCPExecution: [{ command: $cmd, ($marker): true, timeout: $timeout }],
+        subagentStart: [{ command: $cmd, ($marker): true, timeout: $timeout }]
       }
     }' > "$file"
     else
@@ -131,10 +141,10 @@ _write_cursor_hooks_file() {
 {
   "version": 1,
   "hooks": {
-    "beforeShellExecution": [{"command": "${escaped_cmd}"}],
-    "preToolUse": [{"command": "${escaped_cmd}"}],
-    "beforeMCPExecution": [{"command": "${escaped_cmd}"}],
-    "subagentStart": [{"command": "${escaped_cmd}"}]
+    "beforeShellExecution": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10}],
+    "preToolUse": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10}],
+    "beforeMCPExecution": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10}],
+    "subagentStart": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10}]
   }
 }
 EOF

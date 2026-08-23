@@ -8,7 +8,7 @@
 
 aport_hook_read_tools_with_path() {
     case "$1" in
-        read | readfile | semanticsearch) return 0 ;;
+        read | readfile | read_file | semanticsearch) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -27,7 +27,7 @@ aport_hook_try_read_evaluation() {
         return 1
     fi
 
-    file_path="$(echo "$tool_input" | jq -r '.file_path // .path // ""' 2> /dev/null || true)"
+    file_path="$(echo "$tool_input" | jq -r '.file_path // .path // .args.file_path // .args.path // ""' 2> /dev/null || true)"
     if [ -z "$file_path" ]; then
         return 1
     fi
