@@ -1,0 +1,19 @@
+version: oap-github-policy/1
+
+repository:
+  protected_paths:
+    - .github/workflows/**
+    - .aport/**
+    - bin/**
+    - enterprise-scripts/**
+    - extensions/**
+    - external/**
+    - packages/**
+    - policies/**
+    - python/**
+    - scripts/**
+    - package.json
+    - package-lock.json
+
+github:
+  require_pinned_actions: true

@@ -97,6 +97,7 @@ npx --yes @aporthq/aport-agent-guardrails claude-code --non-interactive
 - **I need OpenClaw now:** [docs/QUICKSTART_OPENCLAW_PLUGIN.md](docs/QUICKSTART_OPENCLAW_PLUGIN.md)
 - **I already have agent_id:** [docs/HOSTED_PASSPORT_SETUP.md](docs/HOSTED_PASSPORT_SETUP.md)
 - **I’m deploying for an IT team:** [docs/ENTERPRISE_DEVICE_DEPLOYMENT.md](docs/ENTERPRISE_DEVICE_DEPLOYMENT.md)
+- **I want GitHub protection:** [docs/GITHUB_PROTECTION.md](docs/GITHUB_PROTECTION.md)
 - **I need framework setup docs:** [docs/frameworks](docs/frameworks)
 - **I want Claude marketplace install:** [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md#marketplace-install-claude-plugins)
 
@@ -440,6 +441,23 @@ See [Verification methods](docs/VERIFICATION_METHODS.md) for a detailed comparis
 
 ---
 
+## GitHub Protection
+
+APort can also verify GitHub repository activity in CI. Use hosted verification for GitHub Actions so APort can validate the workflow identity with GitHub OIDC, issue signed decisions, and record auditable evidence.
+
+Protection surfaces:
+
+| Surface | Policy |
+|--------|--------|
+| Current Repository Guard Action: PR/repository provenance and merge/push evidence | `code.repository.merge.v1` |
+| Agent/runtime or direct guardrail checks: explicit release publishing tools | `code.release.publish.v1` |
+
+The local evaluator includes a lightweight subset for developer/offline checks: repository allowlists, branch allowlists, changed-path allowlists, action-specific capability checks, and semantic-version checks for explicit release publishing tool calls. Hosted verification is the source of truth for GitHub OIDC, signed receipts, Action-collected repository evidence, and organization audit. Shell commands such as `npm publish` still arrive through shell hooks as `system.command.execute.v1`; use explicit release tools or hosted API verification for `code.release.publish.v1`.
+
+See [GitHub protection](docs/GITHUB_PROTECTION.md) for the recommended setup and [Tool / Policy Mapping](docs/TOOL_POLICY_MAPPING.md) for exact tool-to-policy names.
+
+---
+
 ## 📜 Commands (after install)
 
 **Node:** When you install via `npm install @aporthq/aport-agent-guardrails` (or use `npx`), these commands are available:
@@ -476,6 +494,7 @@ Use the framework-specific doc for where config and passport live and for any ex
 | [Quick Start Guide](docs/QUICKSTART.md) | Passport wizard, copy-paste option |
 | [OpenClaw Local Integration](docs/OPENCLAW_LOCAL_INTEGRATION.md) | API, Python example |
 | [Tool / Policy Mapping](docs/TOOL_POLICY_MAPPING.md) | Tool names → policy packs |
+| [GitHub Protection](docs/GITHUB_PROTECTION.md) | Protect PR/push workflows with hosted OAP verification and explicit release checks |
 | [Repo Layout](docs/REPO_LAYOUT.md) | For contributors: package layout (`bin/`, `src/`, `extensions/`) |
 | [Upgrade Guide](docs/UPGRADE.md) | Migrating between versions (e.g. 0.1.0 → 1.0.0) |
 | **Frameworks** | Per-framework setup and how guardrails run |

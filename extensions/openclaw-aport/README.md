@@ -122,6 +122,7 @@ Hosted passport mode uses `agentId` instead of `passportFile`.
 The plugin keeps the existing OpenClaw-specific tool mappings. Common examples:
 
 - `exec`, `exec.run` -> `system.command.execute.v1`
+- `release.publish`, `git.release` -> `code.release.publish.v1`
 - `git.create_pr`, `git.merge`, `git.push` -> `code.repository.merge.v1`
 - `message` with send-family actions like `send`, `reply`, `broadcast`, `sendAttachment`, `upload-file`, or `react` -> `messaging.message.send.v1`
 - `read`, `view`, `glob` -> `data.file.read.v1`

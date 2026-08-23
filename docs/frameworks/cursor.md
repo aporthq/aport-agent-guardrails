@@ -1,4 +1,4 @@
-# APort Agent Guardrail — Cursor (and VS Code Copilot)
+# APort Agent Guardrail — Cursor
 
 > **Update (v1.0.13):** The claim that the cursor hook works for Claude Code is incorrect.
 > The cursor hook outputs `permission: allow/deny` — Claude Code expects `hookSpecificOutput.permissionDecision`.
@@ -8,7 +8,7 @@
 > ```
 > See [docs/frameworks/claude-code.md](./claude-code.md).
 
-Cursor and VS Code with GitHub Copilot support **config-driven hooks** that run before shell execution or tool use. The **APort hook script** reads JSON from stdin, calls the existing APort guardrail (policy + passport), and returns allow/deny; **exit 2** blocks the action.
+Cursor supports **config-driven hooks** that run before shell execution or tool use. The **APort hook script** reads JSON from stdin, calls the existing APort guardrail (policy + passport), and returns allow/deny; **deny** is the reliable enforcement result.
 
 ## Two ways to use APort
 
@@ -23,11 +23,11 @@ For Cursor, you almost always use **Guardrails (CLI)** once to install the hook;
 
 ## How it works
 
-- **Hooks:** Cursor uses `~/.cursor/hooks.json` (or `.cursor/hooks.json` in the project). Hooks such as `beforeShellExecution` and `preToolUse` run a command (our script). The host sends JSON to stdin and reads JSON from stdout; **exit code 2** = block.
-- **VS Code Copilot:** Agent hooks (Preview) use `~/.claude/settings.json` or `.github/hooks/*.json` with `PreToolUse`; same idea: command, stdin JSON, stdout JSON, exit 2 = block.
+- **Hooks:** Cursor uses `~/.cursor/hooks.json` (or `.cursor/hooks.json` in the project). Hooks such as `beforeShellExecution` and `preToolUse` run a command (our script). The host sends JSON to stdin and reads JSON from stdout.
+- **Cursor CLI coverage:** Cursor CLI hook coverage has changed over time and may lag the IDE. APort installs the supported hook entries and uses fail-closed `deny` for enforcement, but direct coverage depends on the Cursor version and which hook events that version emits.
 - **Claude Code:** Uses `~/.claude/settings.json` with a **different** output format (`hookSpecificOutput.permissionDecision`). Use the **dedicated Claude Code integration** instead of this Cursor hook — see [claude-code.md](./claude-code.md).
 
-Our script accepts Cursor- and Copilot-style payloads (e.g. `command`, or `tool`/`input`), maps to the **system.command.execute** policy, calls the bash guardrail, and returns `permission: allow|deny` plus optional `agentMessage`.
+Our script accepts Cursor payloads and a small set of legacy tool payloads (e.g. `command`, or `tool`/`input`), maps to the matching APort policy, calls the guardrail evaluator, and returns `permission: allow|deny` plus optional `agentMessage`.
 
 **Hook script path:** The hook script (`aport-cursor-hook.sh`) resolves `bin/aport-guardrail-bash.sh` relative to its own directory (script dir → parent = package root). When you install via **npx**, the installer writes the path to the script inside the npx cache (e.g. `…/node_modules/@aporthq/aport-agent-guardrails/bin/aport-cursor-hook.sh`), so the guardrail script is found at `…/bin/aport-guardrail-bash.sh`. If you copy the hook script elsewhere, ensure `bin/aport-guardrail-bash.sh` exists at the same relative location or set `APORT_GUARDRAIL_SCRIPT` (or equivalent) so the hook can find the evaluator.
 
@@ -61,12 +61,12 @@ The guardrail only runs when the **Cursor agent** is about to run a shell comman
 | **You** type `rm file` in the Cursor terminal | No | No — it’s your shell, not the agent. |
 | **The agent** runs a command (e.g. after you ask “run rm file”) | Yes (`beforeShellExecution`) | Yes — exit 2 blocks the agent’s command. |
 | **The agent** uses a tool that sends a command | Yes (`preToolUse`) | Yes. |
-| **The agent** uses a built-in “delete file” action (no shell) | No | No — direct file API, no hook. |
+| **The agent** uses a tool covered by the installed `preToolUse` hook | Version-dependent | Yes when Cursor emits the hook event. |
 
 So:
 
-- **Checked:** When the **agent** runs a command in the terminal (e.g. `rm file`, `npm install`) or uses a tool that goes through the hook → our script runs and can block (exit 2).
-- **Not checked:** (1) **You** typing in the terminal — the hook is never invoked. (2) The agent using a built-in “delete file” / “edit file” action (editor API) — no shell, so no hook.
+- **Checked:** When the **agent** runs a command in the terminal (e.g. `rm file`, `npm install`) or uses a tool that goes through a Cursor hook event → our script runs and can block.
+- **Not checked:** (1) **You** typing in the terminal — the hook is never invoked. (2) Agent tool paths where the installed Cursor version does not emit a hook event.
 
 To **test that the guardrail is working**, ask the **agent** to run a terminal command your passport blocks (e.g. “Run in the terminal: `rm -rf /path/to/file`”). Do **not** type the command yourself in the terminal — that bypasses the hook.
 
@@ -129,13 +129,9 @@ Then run `bin/aport-status.sh` and `cat ~/.cursor/aport/audit.log` to confirm th
 
 Same as all frameworks: **passport is the source of truth**. Set passport `status` to `suspended` (or `active` to resume). The guardrail denies every call until the passport is active again.
 
-## Using the same script in VS Code (Copilot)
-
-- **VS Code + GitHub Copilot:** Add a PreToolUse hook in `~/.claude/settings.json` (or project `.claude/settings.json`, or `.github/hooks/*.json`) that runs the same script. See [Agent hooks (Preview)](https://code.visualstudio.com/docs/copilot/customization/hooks).
-
 For **Claude Code**, use the [dedicated Claude Code integration](./claude-code.md) instead — it uses the correct output format (`hookSpecificOutput.permissionDecision`) and supports all Claude Code tool types.
 
-The script accepts multiple input shapes (e.g. `command`, `tool`/`input`) and returns the host-expected JSON; **exit 0** = allow, **exit 2** = block.
+The script accepts multiple input shapes (e.g. `command`, `tool`/`input`) and returns the host-expected JSON; **exit 0** = allow, **exit 2** = block for Cursor-style command hooks.
 
 ## Using the Node package (optional)
 
@@ -165,4 +161,4 @@ Runtime enforcement in Cursor is done by the **hook script**, not by this packag
 
 ## Status
 
-Implemented (Story E). **APort Agent Guardrail for Cursor.** Installer: `npx @aporthq/aport-agent-guardrails cursor`; hook script: `bin/aport-cursor-hook.sh`; config: `~/.cursor/hooks.json`. Same script usable for VS Code Copilot. For Claude Code, use the dedicated integration: `npx @aporthq/aport-agent-guardrails claude-code` (see [claude-code.md](./claude-code.md)).
+Implemented (Story E). **APort Agent Guardrail for Cursor.** Installer: `npx @aporthq/aport-agent-guardrails cursor`; hook script: `bin/aport-cursor-hook.sh`; config: `~/.cursor/hooks.json`. For Claude Code, use the dedicated integration: `npx @aporthq/aport-agent-guardrails claude-code` (see [claude-code.md](./claude-code.md)).

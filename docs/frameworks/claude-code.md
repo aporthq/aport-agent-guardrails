@@ -9,7 +9,7 @@ Claude Code's **PreToolUse** hook runs as a separate process before each tool ex
 ## How it works
 
 - **Settings file:** Claude Code uses `~/.claude/settings.json` (user-level) or `.claude/settings.json` (project-level). This is **not** `~/.cursor/hooks.json` — different location and JSON structure.
-- **PreToolUse hook:** The hook receives JSON on stdin with `tool_name` and `tool_input`, runs the APort guardrail, and must output Claude Code's exact deny format on stdout when blocking: `hookSpecificOutput.permissionDecision: "deny"`. Exit 0 = allow; exit 2 = block.
+- **PreToolUse hook:** The hook receives JSON on stdin with `tool_name` and `tool_input`, runs the APort guardrail, and outputs Claude Code's exact structured deny format on stdout when blocking: `hookSpecificOutput.permissionDecision: "deny"`. Claude Code reads structured hook JSON from stdout on exit 0; exit 2 is only for stderr-based blocking.
 - **Hook script:** `bin/aport-claude-code-hook.sh` — maps all Claude Code tool names (Bash, Read, Write, Edit, MultiEdit, Glob, LS, Grep, WebSearch, WebFetch, Browser, TodoRead, TodoWrite, Task, MCP tools) to APort policies and calls the core evaluator.
 
 ---
@@ -113,7 +113,7 @@ Path-based **Read** tools call the guardrail with only `file_path` in context (n
 
 ## What's NOT protected
 
-- **`claude --dangerously-skip-permissions`** — This flag bypasses **all** hooks including PreToolUse. When set, APort is completely inactive. This cannot be mitigated in code; it is an intentional override. Document it prominently and do not rely on APort when this flag is used.
+- **Claude sessions where hooks are not installed or are disabled** — APort enforces through Claude Code's PreToolUse hook. If that hook is absent or hooks are disabled in Claude settings, APort cannot intercept tool calls. Claude Code's bypass-permissions mode does not override a PreToolUse `deny` decision.
 - **You typing in your terminal** — The hook runs only when the Claude Code agent is about to use a tool. Commands you run yourself are not intercepted.
 
 ---
@@ -131,11 +131,11 @@ echo "Exit: $?"
 echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | bin/aport-claude-code-hook.sh
 echo "Exit: $?"
 
-# Deny: Bash with blocked pattern (exit 2, hookSpecificOutput JSON)
+# Deny: Bash with blocked pattern (exit 0, hookSpecificOutput JSON)
 echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' | bin/aport-claude-code-hook.sh
 echo "Exit: $?"
 
-# Deny: Unknown tool (fail-closed, exit 2)
+# Deny: Unknown tool (fail-closed, exit 0 with hookSpecificOutput JSON)
 echo '{"tool_name":"UnknownTool","tool_input":{}}' | bin/aport-claude-code-hook.sh
 echo "Exit: $?"
 ```

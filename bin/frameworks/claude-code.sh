@@ -17,6 +17,9 @@ source "$LIB/guardrail-mode.sh"
 # shellcheck source=../lib/quick-hosted.sh
 source "$LIB/quick-hosted.sh"
 
+APORT_HOOK_MARKER="__aport_hook"
+APORT_HOOK_TIMEOUT=10
+
 run_setup() {
     parse_guardrail_mode_args "$@"
 
@@ -86,11 +89,11 @@ run_setup() {
     fi
     echo "  4. Mode config: $MODE_FILE"
     echo "  5. Restart Claude Code so the PreToolUse hook is picked up."
-    echo "  6. Tool use will be checked by APort policy (exit 2 = block)."
+    echo "  6. Tool use will be checked by APort policy before execution."
     echo ""
     echo "  Audit log: $config_dir/aport/audit.log (entries added on each policy check)"
     echo ""
-    echo "  Note: claude --dangerously-skip-permissions bypasses ALL hooks including APort."
+    echo "  Note: Claude Code PreToolUse deny hooks still apply in bypass-permissions mode."
     echo "  See: docs/frameworks/claude-code.md"
     echo ""
 }
@@ -101,26 +104,46 @@ _write_claude_settings() {
     local file="$1"
     local cmd="$2"
 
-    if [ -f "$file" ] && command -v jq &> /dev/null; then
-        if jq -e '.hooks' "$file" &> /dev/null; then
-            # Merge: replace stale APort hook entries (old npx paths), preserve non-APort hooks
-            local tmpfile
-            tmpfile="$(mktemp "${file}.XXXXXX")"
-            jq -c --arg cmd "$cmd" '
-                (.hooks.PreToolUse // []) as $p |
-                .hooks.PreToolUse = ($p | map(select(
-                    ((.hooks[0].command != $cmd) and (((.hooks[0].command // "") | test("aport-(cursor-hook|claude-code-hook)\\.sh$")) | not))
-                )) | . + [{"matcher":"*","hooks":[{"type":"command","command":$cmd}]}])
-            ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
-            return
+    if [ -f "$file" ]; then
+        if ! command -v jq &> /dev/null; then
+            log_error "Cannot merge existing Claude Code settings without jq: $file"
+            exit 1
         fi
+        if ! jq -e . "$file" > /dev/null 2>&1; then
+            log_error "Refusing to overwrite invalid Claude Code settings JSON: $file"
+            exit 1
+        fi
+
+        # Merge: preserve user hooks, replace marker-owned or legacy APort hooks.
+        local tmpfile
+        tmpfile="$(mktemp "${file}.XXXXXX")"
+        jq -c --arg cmd "$cmd" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" '
+            def aport_hook($cmd; $marker; $timeout):
+              {"type":"command","command":$cmd,($marker):true,"timeout":$timeout};
+            def is_aport_claude_hook:
+              (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-claude-code-hook\\.sh($|[[:space:]])"));
+            .hooks = (.hooks // {}) |
+            .hooks.PreToolUse = (
+              (.hooks.PreToolUse // [])
+              | map(
+                  if (.hooks? // null) == null then
+                    .
+                  else
+                    .hooks = ((.hooks // []) | map(select(is_aport_claude_hook | not)))
+                  end
+                )
+              | map(select(((.hooks? // []) | length) > 0))
+              | . + [{"matcher":"*","hooks":[aport_hook($cmd; $marker; $timeout)]}]
+            )
+        ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+        return
     fi
 
     # Write fresh settings (Claude Code format: hooks.PreToolUse, matcher "*")
     if command -v jq &> /dev/null; then
-        jq -n --arg cmd "$cmd" '{
+        jq -n --arg cmd "$cmd" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" '{
             hooks: {
-                PreToolUse: [{"matcher":"*","hooks":[{"type":"command","command":$cmd}]}]
+                PreToolUse: [{"matcher":"*","hooks":[{"type":"command","command":$cmd,($marker):true,"timeout":$timeout}]}]
             }
         }' > "$file"
     else
@@ -134,10 +157,12 @@ _write_claude_settings() {
       {
         "matcher": "*",
         "hooks": [
-          {
-            "type": "command",
-            "command": "${escaped_cmd}"
-          }
+            {
+              "type": "command",
+              "command": "${escaped_cmd}",
+              "__aport_hook": true,
+              "timeout": 10
+            }
         ]
       }
     ]
