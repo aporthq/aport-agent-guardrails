@@ -104,6 +104,9 @@ function loadConfig() {
 }
 
 function defaultStateDir(framework) {
+  if (process.platform !== 'win32' && !isRoot()) {
+    return path.join(os.homedir(), '.aport', 'enterprise', framework);
+  }
   if (process.platform === 'darwin') {
     return path.join('/Library/Application Support/APort', framework);
   }
@@ -454,7 +457,12 @@ function findExistingInstance(cfg, tenantRef) {
   })}`;
   let response;
   try {
-    response = curl(['-fsS', url]);
+    response = curl([
+      '-fsS',
+      url,
+      '-H',
+      `Authorization: Bearer ${cfg.apiKey}`,
+    ]);
   } catch (error) {
     die(
       `Could not verify whether this device already has a passport instance. Aborting to avoid duplicate issuance. ${error.message}`
@@ -600,22 +608,63 @@ function writeRuntimeConfig(cfg, user, home, agentId, runtimeCredential) {
 
 function hookPresent(home, framework) {
   if (framework === 'claude-code') {
-    try {
-      const settings = fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8');
-      return settings.includes('aport-claude-code-hook.sh');
-    } catch {
-      return false;
-    }
+    return claudeCodeHookPresent(path.join(home, '.claude', 'settings.json'));
   }
   if (framework === 'cursor') {
-    try {
-      const hooks = fs.readFileSync(path.join(home, '.cursor', 'hooks.json'), 'utf8');
-      return hooks.includes('aport-cursor-hook.sh');
-    } catch {
-      return false;
-    }
+    return cursorHookPresent(path.join(home, '.cursor', 'hooks.json'));
   }
   return fs.existsSync(path.join(frameworkConfigDir(home, framework), 'aport', 'guardrail-mode.env'));
+}
+
+function readJsonFile(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function extractHookCommands(entries) {
+  const commands = [];
+  const visit = (entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    if (typeof entry.command === 'string') commands.push(entry.command);
+    if (Array.isArray(entry.hooks)) entry.hooks.forEach(visit);
+  };
+  if (Array.isArray(entries)) entries.forEach(visit);
+  return commands;
+}
+
+function hookScriptPath(command, scriptName) {
+  for (const token of String(command || '').match(/"[^"]+"|'[^']+'|\S+/g) || []) {
+    const value = token.replace(/^['"]|['"]$/g, '');
+    if (value.endsWith(`/${scriptName}`) || value === scriptName) return value;
+  }
+  return '';
+}
+
+function executableHookCommand(command, scriptName) {
+  const scriptPath = hookScriptPath(command, scriptName);
+  if (!scriptPath || scriptPath === scriptName) return false;
+  try {
+    fs.accessSync(scriptPath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function claudeCodeHookPresent(settingsPath) {
+  const settings = readJsonFile(settingsPath);
+  const commands = extractHookCommands(settings?.hooks?.PreToolUse);
+  return commands.some((command) => executableHookCommand(command, 'aport-claude-code-hook.sh'));
+}
+
+function cursorHookPresent(hooksPath) {
+  const config = readJsonFile(hooksPath);
+  const hooks = config?.hooks && typeof config.hooks === 'object' ? config.hooks : {};
+  const commands = Object.values(hooks).flatMap((entries) => extractHookCommands(entries));
+  return commands.some((command) => executableHookCommand(command, 'aport-cursor-hook.sh'));
 }
 
 function installAction(cfg) {

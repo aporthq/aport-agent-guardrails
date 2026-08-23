@@ -101,12 +101,6 @@ select_guardrail_mode() {
     local noninteractive="${APORT_NONINTERACTIVE:-${CI:-}}"
     local selected_mode="${APORT_GUARDRAIL_MODE_CLI:-${APORT_GUARDRAIL_MODE:-}}"
 
-    if [[ -n "$hosted_agent_id" ]]; then
-        APORT_SELECTED_GUARDRAIL_MODE="api"
-        export APORT_SELECTED_GUARDRAIL_MODE
-        return 0
-    fi
-
     if [[ -n "$selected_mode" ]]; then
         selected_mode="$(echo "$selected_mode" | tr '[:upper:]' '[:lower:]')"
         case "$selected_mode" in
@@ -116,7 +110,17 @@ select_guardrail_mode() {
                 return 1
                 ;;
         esac
+        if [[ "$selected_mode" = "local" && -n "$hosted_agent_id" ]]; then
+            echo "[aport] ERROR: --mode=local cannot be combined with a hosted passport ID." >&2
+            return 1
+        fi
         APORT_SELECTED_GUARDRAIL_MODE="$selected_mode"
+        export APORT_SELECTED_GUARDRAIL_MODE
+        return 0
+    fi
+
+    if [[ -n "$hosted_agent_id" ]]; then
+        APORT_SELECTED_GUARDRAIL_MODE="api"
         export APORT_SELECTED_GUARDRAIL_MODE
         return 0
     fi

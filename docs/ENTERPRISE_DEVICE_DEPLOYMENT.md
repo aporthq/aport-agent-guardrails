@@ -41,7 +41,7 @@ export APORT_API_KEY="apk_..."
 export APORT_TEMPLATE_ID="ap_..."
 export APORT_FRAMEWORK="claude-code"
 
-curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" | sudo -E bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy" | sudo -E bash
 ```
 
 Use `sudo -E` so the whole script runs with administrator permissions and receives the exported `APORT_*` variables. Do **not** use `sudo curl ... | bash`; that only runs `curl` as root while `bash` still runs as the current user.
@@ -70,16 +70,58 @@ For a non-admin smoke test only, override `APORT_STATE_DIR` to a writable direct
 
 ```bash
 export APORT_STATE_DIR="$HOME/.aport/enterprise/claude-code"
-curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" | bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy" | bash
+```
+
+## Copy/Paste Script For Review Or Device Management
+
+If IT wants to review the full script or paste it directly into a device-management tool, download the bundled script first:
+
+```bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy" -o aport-device-deploy.sh
+```
+
+Open `aport-device-deploy.sh`, edit only the configuration block near the top, then upload or paste the whole file:
+
+```bash
+export APORT_API_KEY="${APORT_API_KEY:-apk_...}"
+export APORT_TEMPLATE_ID="${APORT_TEMPLATE_ID:-ap_...}"
+export APORT_FRAMEWORK="${APORT_FRAMEWORK:-claude-code}"
+export APORT_API_URL="${APORT_API_URL:-https://api.aport.io}"
+export APORT_TARGET_USER="${APORT_TARGET_USER:-}"
+export APORT_TARGET_HOME="${APORT_TARGET_HOME:-}"
+```
+
+The downloaded file is self-contained: it includes the editable config header and the inlined Node.js installer core. Do not copy `enterprise-scripts/aport-device-deploy.sh` from the source tree by itself; that source file is a thin launcher and expects sibling files on disk.
+
+For recurring compliance checks, download the enforce bundle:
+
+```bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/enforce" -o aport-device-enforce.sh
+```
+
+For approved removal, download the uninstall bundle:
+
+```bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/uninstall" -o aport-device-uninstall.sh
+```
+
+For native Windows deployment, download the PowerShell entrypoint instead:
+
+```powershell
+Invoke-WebRequest -Uri "https://api.aport.io/enterprise/scripts/deploy.ps1" -OutFile "aport-device-deploy.ps1"
 ```
 
 ## Script Commands
 
 | Command | URL | Purpose |
 | --- | --- | --- |
-| Deploy | `https://api.aport.io/enterprise/scripts/deploy?version=1.0.29` | Initial install or repair |
-| Enforce | `https://api.aport.io/enterprise/scripts/enforce?version=1.0.29` | Validate state and reinstall if the hook/config is missing |
-| Uninstall | `https://api.aport.io/enterprise/scripts/uninstall?version=1.0.29` | Remove APort-owned wiring and local state |
+| Deploy | `https://api.aport.io/enterprise/scripts/deploy` | Initial install or repair on macOS/Linux |
+| Enforce | `https://api.aport.io/enterprise/scripts/enforce` | Validate state and reinstall if the hook/config is missing on macOS/Linux |
+| Uninstall | `https://api.aport.io/enterprise/scripts/uninstall` | Remove APort-owned wiring and local state on macOS/Linux |
+| Deploy Windows | `https://api.aport.io/enterprise/scripts/deploy.ps1` | Native PowerShell install or repair |
+| Enforce Windows | `https://api.aport.io/enterprise/scripts/enforce.ps1` | Native PowerShell validation and repair |
+| Uninstall Windows | `https://api.aport.io/enterprise/scripts/uninstall.ps1` | Native PowerShell removal |
 
 Use `deploy` for the first test. Use `enforce` as the recurring compliance script. Use `uninstall` only for approved removal.
 
@@ -138,7 +180,7 @@ export APORT_API_KEY="apk_..."
 export APORT_TEMPLATE_ID="ap_..."
 export APORT_FRAMEWORK="claude-code"
 
-curl -fsSL "https://api.aport.io/enterprise/scripts/enforce?version=1.0.29" | bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/enforce" | bash
 ```
 
 `enforce` reuses existing local state when present. If the framework hook/config is missing, it reinstalls without creating a duplicate passport instance.
@@ -150,7 +192,7 @@ Use only for approved removal:
 ```bash
 export APORT_FRAMEWORK="claude-code"
 
-curl -fsSL "https://api.aport.io/enterprise/scripts/uninstall?version=1.0.29" | bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/uninstall" | bash
 ```
 
 Uninstall removes APort-owned framework wiring and local APort state for the selected framework. It does not delete the passport or audit records from APort.
@@ -160,13 +202,23 @@ Uninstall removes APort-owned framework wiring and local APort state for the sel
 For stricter change-control, fetch the manifest and verify the script hash before execution:
 
 ```bash
-curl -fsSL "https://api.aport.io/enterprise/scripts?version=1.0.29"
-curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" -o /tmp/aport-deploy.sh
+curl -fsSL "https://api.aport.io/enterprise/scripts"
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy" -o /tmp/aport-deploy.sh
 shasum -a 256 /tmp/aport-deploy.sh
 bash /tmp/aport-deploy.sh
 ```
 
 Compare the `shasum` output to the manifest’s `sha256` value.
+
+The unversioned URLs resolve to the latest GitHub release. For change-controlled rollouts, pin both the manifest and script to the same reviewed release:
+
+```bash
+VERSION="<reviewed-version>"
+curl -fsSL "https://api.aport.io/enterprise/scripts?version=$VERSION"
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=$VERSION" -o /tmp/aport-deploy.sh
+shasum -a 256 /tmp/aport-deploy.sh
+bash /tmp/aport-deploy.sh
+```
 
 ## More Detail
 

@@ -22,13 +22,19 @@ cat > "$CLAUDE_DIR/settings.json" << EOF
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/uchi/.npm/_npx/stale/node_modules/@aporthq/aport-agent-guardrails/bin/aport-claude-code-hook.sh"
+            "command": "/Users/uchi/.npm/_npx/stale/node_modules/@aporthq/aport-agent-guardrails/bin/aport-claude-code-hook.sh",
+            "__aport_hook": true,
+            "timeout": 10
           }
         ]
       },
       {
         "matcher": "Bash(*)",
         "hooks": [
+          {
+            "type": "command",
+            "command": "/opt/custom/aport-claude-code-hook.sh"
+          },
           {
             "type": "command",
             "command": "/usr/local/bin/custom-claude-hook.sh"
@@ -79,14 +85,30 @@ if command -v jq &> /dev/null; then
     fi
     echo "  ✅ settings.json references APort Claude Code hook script"
 
-    # Stale npx APort claude hook path should be replaced
-    STALE_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | .command // ""] | map(select(test("aport-claude-code-hook\\.sh$") and test("/\\.npm/_npx/"))) | length' "$CLAUDE_DIR/settings.json")
+    MARKER_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true and .timeout == 10)] | length' "$CLAUDE_DIR/settings.json")
+    if [[ "$MARKER_COUNT" -ne 1 ]]; then
+        echo "FAIL: expected exactly one marker-owned APort hook with timeout=10" >&2
+        jq -c '.hooks.PreToolUse' "$CLAUDE_DIR/settings.json" >&2
+        exit 1
+    fi
+    echo "  ✅ marker-owned APort hook with timeout=10"
+
+    # Stale marker-owned npx APort Claude hook path should be replaced
+    STALE_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true) | .command // ""] | map(select(test("aport-claude-code-hook\\.sh$") and test("/\\.npm/_npx/"))) | length' "$CLAUDE_DIR/settings.json")
     if [[ "$STALE_COUNT" -ne 0 ]]; then
         echo "FAIL: stale npx APort Claude hook entries should be removed" >&2
         jq -c '.hooks.PreToolUse' "$CLAUDE_DIR/settings.json" >&2
         exit 1
     fi
     echo "  ✅ stale npx APort Claude hook entries removed"
+
+    LEGACY_UNMARKED_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.command == "/opt/custom/aport-claude-code-hook.sh")] | length' "$CLAUDE_DIR/settings.json")
+    if [[ "$LEGACY_UNMARKED_COUNT" -ne 0 ]]; then
+        echo "FAIL: legacy unmarked APort Claude hook entries should be removed" >&2
+        jq -c '.hooks.PreToolUse' "$CLAUDE_DIR/settings.json" >&2
+        exit 1
+    fi
+    echo "  ✅ legacy unmarked APort Claude hook entries removed"
 
     # User custom hook must be preserved
     CUSTOM_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.command == "/usr/local/bin/custom-claude-hook.sh")] | length' "$CLAUDE_DIR/settings.json")

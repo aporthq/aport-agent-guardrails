@@ -1,7 +1,8 @@
 # Release: publish to npm (root + workspace packages) and PyPI, then create GitHub Release.
 # Trigger: push a tag v* (e.g. v1.0.8). Run `npm run version` and commit before tagging.
-# Root package @aporthq/aport-agent-guardrails exposes bin/agent-guardrails (CLI). Workspace packages
-# @aporthq/aport-agent-guardrails-{core,langchain,crewai,cursor} are published; n8n is not published yet (coming soon).
+# Root package @aporthq/aport-agent-guardrails exposes bin/agent-guardrails (CLI). Published workspace
+# packages include core, langchain, crewai, cursor, claude-code, @aporthq/openclaw-aport, and the
+# deprecated compatibility alias. n8n is not published yet (coming soon).
 # PyPI: add this repo and workflow name "Release" in PyPI trusted publishing, or set PYPI_TOKEN secret.
 name: Release
 
@@ -17,7 +18,54 @@ on:
         type: string
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          registry-url: "https://registry.npmjs.org"
+          node-version: "22"
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify npm dependency signatures
+        run: npm audit signatures
+
+      - name: Verify version matches release version
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+          ROOT_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$ROOT_VERSION" ]; then
+            echo "Version mismatch: requested release is v$TAG_VERSION but root package.json has $ROOT_VERSION. Run 'npm run version' and commit before releasing."
+            exit 1
+          fi
+          echo "Version OK: $TAG_VERSION"
+
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Run release regression gate
+        run: |
+          APORT_SKIP_REMOTE_PASSPORT_TEST="${APORT_SKIP_REMOTE_PASSPORT_TEST:-1}" make test
+          git diff --check
+
   publish-npm:
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -139,6 +187,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-python:
+    needs: validate
     runs-on: ubuntu-latest
     env:
       TWINE_USERNAME: __token__
@@ -258,13 +307,28 @@ jobs:
           VERSION="${{ steps.version.outputs.VERSION }}"
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "GitHub release ${TAG} already exists; skipping creation"
+            echo "GitHub release ${TAG} already exists; uploading enterprise assets with --clobber"
+            gh release upload "$TAG" --clobber \
+              dist/enterprise-scripts/aport-device-deploy.bundled.sh \
+              dist/enterprise-scripts/aport-device-enforce.bundled.sh \
+              dist/enterprise-scripts/aport-device-uninstall.bundled.sh \
+              dist/enterprise-scripts/aport-device-deploy.bundled.ps1 \
+              dist/enterprise-scripts/aport-device-enforce.bundled.ps1 \
+              dist/enterprise-scripts/aport-device-uninstall.bundled.ps1 \
+              dist/enterprise-scripts/aport-device-core.mjs \
+              dist/enterprise-scripts/aport-device-deploy.ps1 \
+              dist/enterprise-scripts/aport-device-enforce.ps1 \
+              dist/enterprise-scripts/aport-device-uninstall.ps1 \
+              dist/enterprise-scripts/enterprise-scripts-manifest.json
             exit 0
           fi
           gh release create "$TAG" --generate-notes \
             dist/enterprise-scripts/aport-device-deploy.bundled.sh \
             dist/enterprise-scripts/aport-device-enforce.bundled.sh \
             dist/enterprise-scripts/aport-device-uninstall.bundled.sh \
+            dist/enterprise-scripts/aport-device-deploy.bundled.ps1 \
+            dist/enterprise-scripts/aport-device-enforce.bundled.ps1 \
+            dist/enterprise-scripts/aport-device-uninstall.bundled.ps1 \
             dist/enterprise-scripts/aport-device-core.mjs \
             dist/enterprise-scripts/aport-device-deploy.ps1 \
             dist/enterprise-scripts/aport-device-enforce.ps1 \
@@ -298,19 +362,19 @@ jobs:
 
           ### Enterprise device scripts (macOS, Linux, Windows)
           Generic IT install — same version as npm \`v$VERSION\`. Requires Node.js 18+, npm/npx, curl.
-          - \`aport-device-deploy.bundled.sh\` / \`.ps1\` — initial install
-          - \`aport-device-enforce.bundled.sh\` / \`.ps1\` — verify and repair
-          - \`aport-device-uninstall.bundled.sh\` / \`.ps1\` — removal
+          - \`aport-device-deploy.bundled.sh\` / \`.bundled.ps1\` — initial install
+          - \`aport-device-enforce.bundled.sh\` / \`.bundled.ps1\` — verify and repair
+          - \`aport-device-uninstall.bundled.sh\` / \`.bundled.ps1\` — removal
           - \`aport-device-core.mjs\` — shared cross-platform core
           - \`enterprise-scripts-manifest.json\` — SHA-256 checksums
 
           Auditable install (download, verify hash, run):
           \`\`\`bash
           curl -fsSL https://api.aport.io/enterprise/scripts/deploy?version=$VERSION -o /tmp/aport-deploy.sh
-          # Compare sha256 with GET https://api.aport.io/enterprise/scripts
+          # Compare sha256 with GET https://api.aport.io/enterprise/scripts?version=$VERSION
           bash /tmp/aport-deploy.sh   # macOS / Linux
           \`\`\`
-          Windows: \`powershell -File aport-device-deploy.ps1\` with \`APORT_API_KEY\` / \`APORT_TEMPLATE_ID\` set.
+          Windows: \`powershell -File aport-device-deploy.bundled.ps1\` with \`APORT_API_KEY\` / \`APORT_TEMPLATE_ID\` set.
 
           See [README](https://github.com/aporthq/aport-agent-guardrails#readme) and [enterprise-scripts/README.md](https://github.com/aporthq/aport-agent-guardrails/tree/main/enterprise-scripts) for usage."
         if: success()

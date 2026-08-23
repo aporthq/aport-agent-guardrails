@@ -184,6 +184,11 @@ grep -q '/api/passports/agt_inst_mppi38zb_ogxgbi/setup-key' "$APORT_TEST_CURL_LO
     echo "FAIL: install should mint runtime setup key for created instance" >&2
     exit 1
 }
+grep -q '/api/check-instance' "$APORT_TEST_CURL_LOG" && grep -q 'Authorization: Bearer apk_enrollment_test' "$APORT_TEST_CURL_LOG" || {
+    echo "FAIL: check-instance lookup should be authenticated with enrollment API key" >&2
+    cat "$APORT_TEST_CURL_LOG" >&2
+    exit 1
+}
 grep -q '"device_info"' "$APORT_TEST_CURL_LOG" || {
     echo "FAIL: install should send device metadata by default" >&2
     cat "$APORT_TEST_CURL_LOG" >&2
@@ -199,6 +204,30 @@ grep -q '"device_id_source":"env"' "$APORT_TEST_CURL_LOG" || {
     cat "$APORT_TEST_CURL_LOG" >&2
     exit 1
 }
+
+if [ "$(id -u)" -eq 0 ]; then
+    echo "  SKIP: non-root default state directory assertion (test process is root)"
+else
+    DEFAULT_OS_HOME="$TMP_DIR/default-os-home"
+    mkdir -p "$DEFAULT_OS_HOME"
+    : > "$APORT_TEST_CURL_LOG"
+    PATH="$FAKE_BIN:$PATH" \
+        HOME="$DEFAULT_OS_HOME" \
+        APORT_SKIP_USER_SWITCH=1 \
+        APORT_TARGET_USER="testuser" \
+        APORT_TARGET_HOME="$HOME_DIR" \
+        APORT_DEVICE_ID="device-default-state" \
+        APORT_API_KEY="apk_enrollment_test" \
+        APORT_TEMPLATE_ID="ap_template_test" \
+        APORT_FRAMEWORK="claude-code" \
+        bash "$SCRIPT"
+
+    DEFAULT_STATE_FILE="$DEFAULT_OS_HOME/.aport/enterprise/claude-code/state.env"
+    [ -f "$DEFAULT_STATE_FILE" ] || {
+        echo "FAIL: non-root install should default state to ~/.aport/enterprise/<framework>" >&2
+        exit 1
+    }
+fi
 
 DISABLED_INFO_STATE_DIR="$TMP_DIR/disabled-device-info-state"
 : > "$APORT_TEST_CURL_LOG"
@@ -252,6 +281,64 @@ PATH="$FAKE_BIN:$PATH" \
 
 if grep -q '/instances\|/setup-key' "$APORT_TEST_CURL_LOG"; then
     echo "FAIL: enforce should reuse persisted state without reissuing" >&2
+    cat "$APORT_TEST_CURL_LOG" >&2
+    exit 1
+fi
+
+HOOK_DIR="$TMP_DIR/hooks"
+HEALTHY_HOOK="$HOOK_DIR/aport-claude-code-hook.sh"
+mkdir -p "$HOOK_DIR" "$HOME_DIR/.claude"
+cat > "$HEALTHY_HOOK" << 'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "$HEALTHY_HOOK"
+cat > "$HOME_DIR/.claude/settings.json" << EOF
+{"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"$HEALTHY_HOOK","__aport_hook":true,"timeout":10}]}]}}
+EOF
+
+: > "$APORT_TEST_CURL_LOG"
+: > "$APORT_TEST_NPX_LOG"
+PATH="$FAKE_BIN:$PATH" \
+    APORT_SKIP_USER_SWITCH=1 \
+    APORT_TARGET_USER="testuser" \
+    APORT_TARGET_HOME="$HOME_DIR" \
+    APORT_STATE_DIR="$STATE_DIR" \
+    APORT_DEVICE_ID="device-123" \
+    APORT_API_KEY="apk_enrollment_test" \
+    APORT_TEMPLATE_ID="ap_template_test" \
+    APORT_FRAMEWORK="claude-code" \
+    bash "$ENFORCE_SCRIPT"
+
+if [ -s "$APORT_TEST_NPX_LOG" ]; then
+    echo "FAIL: enforce should not reinstall when active hook target exists and is executable" >&2
+    cat "$APORT_TEST_NPX_LOG" >&2
+    exit 1
+fi
+
+cat > "$HOME_DIR/.claude/settings.json" << 'EOF'
+{"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"/missing/aport-claude-code-hook.sh","__aport_hook":true,"timeout":10}]}]}}
+EOF
+: > "$APORT_TEST_CURL_LOG"
+: > "$APORT_TEST_NPX_LOG"
+PATH="$FAKE_BIN:$PATH" \
+    APORT_SKIP_USER_SWITCH=1 \
+    APORT_TARGET_USER="testuser" \
+    APORT_TARGET_HOME="$HOME_DIR" \
+    APORT_STATE_DIR="$STATE_DIR" \
+    APORT_DEVICE_ID="device-123" \
+    APORT_API_KEY="apk_enrollment_test" \
+    APORT_TEMPLATE_ID="ap_template_test" \
+    APORT_FRAMEWORK="claude-code" \
+    bash "$ENFORCE_SCRIPT"
+
+if ! grep -q 'ARGS=' "$APORT_TEST_NPX_LOG"; then
+    echo "FAIL: enforce should reinstall when hook command points to a missing script" >&2
+    cat "$APORT_TEST_NPX_LOG" >&2
+    exit 1
+fi
+if grep -q '/instances\|/setup-key' "$APORT_TEST_CURL_LOG"; then
+    echo "FAIL: stale hook repair should reuse persisted state without reissuing" >&2
     cat "$APORT_TEST_CURL_LOG" >&2
     exit 1
 fi

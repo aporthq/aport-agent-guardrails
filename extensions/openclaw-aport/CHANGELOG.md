@@ -1,5 +1,13 @@
 # Changelog - APort OpenClaw Plugin
 
+## 1.0.30
+
+### Patch Changes
+
+- Align OpenClaw tool-to-policy mapping with the shared APort mappings for repository and release protection, including `git.*`, `release.publish`, and `git.release`.
+- Enforce `code.release.publish.v1` in local plugin mode with `repo.release` capability, semantic-version checks, required release files, repository allowlists, and optional extension allowlists.
+- Document the added repository/release policy mappings in the OpenClaw integration docs.
+
 ## 1.0.29
 
 ## 1.0.28
