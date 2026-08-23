@@ -38,8 +38,6 @@ Shell commands such as `npm publish`, `pnpm publish`, and `gh release create` ar
 
 The canonical GitHub Repository Guard Action lives in the `agent-passport` repository under `integrations/github/actions/policy-verify/` and is published to `aporthq/policy-verify-action`.
 
-Use the published action after the downstream action PR is released. Until then, APort dogfoods the local action path from `agent-passport`.
-
 ```yaml
 permissions:
   contents: read
@@ -47,10 +45,8 @@ permissions:
   pull-requests: read
 
 steps:
-  - uses: actions/checkout@v4
-
   - name: APort repository guard
-    uses: aporthq/policy-verify-action@v1
+    uses: aporthq/policy-verify-action@v1.0.2
     with:
       mode: auto
 ```
@@ -61,7 +57,7 @@ For blocking enforcement, switch to explicit hosted mode after the org has revie
 
 ```yaml
 - name: APort repository guard
-  uses: aporthq/policy-verify-action@v1
+  uses: aporthq/policy-verify-action@v1.0.2
   with:
     mode: hosted
 ```
@@ -117,6 +113,36 @@ Hosted verification can also use `integrations.github` allowlists on the passpor
 ## Local Smoke Tests
 
 Local checks are intentionally narrow and should be treated as smoke tests, not a replacement for hosted GitHub OIDC verification.
+
+To test the published GitHub Action behavior locally, run the action source in `evidence-only` mode with a synthetic GitHub event. Use a real PR number from the repository if you want the action to fetch changed files and commits from GitHub. This exercises attribution, summary rendering, repository evidence fetches, protected-path checks, and outputs. It does not exercise hosted OIDC because GitHub only issues OIDC tokens inside Actions.
+
+```bash
+cat > /tmp/aport-pr-event.json <<'JSON'
+{
+  "pull_request": {
+    "number": 123,
+    "user": { "login": "octocat", "type": "User" },
+    "head": { "ref": "feature-branch" },
+    "base": { "ref": "staging" }
+  },
+  "repository": { "full_name": "aporthq/aport-agent-guardrails" },
+  "sender": { "login": "octocat", "type": "User" }
+}
+JSON
+
+APORT_MODE=evidence-only \
+GITHUB_EVENT_NAME=pull_request \
+GITHUB_EVENT_PATH=/tmp/aport-pr-event.json \
+GITHUB_REPOSITORY=aporthq/aport-agent-guardrails \
+GITHUB_STEP_SUMMARY=/tmp/aport-summary.md \
+GITHUB_OUTPUT=/tmp/aport-output.txt \
+node /path/to/policy-verify-action/src/index.js
+
+cat /tmp/aport-summary.md
+cat /tmp/aport-output.txt
+```
+
+To verify hosted behavior, push the workflow and open or update a PR. `mode: auto` should request GitHub OIDC, create or reuse a hosted repository/workflow-scoped OAP passport, write a signed APort decision, and fall back to labelled evidence-only only if hosted verification is unavailable.
 
 ```bash
 aport-guardrail git.create_pr '{

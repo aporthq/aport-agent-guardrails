@@ -107,6 +107,13 @@ fi
 assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
 assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.file_forbidden" "reasons[0].code"
 
+if "$GUARDRAIL" release.publish '{"repository":"aporthq/repo","version":"1.2.3","files":["dist/payload"]}' 2> /dev/null; then
+    echo "FAIL: release.publish should DENY extensionless file when extensions are restricted" >&2
+    exit 1
+fi
+assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
+assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.file_forbidden" "reasons[0].code"
+
 echo '{"passport_id":"release-low-assurance","kind":"template","spec_version":"oap/1.0","owner_id":"u","owner_type":"user","assurance_level":"L2","status":"active","capabilities":[{"id":"repo.release"}],"limits":{"allowed_repos":["aporthq/*"],"allowed_extensions":[".tgz"]},"regions":["US"],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","version":"1.0.0"}' > "$OPENCLAW_PASSPORT_FILE"
 if "$GUARDRAIL" release.publish '{"repository":"aporthq/repo","version":"1.2.3","files":["dist/app.tgz"]}' 2> /dev/null; then
     echo "FAIL: release.publish should DENY assurance below L3" >&2

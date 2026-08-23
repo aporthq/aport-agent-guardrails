@@ -108,6 +108,7 @@ export default definePluginEntry({
               })
             : evaluateLocalDecision({
                 policyName: effectivePolicyName,
+                toolName: effectiveToolName,
                 context: requestContext,
                 passportFile,
               });

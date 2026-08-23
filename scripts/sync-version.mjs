@@ -205,14 +205,14 @@ for (const p of pyPackages) {
   }
 }
 
-// Keep the deprecated npm shim pointing at the current package line.
+// Keep the deprecated npm shim installable before the current release exists in npm.
 const deprecatedShimPath = join(root, "packages", "deprecated-agent-guardrails", "package.json");
 try {
   const deprecatedShim = readJson(deprecatedShimPath);
   if (deprecatedShim.dependencies && deprecatedShim.dependencies["@aporthq/aport-agent-guardrails"]) {
-    deprecatedShim.dependencies["@aporthq/aport-agent-guardrails"] = `^${version}`;
+    deprecatedShim.dependencies["@aporthq/aport-agent-guardrails"] = ">=1.0.0";
     writeJson(deprecatedShimPath, deprecatedShim);
-    console.log(`Updated packages/deprecated-agent-guardrails/package.json dependency -> ^${version}`);
+    console.log("Updated packages/deprecated-agent-guardrails/package.json dependency -> >=1.0.0");
   }
 } catch (error) {
   console.warn("sync-version: could not update deprecated npm shim dependency:", error.message);

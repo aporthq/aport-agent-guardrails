@@ -57,18 +57,24 @@ session_log="${APORT_SESSION_DECISIONS_FILE:-$(dirname "$DECISION_FILE")/session
 decision_id=""
 agent_id=""
 
-if [ -f "$DECISION_FILE" ]; then
-    decision_id="$(jq -r '.decision_id // empty' "$DECISION_FILE" 2> /dev/null || true)"
-    agent_id="$(jq -r '.agent_id // .passport_id // empty' "$DECISION_FILE" 2> /dev/null || true)"
-fi
-
-if { [ -z "$decision_id" ] || [ -z "$agent_id" ]; } && [ -f "$session_log" ]; then
-    latest_session_record="$(tail -n 1 "$session_log" 2> /dev/null || true)"
+if [ -f "$session_log" ]; then
+    latest_session_record=""
+    if [ -n "$session_id" ]; then
+        latest_session_record="$(jq -c --arg sid "$session_id" 'select(.session_id == $sid and .decision) | .' "$session_log" 2> /dev/null | tail -n 1 || true)"
+    fi
+    if [ -z "$latest_session_record" ]; then
+        latest_session_record="$(jq -c 'select(.decision) | .' "$session_log" 2> /dev/null | tail -n 1 || true)"
+    fi
     decision_id="$(printf '%s' "$latest_session_record" | jq -r '.decision.decision_id // empty' 2> /dev/null || true)"
     agent_id="$(printf '%s' "$latest_session_record" | jq -r '.decision.agent_id // .decision.passport_id // empty' 2> /dev/null || true)"
     if [ -z "$session_id" ]; then
         session_id="$(printf '%s' "$latest_session_record" | jq -r '.session_id // empty' 2> /dev/null || true)"
     fi
+fi
+
+if { [ -z "$decision_id" ] || [ -z "$agent_id" ]; } && [ -f "$DECISION_FILE" ]; then
+    decision_id="$(jq -r '.decision_id // empty' "$DECISION_FILE" 2> /dev/null || true)"
+    agent_id="$(jq -r '.agent_id // .passport_id // empty' "$DECISION_FILE" 2> /dev/null || true)"
 fi
 
 if [ -z "$session_id" ]; then

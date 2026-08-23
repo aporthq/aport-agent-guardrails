@@ -14,6 +14,10 @@ export APORT_DECISION_FILE="$CONFIG_DIR/decision.json"
 export OPENCLAW_DECISION_FILE="$APORT_DECISION_FILE"
 export APORT_SESSION_DECISIONS_FILE="$CONFIG_DIR/session-decisions.jsonl"
 
+cat > "$APORT_DECISION_FILE" << 'EOF'
+{"decision_id":"dec-stale","agent_id":"ap_stale"}
+EOF
+
 cat > "$APORT_SESSION_DECISIONS_FILE" << 'EOF'
 {"session_id":"sess-old","decision":{"decision_id":"dec-old","agent_id":"ap_old"}}
 {"session_id":"sess-latest","decision":{"decision_id":"dec-latest","agent_id":"ap_latest"}}
