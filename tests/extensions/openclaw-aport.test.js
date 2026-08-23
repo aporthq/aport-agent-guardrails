@@ -101,6 +101,9 @@ describe("mapToolToPolicy", () => {
     assert.strictEqual(mapToolToPolicy("exec.run"), "system.command.execute.v1");
     assert.strictEqual(mapToolToPolicy("git.create_pr"), "code.repository.merge.v1");
     assert.strictEqual(mapToolToPolicy("release.publish"), "code.release.publish.v1");
+    assert.strictEqual(mapToolToPolicy("release", { action: "publish" }), "code.release.publish.v1");
+    assert.strictEqual(mapToolToPolicy("release.list"), null);
+    assert.strictEqual(mapToolToPolicy("release.status"), null);
     assert.strictEqual(mapToolToPolicy("git.release"), "code.release.publish.v1");
     assert.strictEqual(mapToolToPolicy("message", { action: "send" }), "messaging.message.send.v1");
     assert.strictEqual(mapToolToPolicy("message", { action: "react" }), "messaging.message.send.v1");
@@ -464,6 +467,60 @@ describe("local evaluator", () => {
     });
     assert.strictEqual(denyDecision.allow, false);
     assert.strictEqual(denyDecision.reasons[0].code, "oap.path_not_allowed");
+
+    const missingEvidenceDecision = evaluateLocalDecision({
+      policyName: "code.repository.merge.v1",
+      context: {
+        action: "pull_request.update",
+        repository: "aporthq/repo",
+        base_branch: "main",
+      },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(missingEvidenceDecision.allow, false);
+    assert.strictEqual(missingEvidenceDecision.reasons[0].code, "oap.missing_required_context");
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("preserves bare repository allowlist compatibility locally", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "aport-openclaw-repo-name-"));
+    const aportDir = path.join(tempDir, "aport");
+    await mkdir(aportDir, { recursive: true });
+    const passportPath = path.join(aportDir, "passport.json");
+    await writeFile(
+      passportPath,
+      JSON.stringify({
+        spec_version: "oap/1.0",
+        status: "active",
+        passport_id: "ap_repo_name",
+        agent_id: "ap_repo_name",
+        owner_id: "owner-1",
+        assurance_level: "L2",
+        capabilities: [{ id: "repo.pr.create" }],
+        limits: {
+          "code.repository.merge": {
+            max_pr_size_kb: 500,
+            allowed_repos: ["repo"],
+            allowed_base_branches: ["main"],
+            allowed_paths: ["src/**"],
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const decision = evaluateLocalDecision({
+      policyName: "code.repository.merge.v1",
+      context: {
+        action: "pull_request.update",
+        repository: "aporthq/repo",
+        base_branch: "main",
+        files_changed: ["src/index.js"],
+      },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(decision.allow, true);
 
     await rm(tempDir, { recursive: true, force: true });
   });

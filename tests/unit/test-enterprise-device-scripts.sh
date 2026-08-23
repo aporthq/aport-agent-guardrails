@@ -205,25 +205,29 @@ grep -q '"device_id_source":"env"' "$APORT_TEST_CURL_LOG" || {
     exit 1
 }
 
-DEFAULT_OS_HOME="$TMP_DIR/default-os-home"
-mkdir -p "$DEFAULT_OS_HOME"
-: > "$APORT_TEST_CURL_LOG"
-PATH="$FAKE_BIN:$PATH" \
-    HOME="$DEFAULT_OS_HOME" \
-    APORT_SKIP_USER_SWITCH=1 \
-    APORT_TARGET_USER="testuser" \
-    APORT_TARGET_HOME="$HOME_DIR" \
-    APORT_DEVICE_ID="device-default-state" \
-    APORT_API_KEY="apk_enrollment_test" \
-    APORT_TEMPLATE_ID="ap_template_test" \
-    APORT_FRAMEWORK="claude-code" \
-    bash "$SCRIPT"
+if [ "$(id -u)" -eq 0 ]; then
+    echo "  SKIP: non-root default state directory assertion (test process is root)"
+else
+    DEFAULT_OS_HOME="$TMP_DIR/default-os-home"
+    mkdir -p "$DEFAULT_OS_HOME"
+    : > "$APORT_TEST_CURL_LOG"
+    PATH="$FAKE_BIN:$PATH" \
+        HOME="$DEFAULT_OS_HOME" \
+        APORT_SKIP_USER_SWITCH=1 \
+        APORT_TARGET_USER="testuser" \
+        APORT_TARGET_HOME="$HOME_DIR" \
+        APORT_DEVICE_ID="device-default-state" \
+        APORT_API_KEY="apk_enrollment_test" \
+        APORT_TEMPLATE_ID="ap_template_test" \
+        APORT_FRAMEWORK="claude-code" \
+        bash "$SCRIPT"
 
-DEFAULT_STATE_FILE="$DEFAULT_OS_HOME/.aport/enterprise/claude-code/state.env"
-[ -f "$DEFAULT_STATE_FILE" ] || {
-    echo "FAIL: non-root install should default state to ~/.aport/enterprise/<framework>" >&2
-    exit 1
-}
+    DEFAULT_STATE_FILE="$DEFAULT_OS_HOME/.aport/enterprise/claude-code/state.env"
+    [ -f "$DEFAULT_STATE_FILE" ] || {
+        echo "FAIL: non-root install should default state to ~/.aport/enterprise/<framework>" >&2
+        exit 1
+    }
+fi
 
 DISABLED_INFO_STATE_DIR="$TMP_DIR/disabled-device-info-state"
 : > "$APORT_TEST_CURL_LOG"

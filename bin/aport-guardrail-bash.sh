@@ -370,7 +370,31 @@ safe_glob_match_full() {
     [ -z "$value" ] && return 1
 
     regex="$(glob_to_regex "$pattern")"
-    printf '%s\n' "$value" | grep -qiE "^${regex}$"
+    printf '%s\n' "$value" | grep -qE "^${regex}$"
+}
+
+repo_allowed_by_patterns() {
+    local repo="$1"
+    local patterns_json="$2"
+    local repo_name="${repo##*/}"
+    local pattern
+
+    while IFS= read -r pattern; do
+        [ -z "$pattern" ] && continue
+        if safe_glob_match_full "$pattern" "$repo"; then
+            return 0
+        fi
+        case "$pattern" in
+            */* | *\** | *\?*) ;;
+            *)
+                if [ "$repo_name" = "$pattern" ]; then
+                    return 0
+                fi
+                ;;
+        esac
+    done < <(echo "$patterns_json" | jq -r '.[]? // empty' 2> /dev/null)
+
+    return 1
 }
 
 context_repo_action() {
@@ -435,6 +459,10 @@ pattern_count() {
     echo "$1" | jq -r 'if type == "array" then length else 0 end' 2> /dev/null || echo "0"
 }
 
+has_restrictive_patterns() {
+    echo "$1" | jq -e 'type == "array" and length > 0 and (index("*") == null)' > /dev/null 2>&1
+}
+
 assurance_rank() {
     case "${1:-L0}" in
         L0) echo 0 ;;
@@ -490,7 +518,7 @@ if [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
     if [ -n "$REPO" ]; then
         ALLOWED_REPOS_JSON=$(echo "$LIMITS" | jq -c '.allowed_repos // []')
         HAS_ALLOWED_REPOS=$(pattern_count "$ALLOWED_REPOS_JSON")
-        if ! is_allowed_by_patterns "$REPO" "$ALLOWED_REPOS_JSON" && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2> /dev/null; then
+        if ! repo_allowed_by_patterns "$REPO" "$ALLOWED_REPOS_JSON" && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.repo_not_allowed" "Repository '$REPO' is not in allowed list"
         fi
     fi
@@ -512,14 +540,26 @@ if [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
 
     # Check allowed changed paths when configured.
     ALLOWED_PATHS_JSON=$(echo "$LIMITS" | jq -c '.allowed_paths // []')
-    HAS_ALLOWED_PATHS=$(pattern_count "$ALLOWED_PATHS_JSON")
-    if [ "$HAS_ALLOWED_PATHS" -gt 0 ] 2> /dev/null; then
+    if has_restrictive_patterns "$ALLOWED_PATHS_JSON"; then
+        CHANGED_PATHS_JSON=$(echo "$CONTEXT_JSON" | jq -c '
+            [
+              (.files_changed // []),
+              (.files // []),
+              (.file_paths // []),
+              (.paths // [])
+            ]
+            | map(if type == "array" then .[] elif type == "string" then . else empty end)
+        ' 2> /dev/null || echo "[]")
+        CHANGED_PATH_COUNT=$(echo "$CHANGED_PATHS_JSON" | jq -r 'length' 2> /dev/null || echo "0")
+        if [ "${CHANGED_PATH_COUNT:-0}" -eq 0 ] 2> /dev/null; then
+            write_decision false "$POLICY_ID" "oap.missing_required_context" "Repository policy requires changed-file path evidence"
+        fi
         while IFS= read -r changed_path; do
             [ -z "$changed_path" ] && continue
             if ! is_allowed_by_patterns "$changed_path" "$ALLOWED_PATHS_JSON"; then
                 write_decision false "$POLICY_ID" "oap.path_not_allowed" "File path '$changed_path' is not in allowed list"
             fi
-        done < <(echo "$CONTEXT_JSON" | jq -r '(.files_changed // .files // []) | if type == "array" then .[] else empty end' 2> /dev/null)
+        done < <(echo "$CHANGED_PATHS_JSON" | jq -r '.[]? // empty' 2> /dev/null)
     fi
 
     # Lightweight local GitHub integration allowlists. Hosted OIDC and server
@@ -578,7 +618,7 @@ if [[ "$POLICY_ID" == "code.release.publish"* ]]; then
 
     ALLOWED_REPOS_JSON=$(echo "$LIMITS" | jq -c '.allowed_repos // []')
     HAS_ALLOWED_REPOS=$(pattern_count "$ALLOWED_REPOS_JSON")
-    if ! is_allowed_by_patterns "$REPO" "$ALLOWED_REPOS_JSON" && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2> /dev/null; then
+    if ! repo_allowed_by_patterns "$REPO" "$ALLOWED_REPOS_JSON" && [ "$HAS_ALLOWED_REPOS" -gt 0 ] 2> /dev/null; then
         write_decision false "$POLICY_ID" "oap.repo_not_allowed" "Repository '$REPO' is not in allowed release list"
     fi
 

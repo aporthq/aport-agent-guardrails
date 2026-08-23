@@ -44,10 +44,11 @@ aport_try_reuse_existing_hosted_config() {
     local mode_file="$config_dir/aport/guardrail-mode.env"
     [[ -r "$mode_file" ]] || return 1
 
-    local mode agent_id api_key
+    local mode agent_id api_key api_url
     mode="$(aport_quick_hosted_mode_file_value "$mode_file" "APORT_GUARDRAIL_MODE")"
     agent_id="$(aport_quick_hosted_mode_file_value "$mode_file" "APORT_AGENT_ID")"
     api_key="$(aport_quick_hosted_mode_file_value "$mode_file" "APORT_API_KEY")"
+    api_url="$(aport_quick_hosted_mode_file_value "$mode_file" "APORT_API_URL")"
 
     [[ "$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]')" = "api" ]] || return 1
     aport_quick_hosted_is_valid_agent_id "$agent_id" || return 1
@@ -55,6 +56,10 @@ aport_try_reuse_existing_hosted_config() {
     export APORT_AGENT_ID="$agent_id"
     if [[ -n "$api_key" ]]; then
         export APORT_API_KEY="$api_key"
+    fi
+    if [[ -n "$api_url" ]]; then
+        export APORT_API_URL="$api_url"
+        export APORT_SELECTED_API_URL="$api_url"
     fi
     log_info "Found existing hosted passport in $mode_file"
     return 0

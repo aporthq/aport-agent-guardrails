@@ -9,6 +9,13 @@ const MESSAGE_SEND_ACTIONS = new Set([
   "react",
 ]);
 
+const RELEASE_PUBLISH_ACTIONS = new Set([
+  "create",
+  "publish",
+  "release",
+  "upload",
+]);
+
 function firstNonEmpty(...values) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -57,11 +64,14 @@ export function mapToolToPolicy(toolName, params) {
   const tool = rawTool.toLowerCase();
 
   if (
-    tool.startsWith("release.") ||
-    tool.startsWith("repo.release.") ||
+    tool === "release.publish" ||
+    tool === "release.create" ||
+    tool === "repo.release.publish" ||
+    tool === "repo.release.create" ||
     tool === "git.release" ||
     tool.includes("release.publish") ||
-    tool.includes("release.create")
+    tool.includes("release.create") ||
+    ((tool === "release" || tool === "repo.release") && RELEASE_PUBLISH_ACTIONS.has(readAction(params)))
   ) {
     return "code.release.publish.v1";
   }

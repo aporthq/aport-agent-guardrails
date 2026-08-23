@@ -63,6 +63,20 @@ fi
 assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
 assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.path_not_allowed" "reasons[0].code"
 
+if "$GUARDRAIL" git.create_pr '{"repository":"aporthq/repo","action":"pr.update","branch":"feature/x","base_branch":"main"}' 2> /dev/null; then
+    echo "FAIL: pr.update should DENY when restrictive allowed_paths has no changed-file evidence" >&2
+    exit 1
+fi
+assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
+assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.missing_required_context" "reasons[0].code"
+
+if "$GUARDRAIL" git.create_pr '{"repository":"aporthq/repo","action":"pr.update","branch":"feature/x","base_branch":"main","files_changed":["SRC/app.ts"]}' 2> /dev/null; then
+    echo "FAIL: pr.update should DENY differently cased paths outside allowed_paths" >&2
+    exit 1
+fi
+assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
+assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.path_not_allowed" "reasons[0].code"
+
 if "$GUARDRAIL" git.create_pr '{"repository":"aporthq/repo","action":"pr.update","branch":"feature/x","base_branch":"prod","files_changed":["src/app.ts"]}' 2> /dev/null; then
     echo "FAIL: pr.update should check base_branch and DENY forbidden base branch" >&2
     exit 1
