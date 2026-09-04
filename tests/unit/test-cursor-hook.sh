@@ -63,6 +63,31 @@ jq -e '.permission == "deny" and .allowed == false and (.reason | contains("oap.
 }
 echo "  ✅ oversized stdin: fail-closed deny"
 
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+OUT0C="$TEST_DIR/cursor-oversized-input-warn.txt"
+set +e
+echo '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' \
+    | APORT_HOOK_STDIN_MAX_BYTES=20 OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT0C" 2> /dev/null
+EXIT0C=$?
+set -e
+[[ "$EXIT0C" -eq 0 ]] || {
+    echo "FAIL: oversized stdin should allow in warn mode, got $EXIT0C (output: $(cat "$OUT0C"))" >&2
+    exit 1
+}
+jq -e '.permission == "allow" and .allowed == true and (.reason | contains("oap.input_too_large"))' "$OUT0C" > /dev/null || {
+    echo "FAIL: oversized stdin should return Cursor warn JSON with oap.input_too_large" >&2
+    cat "$OUT0C" >&2
+    exit 1
+}
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ oversized stdin: warn mode allows with warning"
+
 # Byte cap must count UTF-8 bytes, not shell characters. Two emoji are 8 bytes.
 # Use octal escapes to keep this source file ASCII-stable.
 # shellcheck source=bin/lib/hook-runtime.sh

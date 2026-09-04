@@ -57,12 +57,34 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
     fi
 fi
 
+emit_cursor_input_too_large() {
+    local notice
+    if aport_hook_is_warn_mode; then
+        notice="$(aport_format_guardrail_notice warn hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
+        if command -v jq > /dev/null 2>&1; then
+            jq -n -c --arg reason "$notice" \
+                '{permission:"allow",allowed:true,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
+        else
+            printf '{"permission":"allow","allowed":true,"agentMessage":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","agent_message":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","user_message":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","reason":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}\n'
+        fi
+        exit 0
+    fi
+
+    notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
+    if command -v jq > /dev/null 2>&1; then
+        jq -n -c --arg reason "$notice" \
+            '{permission:"deny",allowed:false,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
+    else
+        printf '{"permission":"deny","allowed":false,"agentMessage":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","agent_message":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","user_message":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","reason":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}\n'
+    fi
+    exit 2
+}
+
 # Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
 INPUT="$(aport_read_stdin_with_timeout)"
 
 if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
-    echo '{"permission":"deny","allowed":false,"agentMessage":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","agent_message":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","user_message":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","reason":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}'
-    exit 2
+    emit_cursor_input_too_large
 fi
 
 # Empty input means the host did not provide a tool-call payload. Fail closed.
