@@ -20,6 +20,8 @@ const changesetFiles = readdirSync(changesetDir)
 
 let normalizedCount = 0;
 const majorBumps = [];
+const bumpLinePattern =
+  /^(\s*(?:"[^"\r\n]+"|'[^'\r\n]+'|[@A-Za-z0-9_./-]+)\s*:\s*)(["']?)(patch|minor|major)\2(\s*(?:#.*)?)$/gm;
 
 for (const filePath of changesetFiles) {
   const current = readFileSync(filePath, "utf8");
@@ -29,8 +31,8 @@ for (const filePath of changesetFiles) {
   }
 
   const nextFrontmatter = frontmatter[1].replace(
-    /^("[^"]+"\s*:\s*")(patch|minor|major)("\s*)$/gm,
-    (match, prefix, bump, suffix) => {
+    bumpLinePattern,
+    (match, prefix, quote, bump, suffix) => {
       if (bump === "patch" || allowNonPatch) {
         return match;
       }
@@ -39,7 +41,7 @@ for (const filePath of changesetFiles) {
         return match;
       }
       normalizedCount += 1;
-      return `${prefix}patch${suffix}`;
+      return `${prefix}${quote}patch${quote}${suffix}`;
     },
   );
 
