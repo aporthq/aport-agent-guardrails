@@ -34,6 +34,7 @@ class TestAportGuardrailBeforeToolCall:
     def test_deny_returns_false(self, mock_evaluator_cls: MagicMock) -> None:
         """When evaluator returns allow=False, hook returns False (block execution)."""
         hook._crewai_evaluator = None
+        hook._crewai_enforcement_mode = None
         mock_evaluator_cls.return_value.verify_sync.return_value = {
             "allow": False,
             "reasons": [{"code": "oap.command_not_allowed", "message": "Command not in allowlist"}],
@@ -45,6 +46,47 @@ class TestAportGuardrailBeforeToolCall:
         mock_evaluator_cls.return_value.verify_sync.assert_called_once()
         call_args = mock_evaluator_cls.return_value.verify_sync.call_args[0]
         assert call_args[2].get("tool") == "run_command"
+
+    @patch("crewai_adapter.hook.Evaluator")
+    def test_warn_mode_returns_none_on_deny(self, mock_evaluator_cls: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explicit warn mode records the deny decision but allows CrewAI to continue."""
+        hook._crewai_evaluator = None
+        hook._crewai_enforcement_mode = None
+        monkeypatch.setenv("APORT_ENFORCEMENT", "warn")
+        mock_evaluator_cls.return_value.verify_sync.return_value = {
+            "allow": False,
+            "reasons": [{"code": "oap.command_not_allowed", "message": "Command not in allowlist"}],
+        }
+
+        result = aport_guardrail_before_tool_call(_fake_context(tool_input={"command": "rm -rf /"}))
+
+        assert result is None
+
+    @patch("crewai_adapter.hook.Evaluator")
+    def test_warn_mode_sanitizes_display_output(
+        self,
+        mock_evaluator_cls: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Warn mode must not echo control characters or secrets to the terminal."""
+        hook._crewai_evaluator = None
+        hook._crewai_enforcement_mode = None
+        monkeypatch.setenv("APORT_ENFORCEMENT", "warn")
+        mock_evaluator_cls.return_value.verify_sync.return_value = {
+            "allow": False,
+            "reasons": [{"code": "oap.denied\napk_testsecret"}],
+        }
+
+        result = aport_guardrail_before_tool_call(
+            _fake_context(tool_name="run_command\n::stop-commands::x")
+        )
+
+        output = capsys.readouterr().out
+        assert result is None
+        assert "\n::stop-commands::" not in output
+        assert "apk_testsecret" not in output
+        assert "[REDACTED_APORT_KEY]" in output
 
     @patch("crewai_adapter.hook.Evaluator")
     def test_context_input_serialized(self, mock_evaluator_cls: MagicMock) -> None:

@@ -32,7 +32,7 @@ The setup command:
 
 1. Chooses your OpenClaw config directory
 2. Creates a local passport or wires a hosted `agent_id`
-3. Installs the `openclaw-aport` plugin with `openclaw plugins install -l ...`
+3. Installs the `openclaw-aport` plugin with `openclaw plugins install --link ...`
 4. Writes `plugins.entries.openclaw-aport` config into your OpenClaw config files
 5. Installs APort wrappers in `CONFIG_DIR/.skills/` for manual status checks and smoke tests
 
@@ -80,7 +80,8 @@ plugins:
         passportFile: ~/.openclaw/aport/passport.json
         apiUrl: https://api.aport.io
         failClosed: true
-        allowUnmappedTools: true
+        enforcementMode: enforce
+        allowUnmappedTools: false
 ```
 
 Hosted passport mode uses `agentId` instead of `passportFile`:
@@ -96,7 +97,8 @@ plugins:
         agentId: ap_your_agent_id
         apiUrl: https://api.aport.io
         failClosed: true
-        allowUnmappedTools: true
+        enforcementMode: enforce
+        allowUnmappedTools: false
 ```
 
 ## Modes
@@ -117,12 +119,29 @@ Best for privacy-sensitive or offline environments.
 - No `child_process` spawn is required
 - The installer still writes `guardrailScript` wrappers for manual smoke tests and legacy shell tooling, but current plugin versions do not depend on that script for local-mode enforcement
 
+### Enforcement mode
+
+Default enforcement is `enforce`: policy denials, unmapped tools, and evaluator failures block tool execution. To roll out in report-only mode, opt in explicitly:
+
+```bash
+npx @aporthq/aport-agent-guardrails openclaw --enforcement=warn
+```
+
+To change enforcement later without creating a new passport or reinstalling the plugin:
+
+```bash
+npx @aporthq/aport-agent-guardrails mode openclaw --enforcement=warn
+npx @aporthq/aport-agent-guardrails mode openclaw --enforcement=enforce
+```
+
+Warn mode records the original deny decision but lets OpenClaw continue. It is for rollout/audit only, not a secure enforcement mode.
+
 ## Manual install for development
 
 The public path is `npx @aporthq/aport-agent-guardrails openclaw`. If you are developing locally from a checkout, you can install the plugin directly:
 
 ```bash
-openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport
+openclaw plugins install --link /path/to/aport-agent-guardrails/extensions/openclaw-aport
 ```
 
 Then add the same `plugins.entries.openclaw-aport` config shown above.

@@ -55,3 +55,22 @@ class TestAPortCallback:
 
         assert "APort denied" in str(exc_info.value)
         assert exc_info.value.code == "oap.denied"
+
+    @pytest.mark.asyncio
+    async def test_warn_mode_does_not_raise(self):
+        """Explicit warn mode lets LangChain continue while preserving the deny decision."""
+        callback = APortCallback(config_path="/nonexistent", enforcement_mode="warn")
+        callback.evaluator = AsyncMock()
+        callback.evaluator.verify = AsyncMock(
+            return_value={
+                "allow": False,
+                "reasons": [{"code": "oap.command_not_allowed", "message": "Command not in allowlist"}],
+            }
+        )
+
+        await callback.on_tool_start({"name": "run_command"}, None, inputs={"command": "rm -rf /"})
+
+        callback.evaluator.verify.assert_called_once()
+        context = callback.evaluator.verify.call_args[0][2]
+        assert context["tool"] == "run_command"
+        assert context["params"] == {"command": "rm -rf /"}

@@ -7,6 +7,8 @@ import { APortGuardrailCallback, GuardrailViolationError } from './middleware.js
 
 jest.mock('@aporthq/aport-agent-guardrails-core', () => ({
   Evaluator: jest.fn().mockImplementation(() => ({ verify: jest.fn() })),
+  findConfigPath: jest.fn(() => null),
+  loadConfig: jest.fn(() => ({})),
   toolToPackId: jest.fn((name: string) => 'system.command.execute.v1'),
 }));
 
@@ -87,6 +89,28 @@ describe('APortGuardrailCallback', () => {
         undefined
       )
     ).rejects.toThrow('APort policy denied tool execution');
+  });
+
+  it('does not throw on deny when explicit warn mode is configured', async () => {
+    (Evaluator as jest.Mock).mockImplementation(() => ({
+      verify: jest.fn().mockResolvedValue({
+        allow: false,
+        reasons: [{ code: 'oap.command_not_allowed', message: 'Tool not allowed by policy' }],
+      }),
+    }));
+    const callback = new APortGuardrailCallback({ enforcementMode: 'warn' });
+    await expect(
+      callback.handleToolStart(
+        mockTool as any,
+        '{"command":"rm -rf /"}',
+        'run-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'tool-call-1'
+      )
+    ).resolves.toBeUndefined();
   });
 });
 

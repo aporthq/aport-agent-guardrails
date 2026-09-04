@@ -31,7 +31,7 @@ That will:
 If you are working from a local checkout:
 
 ```bash
-openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport
+openclaw plugins install --link /path/to/aport-agent-guardrails/extensions/openclaw-aport
 ```
 
 Then re-run the installer or update `plugins.entries.openclaw-aport` in your config.

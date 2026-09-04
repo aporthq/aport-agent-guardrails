@@ -45,4 +45,29 @@ bash -c '
     exit 1
 }
 
+MALICIOUS_MARKER="$TEST_DIR/mode-injection-executed"
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:8787
+EVIL=$(touch "$MALICIOUS_MARKER")
+EOF
+set +e
+load_guardrail_mode_for_hooks "$TEST_DIR" > "$TEST_DIR/mode-injection.stdout" 2> "$TEST_DIR/mode-injection.stderr"
+INJECTION_EXIT=$?
+set -e
+[ "$INJECTION_EXIT" -ne 0 ] || {
+    echo "FAIL: unsafe guardrail mode key should be rejected" >&2
+    cat "$TEST_DIR/mode-injection.stderr" >&2
+    exit 1
+}
+[ ! -e "$MALICIOUS_MARKER" ] || {
+    echo "FAIL: guardrail mode parser executed shell content" >&2
+    exit 1
+}
+grep -q "Unsupported guardrail mode key" "$TEST_DIR/mode-injection.stderr" || {
+    echo "FAIL: expected unsupported key error for unsafe mode entry" >&2
+    cat "$TEST_DIR/mode-injection.stderr" >&2
+    exit 1
+}
+
 echo "OK test-guardrail-mode-env-export.sh"

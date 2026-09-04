@@ -45,6 +45,24 @@ jq -e '.permission == "deny" and .allowed == false' "$OUT0" > /dev/null || {
 }
 echo "  ✅ empty stdin: fail-closed deny"
 
+OUT0B="$TEST_DIR/cursor-oversized-input.txt"
+set +e
+echo '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' \
+    | APORT_HOOK_STDIN_MAX_BYTES=20 OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT0B" 2> /dev/null
+EXIT0B=$?
+set -e
+[[ "$EXIT0B" -eq 2 ]] || {
+    echo "FAIL: oversized stdin should deny with exit 2, got $EXIT0B (output: $(cat "$OUT0B"))" >&2
+    exit 1
+}
+jq -e '.permission == "deny" and .allowed == false and (.reason | contains("oap.input_too_large"))' "$OUT0B" > /dev/null || {
+    echo "FAIL: oversized stdin should return Cursor deny JSON with oap.input_too_large" >&2
+    cat "$OUT0B" >&2
+    exit 1
+}
+echo "  ✅ oversized stdin: fail-closed deny"
+
 # Helper: run hook with input, check exit code and output
 run_hook() {
     local desc="$1" input="$2" expect_exit="$3" expect_field="$4"
@@ -95,6 +113,9 @@ run_hook "preToolUse read_file: allow (args path)" \
 
 run_hook "preToolUse Read: deny (.env sensitive path)" \
     '{"tool_name":"Read","tool_input":{"file_path":"/repo/.env.local"}}' 2 '"permission":"deny"'
+
+run_hook "preToolUse present_file: deny (.env sensitive path)" \
+    '{"tool_name":"present_file","tool_input":{"path":"/repo/.env.local"}}' 2 '"permission":"deny"'
 
 # --- preToolUse: Grep (allow without evaluator) ---
 run_hook "preToolUse Grep: allow (no evaluator)" \
@@ -163,6 +184,32 @@ APORT_API_URL=http://127.0.0.1:9
 EOF
 run_hook "Mode=api with unreachable API: deny" \
     '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 2 '"permission":"deny"'
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=warn
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+APORT_API_KEY=apk_cursor_secret_should_redact
+EOF
+run_hook "Mode=api warn with unreachable API: allow with warning" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
+WARN_OUT="$(ls -t "$TEST_DIR"/hook-out-*.txt | head -n 1)"
+grep -q "APort warning" "$WARN_OUT" || {
+    echo "FAIL: warn mode should emit APort warning" >&2
+    cat "$WARN_OUT" >&2
+    exit 1
+}
+grep -q "https://aport.io/passports?details=ap_1234567890abcdef1234567890abcdef" "$WARN_OUT" || {
+    echo "FAIL: hosted warn message should include passport review link" >&2
+    cat "$WARN_OUT" >&2
+    exit 1
+}
+if grep -q "apk_cursor_secret" "$WARN_OUT"; then
+    echo "FAIL: warning output must not leak API keys" >&2
+    cat "$WARN_OUT" >&2
+    exit 1
+fi
 
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local

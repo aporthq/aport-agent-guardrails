@@ -181,6 +181,22 @@ class TestApiMode:
         assert r.allow is False
         assert r.reasons[0].code == "oap.command_not_allowed"
 
+    @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)
+    @patch("aport_guardrails.providers.generic.Evaluator")
+    def test_warn_mode_preserves_original_deny_metadata(self, mock_eval_cls, mock_find):
+        mock_eval = MagicMock()
+        mock_eval.verify_sync.return_value = {
+            "allow": False,
+            "reasons": [{"code": "oap.command_not_allowed", "message": "blocked by policy"}],
+        }
+        mock_eval_cls.return_value = mock_eval
+
+        p = OAPGuardrailProvider(framework="deerflow", enforcement_mode="warn")
+        r = p.evaluate(_request("bash", {"command": "bad"}, agent_id="ap_test"))
+        assert r.allow is True
+        assert r.reasons[0].code == "oap.command_not_allowed"
+        assert r.metadata == {"enforcement_mode": "warn", "original_allow": False}
+
 
 # -- DeerFlow tool name to OAP policy pack mapping --
 

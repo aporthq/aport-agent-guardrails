@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENT="$ROOT/enterprise-scripts"
 CORE="$ENT/aport-device-core.mjs"
-DIST="$ROOT/dist/enterprise-scripts"
+DIST="${APORT_BUNDLE_DIST_DIR:-$ROOT/dist/enterprise-scripts}"
 VERSION="${APORT_BUNDLE_VERSION:-$(node -p "require('$ROOT/package.json').version")}"
 
 header_through_config() {

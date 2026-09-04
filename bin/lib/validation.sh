@@ -255,14 +255,22 @@ sanitize_log_value() {
         return 0
     fi
 
-    # Check for API key patterns (aprt_, sk_, pk_, Bearer)
-    if echo "$value" | grep -qE '^(aprt_|sk_|pk_)'; then
-        echo "${value:0:4}****"
-        return 0
-    fi
+    value="$(printf '%s' "$value" | tr '\r\n' '  ')"
+    value="$(printf '%s' "$value" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
+    value="$(printf '%s' "$value" | sed -E \
+        -e 's/apk_[A-Za-z0-9_-]+/[REDACTED_APORT_KEY]/g' \
+        -e 's/aprt_[A-Za-z0-9_-]+/[REDACTED_APORT_KEY]/g' \
+        -e 's/github_pat_[A-Za-z0-9_]+/[REDACTED_GITHUB_TOKEN]/g' \
+        -e 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED_GITHUB_TOKEN]/g' \
+        -e 's/xox[baprs]-[A-Za-z0-9-]+/[REDACTED_SLACK_TOKEN]/g' \
+        -e 's/AKIA[0-9A-Z]{16}/[REDACTED_AWS_KEY]/g' \
+        -e 's/(Authorization: Bearer|Authorization:|Bearer) +[A-Za-z0-9._~+\/=-]+/\1 [REDACTED]/g' \
+        -e 's/(password|passwd|pwd|token|secret|api[_-]?key)=([^[:space:]]+)/\1=[REDACTED]/g' \
+        -e 's/-----BEGIN [A-Z ]*PRIVATE KEY-----[^-]*-----END [A-Z ]*PRIVATE KEY-----/[REDACTED_PRIVATE_KEY]/g')"
 
-    if echo "$value" | grep -qiE '^Bearer '; then
-        echo "Bearer ****"
+    # Check for remaining API key patterns (sk_, pk_)
+    if echo "$value" | grep -qE '^(sk_|pk_)'; then
+        echo "${value:0:4}****"
         return 0
     fi
 
