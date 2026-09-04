@@ -56,7 +56,8 @@ run_setup() {
     if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
         export APORT_API_URL="${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
     fi
-    MODE_FILE="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id")"
+    select_guardrail_enforcement
+    MODE_FILE="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id" "$APORT_SELECTED_ENFORCEMENT")"
 
     # Resolve absolute path to hook script (works from repo or npx package)
     HOOK_SCRIPT="$(resolve_hook_script_path "${APORT_CURSOR_HOOK_SCRIPT:-}" "aport-cursor-hook.sh" "$LIB")"
@@ -85,7 +86,7 @@ run_setup() {
         # Replace marker-owned or legacy APort entries, preserve non-APort hooks.
         NEW_HOOKS=$(jq -c --arg cmd "$HOOK_SCRIPT" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" '
         def aport_hook($cmd; $marker; $timeout):
-          { "command": $cmd, ($marker): true, "timeout": $timeout };
+          { "command": $cmd, ($marker): true, "timeout": $timeout, "failClosed": true };
         def is_aport_cursor_hook:
           (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-cursor-hook\\.sh($|[[:space:]])"));
         def upsert_hook:
@@ -95,6 +96,7 @@ run_setup() {
         .hooks.beforeShellExecution = ((.hooks.beforeShellExecution // []) | upsert_hook) |
         .hooks.preToolUse = ((.hooks.preToolUse // []) | upsert_hook) |
         .hooks.beforeMCPExecution = ((.hooks.beforeMCPExecution // []) | upsert_hook) |
+        .hooks.beforeReadFile = ((.hooks.beforeReadFile // []) | upsert_hook) |
         .hooks.subagentStart = ((.hooks.subagentStart // []) | upsert_hook)
       ' "$CURSOR_HOOKS_FILE")
         cp "$CURSOR_HOOKS_FILE" "${CURSOR_HOOKS_FILE}.bak"
@@ -110,6 +112,7 @@ run_setup() {
     echo "  1. Hooks config written to: $CURSOR_HOOKS_FILE"
     echo "  2. Hook script: $HOOK_SCRIPT"
     echo "  3. Guardrail mode: $APORT_SELECTED_GUARDRAIL_MODE"
+    echo "     Enforcement: $APORT_SELECTED_ENFORCEMENT"
     if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
         echo "     API URL: ${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
     fi
@@ -128,10 +131,11 @@ _write_cursor_hooks_file() {
         jq -n -c --arg cmd "$cmd" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" '{
       version: 1,
       hooks: {
-        beforeShellExecution: [{ command: $cmd, ($marker): true, timeout: $timeout }],
-        preToolUse: [{ command: $cmd, ($marker): true, timeout: $timeout }],
-        beforeMCPExecution: [{ command: $cmd, ($marker): true, timeout: $timeout }],
-        subagentStart: [{ command: $cmd, ($marker): true, timeout: $timeout }]
+        beforeShellExecution: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }],
+        preToolUse: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }],
+        beforeMCPExecution: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }],
+        beforeReadFile: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }],
+        subagentStart: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }]
       }
     }' > "$file"
     else
@@ -141,10 +145,11 @@ _write_cursor_hooks_file() {
 {
   "version": 1,
   "hooks": {
-    "beforeShellExecution": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10}],
-    "preToolUse": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10}],
-    "beforeMCPExecution": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10}],
-    "subagentStart": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10}]
+    "beforeShellExecution": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}],
+    "preToolUse": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}],
+    "beforeMCPExecution": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}],
+    "beforeReadFile": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}],
+    "subagentStart": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}]
   }
 }
 EOF

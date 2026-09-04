@@ -7,10 +7,11 @@ The request object needs .tool_name (str), .tool_input (dict), and optionally
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from aport_guardrails.core import Evaluator, build_tool_context, tool_to_pack_id
-from aport_guardrails.core.config import find_config_path
+from aport_guardrails.core.config import find_config_path, load_config
 
 
 class OAPGuardrailProvider:
@@ -31,9 +32,21 @@ class OAPGuardrailProvider:
 
     name = "aport"
 
-    def __init__(self, framework: str = "generic", config_path: str | None = None):
+    def __init__(
+        self,
+        framework: str = "generic",
+        config_path: str | None = None,
+        enforcement_mode: str | None = None,
+    ):
+        resolved_config_path = config_path or find_config_path(framework)
+        loaded_config = load_config(resolved_config_path) if resolved_config_path else {}
+        self._enforcement_mode = _normalize_enforcement_mode(
+            enforcement_mode
+            or loaded_config.get("enforcement_mode")
+            or loaded_config.get("enforcementMode")
+        )
         self._evaluator = Evaluator(
-            config_path or find_config_path(framework),
+            resolved_config_path,
             framework=framework,
         )
 
@@ -64,7 +77,7 @@ class OAPGuardrailProvider:
             {"capability": pack_id},
             tool_ctx,
         )
-        return _to_result(decision, pack_id)
+        return _to_result(decision, pack_id, self._enforcement_mode)
 
     async def aevaluate(self, request: Any) -> _ProviderResult:
         """Async evaluation."""
@@ -75,7 +88,7 @@ class OAPGuardrailProvider:
             {"capability": pack_id},
             tool_ctx,
         )
-        return _to_result(decision, pack_id)
+        return _to_result(decision, pack_id, self._enforcement_mode)
 
 
 class _Reason:
@@ -91,15 +104,51 @@ class _Reason:
 class _ProviderResult:
     """Lightweight result object. Attrs match what framework middlewares read."""
 
-    __slots__ = ("allow", "reasons", "policy_id")
+    __slots__ = ("allow", "reasons", "policy_id", "metadata")
 
-    def __init__(self, allow: bool, reasons: list[_Reason], policy_id: str):
+    def __init__(
+        self,
+        allow: bool,
+        reasons: list[_Reason],
+        policy_id: str,
+        metadata: dict[str, Any] | None = None,
+    ):
         self.allow = allow
         self.reasons = reasons
         self.policy_id = policy_id
+        self.metadata = metadata or {}
 
 
-def _to_result(decision: dict, pack_id: str) -> _ProviderResult:
+def _to_result(
+    decision: dict,
+    pack_id: str,
+    enforcement_mode: str = "enforce",
+) -> _ProviderResult:
     raw = decision.get("reasons") or []
     reasons = [_Reason(r.get("code", "oap.denied"), r.get("message", "")) for r in raw]
-    return _ProviderResult(allow=decision.get("allow", False), reasons=reasons, policy_id=pack_id)
+    original_allow = bool(decision.get("allow", False))
+    effective_allow = True if enforcement_mode == "warn" else original_allow
+    metadata = (
+        {"enforcement_mode": enforcement_mode, "original_allow": original_allow}
+        if enforcement_mode == "warn" or effective_allow != original_allow
+        else None
+    )
+    return _ProviderResult(
+        allow=effective_allow,
+        reasons=reasons,
+        policy_id=pack_id,
+        metadata=metadata,
+    )
+
+
+def _normalize_enforcement_mode(value: Any) -> str:
+    raw = str(
+        value
+        or os.environ.get("APORT_ENFORCEMENT_MODE")
+        or os.environ.get("APORT_ENFORCEMENT")
+        or os.environ.get("APORT_GUARDRAIL_ENFORCEMENT")
+        or ""
+    ).strip().lower()
+    if raw in {"warn", "report-only", "report_only", "audit-only", "audit_only"}:
+        return "warn"
+    return "enforce"

@@ -1,0 +1,94 @@
+name: Framework Drift Watch
+
+on:
+  schedule:
+    - cron: "23 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  framework-drift:
+    name: Check upstream framework drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run framework drift check
+        run: |
+          set -euo pipefail
+          node scripts/framework-drift-check.mjs \
+            --json framework-drift-report.json \
+            --markdown framework-drift-report.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Write job summary
+        if: always()
+        run: |
+          if [ -f framework-drift-report.md ]; then
+            cat framework-drift-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload framework drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-drift-report
+          path: |
+            framework-drift-report.json
+            framework-drift-report.md
+          if-no-files-found: ignore
+
+      - name: Summarize drift
+        id: drift
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f framework-drift-report.json ]; then
+            echo "has_drift=true" >> "$GITHUB_OUTPUT"
+            echo "drift_count=unknown" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node -e '
+            const fs = require("node:fs");
+            const report = JSON.parse(fs.readFileSync("framework-drift-report.json", "utf8"));
+            const drift = Number(report.summary?.driftCount || 0);
+            const errors = Number(report.summary?.errorCount || 0);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `has_drift=${drift > 0 || errors > 0}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `drift_count=${drift}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `error_count=${errors}\n`);
+          '
+
+      - name: Create or update framework drift issue
+        if: steps.drift.outputs.has_drift == 'true'
+        run: |
+          set -euo pipefail
+          gh label create framework-drift \
+            --color 0ea5e9 \
+            --description "Upstream agent framework docs or releases changed" \
+            2>/dev/null || true
+
+          existing="$(gh issue list \
+            --label framework-drift \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file framework-drift-report.md
+          else
+            gh issue create \
+              --title "Framework drift review required" \
+              --label framework-drift \
+              --body-file framework-drift-report.md
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

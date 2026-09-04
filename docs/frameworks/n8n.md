@@ -25,6 +25,7 @@ npx @aporthq/aport-agent-guardrails n8n
 # Optional mode flags:
 #   --mode=api --api-url=https://api.aport.io
 #   --mode=local
+#   --enforcement=warn   # stores explicit report-only config for future node/runtime use
 # Runs passport wizard and writes config only. Custom node is NOT yet available.
 # When the node is released, it will install to ~/.n8n/custom/ and you will restart n8n.
 ```

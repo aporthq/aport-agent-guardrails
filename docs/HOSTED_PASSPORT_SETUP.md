@@ -1,4 +1,4 @@
-# Using Hosted Passports with OpenClaw
+# Using Hosted Passports
 
 **For users who created a passport at [aport.io/builder/create](https://aport.io/builder/create)**
 
@@ -6,10 +6,10 @@
 
 ## Overview
 
-You have two options when using APort guardrails with OpenClaw:
+You have two options when using APort guardrails with supported runtime frameworks:
 
-1. **Local Passport** (Default): Create passport with CLI wizard → stored at `~/.openclaw/aport/passport.json`
-2. **Hosted Passport** (This Guide): Create passport at aport.io → Use `agent_id` only, no download needed
+1. **Hosted Passport** (recommended): Create or select a passport in APort → use `agent_id` only, no local passport JSON needed.
+2. **Local Passport**: Create a passport with the CLI wizard → store it in the framework config directory.
 
 **Why Hosted?**
 - ✅ **Global Kill Switch**: Suspend passport instantly from dashboard (all agents stop < 15s)
@@ -25,7 +25,7 @@ You have two options when using APort guardrails with OpenClaw:
 **Step 1: Create Passport at aport.io**
 
 1. Visit [https://aport.io/builder/create](https://aport.io/builder/create)
-2. Select framework: **OpenClaw**
+2. Select your framework: **Claude Code**, **Cursor**, **OpenClaw**, **LangChain**, **CrewAI**, **DeerFlow**, or **n8n**
 3. Fill agent name and limits, then click "Create Passport"
 4. On the success page you’ll see an **agent_id** (e.g. `ap_abc123def456...`) and often a ready-to-run command.
 
@@ -34,7 +34,7 @@ You have two options when using APort guardrails with OpenClaw:
 **Option A — One command:**
 
 ```bash
-npx @aporthq/aport-agent-guardrails openclaw
+npx @aporthq/aport-agent-guardrails <framework>
 ```
 
 When prompted for passport setup, choose option `1`:
@@ -48,21 +48,21 @@ The installer creates a passport, creates a narrow setup key, and configures the
 Non-interactive hosted setup uses the same dispatcher:
 
 ```bash
-npx --yes @aporthq/aport-agent-guardrails openclaw \
+npx --yes @aporthq/aport-agent-guardrails claude-code \
   --quick-hosted \
   --email you@example.com \
   --non-interactive
 ```
 
-Use `--api-url https://your-aport.example` for a private APort deployment; non-interactive OpenClaw setup uses defaults for config directory and strict mode.
+Use `--api-url https://your-aport.example` for a private APort deployment. Non-interactive setup uses framework defaults for config directory and strict mode.
 
 If you already have your agent_id, pass it directly:
 
 ```bash
-npx @aporthq/aport-agent-guardrails openclaw <agent_id>
+npx @aporthq/aport-agent-guardrails <framework> <agent_id>
 ```
 
-Example: `npx @aporthq/aport-agent-guardrails openclaw ap_fa2f6d53bb5b4c98b9af0124285b6e0f`. The CLI skips passport creation and configures the plugin to use your hosted passport.
+Example: `npx @aporthq/aport-agent-guardrails claude-code ap_fa2f6d53bb5b4c98b9af0124285b6e0f`. The CLI skips passport creation and configures the runtime hook to use your hosted passport.
 
 **Option B — Interactive:**
 
@@ -70,7 +70,9 @@ Example: `npx @aporthq/aport-agent-guardrails openclaw ap_fa2f6d53bb5b4c98b9af01
 npx @aporthq/aport-agent-guardrails
 ```
 
-When prompted for passport, create a hosted passport or paste an existing `agent_id`. Config directory default: `~/.openclaw`. Plugin mode will be API (required for hosted).
+When prompted for passport, create a hosted passport or paste an existing `agent_id`. The config directory defaults to the selected framework's APort directory. API mode is required for hosted passports.
+
+The OpenClaw-specific examples below show plugin configuration details. Claude Code and Cursor use their own framework hook files, but the hosted-passport model is the same: the hook stores `agent_id`, sends action context to APort Verify, and receives an allow/deny decision.
 
 **Step 3: Start OpenClaw**
 
@@ -123,6 +125,8 @@ plugins:
         agentId: ap_abc123def456...  # Your hosted passport ID
         apiUrl: https://api.aport.io
         failClosed: true
+        enforcementMode: enforce
+        allowUnmappedTools: false
 ```
 
 **Note:** When `agentId` is set, the plugin uses it instead of reading `passportFile`.
@@ -155,8 +159,9 @@ plugins:
         # Fail-closed: block on error (default: true)
         failClosed: true
 
-        # Allow unmapped tools (custom skills/ClawHub)
-        allowUnmappedTools: true
+        # Fail closed on new/unknown tools unless explicitly relaxed
+        enforcementMode: enforce
+        allowUnmappedTools: false
 ```
 
 **Then restart OpenClaw:**
@@ -341,6 +346,8 @@ config:
   agentId: ap_your_agent_id
   apiUrl: https://your-aport-api.company.com  # YOUR API
   failClosed: true
+  enforcementMode: enforce
+  allowUnmappedTools: false
 ```
 
 **Deploy APort API:**
@@ -357,6 +364,9 @@ A: No. Local mode requires a passport file. Use API mode with hosted passports.
 
 **Q: What if API goes down?**
 A: With `failClosed: true` (default), all tool calls are blocked. Set `failClosed: false` to allow on error (NOT RECOMMENDED for security).
+
+**Q: How do I roll out without blocking developers?**
+A: Keep `failClosed: true`, but set `enforcementMode: warn` or run `npx @aporthq/aport-agent-guardrails mode <framework> --enforcement=warn`. This records the original deny decision while allowing the framework action to continue. Switch back to `--enforcement=enforce` when the passport is tuned.
 
 **Q: Can I create multiple hosted passports?**
 A: Yes! Free tier: 1 passport. Beta/Pro: Unlimited. Each passport has unique `agent_id`.

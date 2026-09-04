@@ -44,6 +44,31 @@ grep -q 'permissionDecision.*deny' "$OUT0" || {
 }
 echo "  ✅ Empty input: structured deny"
 
+# 0b. Deny: oversized stdin must fail closed before JSON parsing
+echo "  Test: oversized stdin -> structured deny..."
+OUT0B="$TEST_DIR/claude-oversized-input.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+    | APORT_HOOK_STDIN_MAX_BYTES=20 OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT0B" 2> /dev/null
+EXIT0B=$?
+set -e
+[[ "$EXIT0B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for oversized input, got $EXIT0B" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT0B" || {
+    echo "FAIL: expected structured deny payload for oversized input" >&2
+    cat "$OUT0B" >&2
+    exit 1
+}
+grep -q 'oap.input_too_large' "$OUT0B" || {
+    echo "FAIL: expected oversized input deny code" >&2
+    cat "$OUT0B" >&2
+    exit 1
+}
+echo "  ✅ Oversized input: structured deny"
+
 # 1. Allow: Read with allowed path (local evaluator)
 echo "  Test: Read tool -> allow (allowed path)..."
 OUT1="$TEST_DIR/claude-allow-read.txt"
@@ -181,6 +206,45 @@ EXIT7=$?
 echo "  ✅ Shell alias: exit 0"
 
 # 8. mode selection (api -> deny on unreachable API; local -> allow)
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=warn
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+APORT_API_KEY=apk_claude_secret_should_redact
+EOF
+OUT8W="$TEST_DIR/claude-api-mode-warn.txt"
+echo "  Test: API mode warn with unreachable endpoint -> allow..."
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT8W" 2> /dev/null
+EXIT8W=$?
+set -e
+[[ "$EXIT8W" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 in warn mode, got $EXIT8W" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*allow' "$OUT8W" || {
+    echo "FAIL: expected allow payload in warn mode" >&2
+    cat "$OUT8W" >&2
+    exit 1
+}
+grep -q 'APort warning' "$OUT8W" || {
+    echo "FAIL: expected warn-mode message" >&2
+    cat "$OUT8W" >&2
+    exit 1
+}
+grep -q 'https://aport.io/passports?details=ap_1234567890abcdef1234567890abcdef' "$OUT8W" || {
+    echo "FAIL: hosted warn message should include passport review link" >&2
+    cat "$OUT8W" >&2
+    exit 1
+}
+if grep -q 'apk_claude_secret' "$OUT8W"; then
+    echo "FAIL: warning output must not leak API keys" >&2
+    cat "$OUT8W" >&2
+    exit 1
+fi
+echo "  ✅ API mode warn allows with sanitized warning"
+
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=api
 APORT_API_URL=http://127.0.0.1:9

@@ -1,5 +1,5 @@
 # Release: publish to npm (root + workspace packages) and PyPI, then create GitHub Release.
-# Trigger: push a tag v* (e.g. v1.0.8). Run `npm run version` and commit before tagging.
+# Trigger: push a tag v* (e.g. v1.0.8) or dispatch with a version after `npm run version` is merged.
 # Root package @aporthq/aport-agent-guardrails exposes bin/agent-guardrails (CLI). Published workspace
 # packages include core, langchain, crewai, cursor, claude-code, @aporthq/openclaw-aport, and the
 # deprecated compatibility alias. n8n is not published yet (coming soon).
@@ -23,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: recursive
 
       - uses: actions/setup-node@v4
@@ -39,6 +40,22 @@ jobs:
             VERSION="${{ github.event.inputs.version }}"
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release ref is main-backed
+        run: |
+          set -euo pipefail
+          git fetch origin main --force
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Manual releases must be dispatched from refs/heads/main."
+            exit 1
+          fi
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_SHA="$(git rev-parse "${GITHUB_REF}^{commit}")"
+            if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+              echo "::error::Release tag ${GITHUB_REF#refs/tags/} does not point to a commit reachable from origin/main."
+              exit 1
+            fi
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -64,8 +81,74 @@ jobs:
           APORT_SKIP_REMOTE_PASSPORT_TEST="${APORT_SKIP_REMOTE_PASSPORT_TEST:-1}" make test
           git diff --check
 
-  publish-npm:
+  ensure-release-tag:
     needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid release version: $VERSION"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify version matches release version
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+          ROOT_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$ROOT_VERSION" ]; then
+            echo "::error::Version mismatch: requested release is v$TAG_VERSION but root package.json has $ROOT_VERSION. Run 'npm run version' and commit before releasing."
+            exit 1
+          fi
+          echo "Version OK: $TAG_VERSION"
+
+      - name: Ensure release tag exists
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          TAG="v${VERSION}"
+          CURRENT_SHA="$(git rev-parse HEAD)"
+
+          git fetch --tags --force
+
+          EXISTING_SHA="$(git rev-list -n 1 "$TAG" 2>/dev/null || true)"
+          if [ -n "$EXISTING_SHA" ]; then
+            if [ "$EXISTING_SHA" != "$CURRENT_SHA" ]; then
+              echo "::error::Tag ${TAG} already points at ${EXISTING_SHA}, not ${CURRENT_SHA}."
+              exit 1
+            fi
+            echo "Release tag ${TAG} already points at ${CURRENT_SHA}."
+            exit 0
+          fi
+
+          git config user.name "APort Release Bot"
+          git config user.email "release@aport.io"
+          git tag -a "$TAG" -m "Release ${TAG}"
+          git push origin "$TAG"
+
+  publish-npm:
+    needs: ensure-release-tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -187,7 +270,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-python:
-    needs: validate
+    needs: ensure-release-tag
     runs-on: ubuntu-latest
     env:
       TWINE_USERNAME: __token__

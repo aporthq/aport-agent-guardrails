@@ -102,13 +102,13 @@ grep -q '^        apiUrl: http://127.0.0.1:9$' "$CONFIG_YAML" || {
     exit 1
 }
 
-grep -q '^        allowUnmappedTools: true$' "$CONFIG_YAML" || {
-    echo "FAIL: non-interactive strict mode default should allow unmapped tools" >&2
+grep -q '^        allowUnmappedTools: false$' "$CONFIG_YAML" || {
+    echo "FAIL: non-interactive default should block unmapped tools" >&2
     cat "$CONFIG_YAML" >&2
     exit 1
 }
 
-awk '{ print; if ($0 == "        allowUnmappedTools: true") print "        mapExecToPolicy: false" }' "$CONFIG_YAML" > "$CONFIG_YAML.tmp"
+awk '{ print; if ($0 == "        allowUnmappedTools: false") print "        mapExecToPolicy: false" }' "$CONFIG_YAML" > "$CONFIG_YAML.tmp"
 mv "$CONFIG_YAML.tmp" "$CONFIG_YAML"
 
 PATH="$FAKE_BIN:$PATH" \
@@ -127,8 +127,8 @@ PATH="$FAKE_BIN:$PATH" \
     exit 1
 }
 
-grep -q '^        agentId: "ap_fedcba9876543210fedcba9876543210"$' "$CONFIG_YAML" || {
-    echo "FAIL: existing config.yaml should update hosted agent id on rerun" >&2
+grep -q '^        agentId: "ap_1234567890abcdef1234567890abcdef"$' "$CONFIG_YAML" || {
+    echo "FAIL: quick-hosted rerun should reuse existing hosted passport id" >&2
     cat "$CONFIG_YAML" >&2
     exit 1
 }

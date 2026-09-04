@@ -2,7 +2,7 @@
 # APort Cursor hook: reads JSON from stdin, maps tool to APort policy, calls guardrail.
 # Handles all Cursor hook events: beforeShellExecution, preToolUse, beforeMCPExecution,
 # beforeReadFile, subagentStart.
-# Output: JSON with "permission": "allow"|"deny"; optional "agentMessage"/"user_message".
+# Output: JSON with "permission": "allow"|"deny"; optional native and legacy message fields.
 # Exit: 0 = allow, 2 = block (deny). Other exits = hook error (Cursor may fail-open).
 #
 # Cursor preToolUse tool names vary by Cursor version. Keep mappings conservative
@@ -18,10 +18,10 @@ __aport_emit_crash_deny() {
     local line_no="$1"
     local script_name
     script_name="$(basename "${BASH_SOURCE[0]:-aport-cursor-hook}")"
-    local reason="🛡️ APort: hook internal error (exit=${exit_code} at ${script_name}:${line_no}). Run with DEBUG_APORT=1 for details."
+    local reason="APort denied this tool call. Policy: hook.runtime. Reason: oap.hook_error. Detail: ${script_name}:${line_no} exited ${exit_code}."
     if command -v jq > /dev/null 2>&1; then
         jq -n -c --arg reason "$reason" \
-            '{permission:"deny",allowed:false,agentMessage:$reason,reason:$reason}' 2> /dev/null \
+            '{permission:"deny",allowed:false,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}' 2> /dev/null \
             || printf '{"permission":"deny","allowed":false,"agentMessage":"%s","reason":"%s"}\n' "$reason" "$reason"
     else
         printf '{"permission":"deny","allowed":false,"agentMessage":"%s","reason":"%s"}\n' "$reason" "$reason"
@@ -60,15 +60,20 @@ fi
 # Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
 INPUT="$(aport_read_stdin_with_timeout)"
 
+if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
+    echo '{"permission":"deny","allowed":false,"agentMessage":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","agent_message":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","user_message":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","reason":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}'
+    exit 2
+fi
+
 # Empty input means the host did not provide a tool-call payload. Fail closed.
 if [ -z "$INPUT" ]; then
-    echo '{"permission":"deny","allowed":false,"agentMessage":"🛡️ APort: empty hook input — fail-closed policy","reason":"🛡️ APort: empty hook input — fail-closed policy"}'
+    echo '{"permission":"deny","allowed":false,"agentMessage":"🛡️ APort: empty hook input — fail-closed policy","agent_message":"🛡️ APort: empty hook input — fail-closed policy","user_message":"🛡️ APort: empty hook input — fail-closed policy","reason":"🛡️ APort: empty hook input — fail-closed policy"}'
     exit 2
 fi
 
 # Require jq for JSON parsing
 if ! command -v jq &> /dev/null; then
-    echo '{"permission":"deny","allowed":false,"agentMessage":"APort: jq is required"}'
+    echo '{"permission":"deny","allowed":false,"agentMessage":"APort: jq is required","agent_message":"APort: jq is required","user_message":"APort: jq is required","reason":"APort: jq is required"}'
     exit 2
 fi
 
@@ -76,8 +81,28 @@ fi
 deny() {
     local reason="$1"
     jq -n -c --arg reason "$reason" \
-        '{permission:"deny",allowed:false,agentMessage:$reason,reason:$reason}'
+        '{permission:"deny",allowed:false,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
     exit 2
+}
+
+warn_allow() {
+    local reason="$1"
+    jq -n -c --arg reason "$reason" \
+        '{permission:"allow",allowed:true,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
+    exit 0
+}
+
+deny_or_warn() {
+    local policy="$1"
+    local code="${2:-oap.denied}"
+    local message="${3:-}"
+    local notice
+    if aport_hook_is_warn_mode; then
+        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
+        warn_allow "$notice"
+    fi
+    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
+    deny "$notice"
 }
 
 allow() {
@@ -86,7 +111,7 @@ allow() {
 }
 
 if ! printf '%s' "$INPUT" | jq -e . > /dev/null 2>&1; then
-    deny "🛡️ APort: invalid hook JSON — fail-closed policy"
+    deny "$(aport_format_guardrail_notice deny hook.input oap.invalid_json "Invalid hook JSON")"
 fi
 
 # Safe jq extraction: returns '{}' on any jq error
@@ -102,7 +127,7 @@ safe_jq() {
 # Cursor sends different JSON shapes per hook event:
 #   beforeShellExecution: { "command": "...", "cwd": "..." }
 #   preToolUse:           { "tool_name": "Shell|Read|Write|...", "tool_input": {...} }
-#   beforeMCPExecution:   { "tool_name": "...", "tool_input": {...}, "server": "..." }
+#   beforeMCPExecution:   { "tool_name": "...", "tool_input": {...}, "mcp_server_name": "..." }
 #   beforeReadFile:       { "file_path": "...", "content": "..." }
 #   subagentStart:        { "subagent_id": "...", "subagent_type": "...", "task": "..." }
 # We detect by checking for distinguishing fields.
@@ -125,10 +150,24 @@ elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INP
     GUARDRAIL_TOOL="session.create"
     CONTEXT_JSON="$(safe_jq "$INPUT" '{description: (.task // ""), subagent_type: (.subagent_type // "")}')"
 
-elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -n "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.server // .url' &> /dev/null; }; then
-    # beforeMCPExecution: MCP tool calls (has server/url field)
+elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -n "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.mcp_server_name // .server // .url' &> /dev/null; }; then
+    # beforeMCPExecution: MCP tool calls. Cursor's current native field is mcp_server_name;
+    # server/url are accepted for backwards compatibility with older fixtures.
     GUARDRAIL_TOOL="mcp.tool"
-    CONTEXT_JSON="$(safe_jq "$INPUT" '{tool_name: (.tool_name // ""), tool_input: (.tool_input // {})}')"
+    CONTEXT_JSON="$(safe_jq "$INPUT" '
+      def parsed_tool_input:
+        (.tool_input // {}) as $ti |
+        if ($ti | type) == "string" then (try ($ti | fromjson) catch {raw_input: $ti}) else $ti end;
+      parsed_tool_input as $params |
+      {
+        server: (.mcp_server_name // .server // .url // ""),
+        mcp_server: (.mcp_server_name // .server // .url // ""),
+        tool: (.tool_name // .mcp_tool // ""),
+        mcp_tool: (.tool_name // .mcp_tool // ""),
+        tool_name: (.tool_name // ""),
+        tool_input: $params,
+        parameters: $params
+      }')"
 
 elif [ -n "$TOOL_NAME" ]; then
     # preToolUse: Shell, Read, Write, Grep, Delete, Task, WebSearch, Agent, MCP:*, etc.
@@ -143,13 +182,30 @@ elif [ -n "$TOOL_NAME" ]; then
                 allow
             fi
             ;;
-        read | readfile | read_file | semanticsearch)
+        read | readfile | read_file | semanticsearch | presentfile | present_file | viewimage | view_image)
             TOOL_INPUT="$(safe_jq "$INPUT" '.tool_input // {}')"
             if ! aport_hook_try_read_evaluation "$TOOL_NORM" "$TOOL_INPUT"; then
                 allow
             fi
             ;;
-        grep | grepsearch | grep_search | glob | filesearch | file_search | codebasesearch | codebase_search | ls | listdir | list_dir | lsp | todoread | presentfile | present_file | viewimage | view_image | askquestion | askuserquestion | listmcpresourcestool | readmcpresourcetool | toolsearch | waitformcpservers | taskget | tasklist | taskoutput | cronlist)
+        readmcpresourcetool)
+            GUARDRAIL_TOOL="mcp.tool"
+            CONTEXT_JSON="$(safe_jq "$INPUT" '
+              def parsed_tool_input:
+                (.tool_input // {}) as $ti |
+                if ($ti | type) == "string" then (try ($ti | fromjson) catch {raw_input: $ti}) else $ti end;
+              parsed_tool_input as $params |
+              {
+                server: (.mcp_server_name // .server // .url // $params.server // $params.mcp_server // ""),
+                mcp_server: (.mcp_server_name // .server // .url // $params.server // $params.mcp_server // ""),
+                tool: (.tool_name // .mcp_tool // $params.tool // $params.name // "resources.read"),
+                mcp_tool: (.tool_name // .mcp_tool // $params.tool // $params.name // "resources.read"),
+                uri: ($params.uri // $params.resource_uri // ""),
+                tool_input: $params,
+                parameters: $params
+              }')"
+            ;;
+        grep | grepsearch | grep_search | glob | filesearch | file_search | codebasesearch | codebase_search | ls | listdir | list_dir | lsp | todoread | askquestion | askuserquestion | listmcpresourcestool | toolsearch | waitformcpservers | taskget | tasklist | taskoutput | cronlist)
             allow
             ;;
         write | writefile | write_file | strreplace | str_replace | edit | editfile | edit_file | createfile | create_file | multiedit | editnotebook | applypatch | searchreplace | search_replace | notebookedit | todowrite | delete | deletefile | delete_file | removefile | remove_file)
@@ -174,10 +230,23 @@ elif [ -n "$TOOL_NAME" ]; then
             ;;
         mcp__* | mcp:* | callmcptool)
             GUARDRAIL_TOOL="mcp.tool"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{tool_name: (.tool_name // ""), tool_input: (.tool_input // {})}')"
+            CONTEXT_JSON="$(safe_jq "$INPUT" '
+              def parsed_tool_input:
+                (.tool_input // {}) as $ti |
+                if ($ti | type) == "string" then (try ($ti | fromjson) catch {raw_input: $ti}) else $ti end;
+              parsed_tool_input as $params |
+              {
+                server: (.mcp_server_name // .server // .url // ""),
+                mcp_server: (.mcp_server_name // .server // .url // ""),
+                tool: (.tool_name // .mcp_tool // ""),
+                mcp_tool: (.tool_name // .mcp_tool // ""),
+                tool_name: (.tool_name // ""),
+                tool_input: $params,
+                parameters: $params
+              }')"
             ;;
         *)
-            deny "🛡️ APort: unknown tool '$TOOL_NAME' — fail-closed policy"
+            deny_or_warn "hook.tool.map" "oap.unknown_tool" "Unknown tool: $TOOL_NAME (fail-closed)"
             ;;
     esac
 
@@ -201,7 +270,7 @@ elif echo "$INPUT" | jq -e '.tool // .input.command' &> /dev/null; then
 
 else
     # Unrecognized input shape: fail-closed
-    deny "🛡️ APort: unrecognized hook input — fail-closed policy"
+    deny_or_warn "hook.input" "oap.unrecognized_input" "Unrecognized hook input"
 fi
 
 # Use a per-invocation decision file to avoid race conditions with concurrent tool calls
@@ -223,12 +292,15 @@ fi
 # Call core evaluator. Cursor requires stdout to be exactly one JSON object from
 # this hook, so child evaluator output must be captured and only surfaced on
 # stderr when DEBUG_APORT is enabled.
+trap - ERR
 set +e
 GUARDRAIL_OUTPUT="$("$GUARDRAIL" "$GUARDRAIL_TOOL" "$CONTEXT_JSON" 2>&1)"
 GUARDRAIL_EXIT=$?
 set -e
+trap '__aport_emit_crash_deny "$LINENO"' ERR
 if [ -n "$DEBUG_APORT" ] && [ -n "$GUARDRAIL_OUTPUT" ]; then
-    printf '%s\n' "$GUARDRAIL_OUTPUT" >&2
+    aport_sanitize_display_text "$GUARDRAIL_OUTPUT" >&2
+    printf '\n' >&2
 fi
 
 # Clean up per-invocation decision file
@@ -242,9 +314,12 @@ fi
 
 # Deny: read reason from decision file
 REASON="Policy denied this action."
+REASON_CODE=""
 if [ -n "$HOOK_DECISION_FILE" ] && [ -f "$HOOK_DECISION_FILE" ]; then
     R="$(jq -r 'if (.allow == false) then (.reasons[0].message // empty) else empty end' "$HOOK_DECISION_FILE" 2> /dev/null)"
     [ -n "$R" ] && REASON="$R"
+    C="$(aport_hook_reason_code "$HOOK_DECISION_FILE")"
+    [ -n "$C" ] && REASON_CODE="$C"
 fi
 # Fallback: try common config dirs only when no per-invocation decision file was
 # configured. Otherwise this can surface stale reasons from earlier tool calls.
@@ -262,4 +337,4 @@ if [ "$REASON" = "Policy denied this action." ] && [ -n "$GUARDRAIL_OUTPUT" ]; t
 fi
 aport_append_local_session_decision "$HOOK_DECISION_FILE" "cursor" "$INPUT" "$TOOL_NAME" "$GUARDRAIL_TOOL" "$CONTEXT_JSON"
 cleanup_decision
-deny "🛡️ APort: $REASON"
+deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON"

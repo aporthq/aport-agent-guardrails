@@ -10,18 +10,58 @@ VENV_DIR="$TEST_DIR/venv"
 CONFIG_DIR="$TEST_DIR/.aport/crewai"
 FIXTURE_PASSPORT="$REPO_ROOT/tests/fixtures/passport.oap-v1.json"
 STUB_DIR="$TEST_DIR/bin"
+DIST_DIR="$TEST_DIR/dist"
+BUILD_ROOT="$TEST_DIR/build-root"
+PKG_SRC="$BUILD_ROOT/python/aport_guardrails"
 
-rm -rf "$VENV_DIR" "$CONFIG_DIR" "$STUB_DIR" "$REPO_ROOT/python/aport_guardrails/dist"
+rm -rf "$VENV_DIR" "$CONFIG_DIR" "$STUB_DIR" "$DIST_DIR" "$BUILD_ROOT"
+mkdir -p "$(dirname "$PKG_SRC")" "$BUILD_ROOT/external/aport-spec/oap" "$BUILD_ROOT/local-overrides"
+cp -R "$REPO_ROOT/python/aport_guardrails" "$PKG_SRC"
+find "$PKG_SRC" \( -name '__pycache__' -o -name '.pytest_cache' -o -name 'build' -o -name 'dist' -o -name '*.egg-info' \) -prune -exec rm -rf {} +
+cp -R "$REPO_ROOT/bin" "$BUILD_ROOT/bin"
+cp -R "$REPO_ROOT/src" "$BUILD_ROOT/src"
+cp -R "$REPO_ROOT/external/aport-policies" "$BUILD_ROOT/external/aport-policies"
+cp "$REPO_ROOT/external/aport-spec/oap/passport-schema.json" "$BUILD_ROOT/external/aport-spec/oap/passport-schema.json"
 
 echo ""
 echo "  Integration — Python package build/install"
 echo "  Test dir: $TEST_DIR"
 echo ""
 
-python3 -m pip install --quiet build
-python3 -m build "$REPO_ROOT/python/aport_guardrails" > /dev/null
+if ! python3 -m build --version > /dev/null 2>&1; then
+    if ! python3 -m pip install --quiet build; then
+        if [[ -n "${APORT_SKIP_REMOTE_PASSPORT_TEST:-}" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+            echo "  SKIP: python build package is unavailable in this local/offline environment"
+            exit 0
+        fi
+        echo "FAIL: python build package is required" >&2
+        exit 1
+    fi
+fi
+BUILD_LOG="$TEST_DIR/python-build.log"
+if ! python3 -m build "$PKG_SRC" --outdir "$DIST_DIR" > "$BUILD_LOG" 2>&1; then
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+        cat "$BUILD_LOG" >&2
+        exit 1
+    fi
+    if [[ -n "${APORT_SKIP_REMOTE_PASSPORT_TEST:-}" || -n "${APORT_PYTHON_BUILD_NO_ISOLATION:-}" ]]; then
+        if ! python3 -c "import wheel" > /dev/null 2>&1; then
+            echo "  SKIP: isolated build failed and local wheel package is unavailable for offline fallback"
+            exit 0
+        fi
+        echo "  ⚠ isolated build failed; retrying without build isolation"
+        FALLBACK_BUILD_LOG="$TEST_DIR/python-build-no-isolation.log"
+        if ! python3 -m build --wheel --no-isolation --skip-dependency-check "$PKG_SRC" --outdir "$DIST_DIR" > "$FALLBACK_BUILD_LOG" 2>&1; then
+            cat "$FALLBACK_BUILD_LOG" >&2
+            exit 1
+        fi
+    else
+        cat "$BUILD_LOG" >&2
+        exit 1
+    fi
+fi
 
-WHEEL="$(ls "$REPO_ROOT/python/aport_guardrails"/dist/*.whl | head -n 1)"
+WHEEL="$(ls "$DIST_DIR"/*.whl | head -n 1)"
 if [[ -z "$WHEEL" ]]; then
     echo "FAIL: wheel not found" >&2
     exit 1
