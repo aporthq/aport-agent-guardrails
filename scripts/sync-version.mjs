@@ -31,6 +31,30 @@ function writeJson(path, value) {
   writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
 }
 
+function isSyncedFirstPartyPackage(name) {
+  return (
+    name === rootPkg.name ||
+    name === "@aporthq/openclaw-aport" ||
+    name.startsWith("@aporthq/aport-agent-guardrails-")
+  );
+}
+
+function syncFirstPartyDependencyRanges(pkg) {
+  for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+    if (!pkg[field]) {
+      continue;
+    }
+    for (const depName of Object.keys(pkg[field])) {
+      if (pkg.name === "@aporthq/agent-guardrails" && depName === rootPkg.name) {
+        continue;
+      }
+      if (isSyncedFirstPartyPackage(depName)) {
+        pkg[field][depName] = `>=${version}`;
+      }
+    }
+  }
+}
+
 function updateTextFile(path, updater) {
   const current = readFileSync(path, "utf8");
   const next = updater(current);
@@ -59,6 +83,9 @@ function updateLockfile(path, { rootName, workspaceVersions = {} } = {}) {
     if (lock.packages && lock.packages[workspacePath]) {
       lock.packages[workspacePath].version = workspaceVersion;
     }
+  }
+  for (const pkg of Object.values(lock.packages || {})) {
+    syncFirstPartyDependencyRanges(pkg);
   }
   writeJson(path, lock);
   console.log(`Updated ${relative(root, path)} -> ${version}`);
@@ -103,6 +130,7 @@ function promoteRootChangelog(path) {
 
 // Root CLI package is not a Changesets workspace package, so keep it aligned here.
 rootPkg.version = version;
+syncFirstPartyDependencyRanges(rootPkg);
 writeJson(rootPackagePath, rootPkg);
 console.log(`Updated package.json -> ${version}`);
 
@@ -120,6 +148,7 @@ for (const subDir of ["packages", "extensions"]) {
         if (stat.isFile()) {
           const pkg = readJson(pkgJsonPath);
           pkg.version = version;
+          syncFirstPartyDependencyRanges(pkg);
           writeJson(pkgJsonPath, pkg);
           const workspacePath = relative(root, packageDir).replace(/\\/g, "/");
           workspaceVersions[workspacePath] = version;

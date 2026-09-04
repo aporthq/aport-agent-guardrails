@@ -30,14 +30,23 @@ Each policy pack includes:
 **Example policy pack structure:**
 ```
 external/aport-policies/
-  system.command.execute.v1/
+  finance.payment.charge.v1/
     policy.json           # Policy definition
-    examples/
-      allow-command.json  # Example allowed context
-      deny-command.json   # Example denied context
+    README.md             # Policy-specific documentation
+    minimal-example.js    # Optional runnable examples when provided by the pack
+    express.example.js
+    fastapi.example.py
     tests/
-      system-command.test.js  # Test suite
+      contexts.jsonl      # Test request contexts
+      expected.jsonl      # Expected allow/deny outcomes
+      passport.template.json
+      passport.instance.json
+      payments-charge-policy.test.js
+      test_payments_charge_policy.py
 ```
+
+Not every policy pack has examples or fixtures. Always check the specific pack directory before
+copying test paths into your implementation.
 
 ### 3. Evaluation Rules Format
 
@@ -305,14 +314,15 @@ The APort cloud API uses a generic evaluator that's designed to work with any po
 Use the test cases from the policy pack directories:
 
 ```bash
-# Get test passport
-cat external/aport-policies/system.command.execute.v1/tests/fixtures/passport.json
+# Get test passports
+cat external/aport-policies/finance.payment.charge.v1/tests/passport.template.json
+cat external/aport-policies/finance.payment.charge.v1/tests/passport.instance.json
 
-# Get test contexts (allow case)
-cat external/aport-policies/system.command.execute.v1/examples/allow-command.json
+# Get request contexts
+head -n 1 external/aport-policies/finance.payment.charge.v1/tests/contexts.jsonl
 
-# Get test contexts (deny case)
-cat external/aport-policies/system.command.execute.v1/examples/deny-command.json
+# Get expected decisions
+head -n 1 external/aport-policies/finance.payment.charge.v1/tests/expected.jsonl
 ```
 
 ### Test Cases

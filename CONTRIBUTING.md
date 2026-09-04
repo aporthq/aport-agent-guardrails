@@ -6,15 +6,34 @@ Thank you for your interest in contributing! This document provides guidelines f
 
 ### Policy Packs
 
-Policy packs are JSON files that define rules for specific actions. To contribute a new policy pack:
+Policy packs are JSON files that define rules for specific actions. This repository consumes
+public policy packs from the `external/aport-policies` submodule; it is not the source of truth
+for upstream policy definitions.
+
+To contribute a new public policy pack:
 
 1. Open an issue using the [Policy Pack Proposal template](.github/ISSUE_TEMPLATE/policy_pack.md)
-2. Get feedback from maintainers
-3. Create a PR with:
-   - Policy JSON file in `policies/`
-   - Documentation
-   - Example usage
-   - Tests (if applicable)
+2. Get feedback from maintainers on the policy shape, trusted evidence source, and local/API support expectations
+3. Open a draft PR in [`aporthq/aport-policies`](https://github.com/aporthq/aport-policies) with:
+   - `<policy_id>/policy.json`
+   - README and example contexts
+   - Conformance tests for allow, deny, malformed, and boundary cases
+4. After the policy is accepted upstream, open a PR here only for guardrail wiring:
+   - Bump `external/aport-policies`
+   - Update tool mapping files if a framework should call the new policy automatically
+   - Add local/offline evaluator support only when the policy can be evaluated safely without hosted verifier state
+   - Update framework docs and tests
+
+Experimental or private local policies may live under `local-overrides/policies/`, but they should
+not be treated as public OAP policy-pack contributions.
+
+Evidence-oriented policies, such as completion or repository policies, must be explicit about
+where ground truth comes from. Prefer provenance-bound inputs such as GitHub OIDC claims,
+CI metadata, APort decision IDs, signed attestations, file hashes, or runner-observed exit codes.
+Do not require the hosted verifier to fetch arbitrary URLs for validation; that creates SSRF,
+latency, and availability risk. The [GitHub Protection guide](docs/GITHUB_PROTECTION.md)
+shows the preferred pattern: the GitHub Action collects structured repository evidence,
+then the hosted verifier evaluates `code.repository.merge.v1` and returns a signed OAP decision.
 
 ### Framework Adapters
 

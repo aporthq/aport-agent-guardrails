@@ -132,7 +132,7 @@ mkdir -p "$github_default_repo"
 git init -q "$github_default_repo"
 out6b="$TEST_DIR/dispatcher-6b.txt"
 set +e
-printf '\n' | APORT_PROJECT_DIR="$github_default_repo" "$DISPATCHER" > "$out6b" 2>&1
+printf '\n' | CI= APORT_NONINTERACTIVE= APORT_PROJECT_DIR="$github_default_repo" "$DISPATCHER" > "$out6b" 2>&1
 e6b=$?
 set -e
 [[ "$e6b" -eq 0 ]] || {
