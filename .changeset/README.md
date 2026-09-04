@@ -10,7 +10,7 @@ After making code or doc changes:
 npx changeset
 ```
 
-- Choose the type of change: **patch** (bugfix), **minor** (feature), **major** (breaking).
+- Choose the type of change: **patch**. The current public package line is released as `1.0.x`; `npm run version` normalizes accidental `minor` bumps to `patch` and rejects `major` bumps unless `APORT_ALLOW_NON_PATCH_RELEASE=1` is set intentionally.
 - Write a short summary for the changelog.
 - Commit the new file under `.changeset/`.
 - Target one of the **workspace packages** in the fixed release group, typically `@aporthq/aport-agent-guardrails-core`.
