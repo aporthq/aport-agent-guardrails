@@ -40,6 +40,7 @@ npx @aporthq/aport-agent-guardrails deerflow
 # Optional mode flags:
 #   --mode=api --api-url=https://api.aport.io
 #   --mode=local
+#   --enforcement=warn   # explicit report-only rollout; default is enforce/fail-closed
 ```
 
 **Hosted passport (production)**
@@ -73,6 +74,8 @@ guardrails:
   passport: ~/.aport/deerflow/aport/passport.json
   provider:
     use: aport_guardrails.providers.generic:OAPGuardrailProvider
+    config:
+      enforcement_mode: enforce
 ```
 
 That's it. Every tool call is now evaluated before execution.
@@ -87,6 +90,8 @@ guardrails:
   passport: ap_fa2f6d53bb5b4c98b9af0124285b6e0f
   provider:
     use: aport_guardrails.providers.generic:OAPGuardrailProvider
+    config:
+      enforcement_mode: enforce
 ```
 
 ---
@@ -125,6 +130,8 @@ Mapping is implemented in `packages/core/src/core/tool-pack-mapping.json` (via `
 | **Local** | `mode: local` in APort config | None | Dev, CI, air-gapped |
 | **API** | `mode: api` in APort config | API call to aport.io | Full OAP features, signed decisions |
 | **Hosted passport** | `passport: ap_xxx` in DeerFlow config | API call | Production, managed passports |
+
+Default enforcement is `enforce`: denied decisions block through DeerFlow's guardrail middleware. Set `enforcement_mode: warn` only for report-only rollout; APort preserves the original deny decision in result metadata while allowing the framework action to continue.
 
 ## Built-in AllowlistProvider (no APort needed)
 

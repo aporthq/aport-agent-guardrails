@@ -7,8 +7,9 @@
  */
 
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { logAuditEntry } from "./audit.js";
 import { canonicalize, formatReasons, verifyDecisionIntegrity } from "./decision.js";
@@ -35,8 +36,15 @@ export default definePluginEntry({
     const apiUrl = config.apiUrl || process.env.APORT_API_URL || "https://api.aport.io";
     const apiKey = config.apiKey || process.env.APORT_API_KEY || undefined;
     const failClosed = config.failClosed !== false;
-    const allowUnmappedTools = config.allowUnmappedTools !== false;
+    const allowUnmappedTools = config.allowUnmappedTools === true;
     const mapExecToPolicy = config.mapExecToPolicy !== false;
+    const enforcement = normalizeEnforcementMode(
+      config.enforcementMode ||
+        config.enforcement ||
+        process.env.APORT_ENFORCEMENT_MODE ||
+        process.env.APORT_ENFORCEMENT ||
+        process.env.APORT_GUARDRAIL_ENFORCEMENT,
+    );
 
     const log = (msg) => api.logger?.info?.(msg);
     const warn = (msg) => api.logger?.warn?.(msg);
@@ -46,7 +54,7 @@ export default definePluginEntry({
       `[APort] Loaded: mode=${mode}, ${agentId ? `agentId=${agentId}` : `passportFile=${passportFile}`}, unmapped=${allowUnmappedTools ? "allow" : "block"}, mapExec=${mapExecToPolicy}`,
     );
 
-    api.on("before_tool_call", async (event) => {
+    api.on("before_tool_call", async (event, hookContext = {}) => {
       const { toolName, params } = event;
 
       try {
@@ -54,14 +62,27 @@ export default definePluginEntry({
           toolName === "exec" && !mapExecToPolicy ? null : mapToolToPolicy(toolName, params);
 
         if (!policyName) {
+          if (toolName === "exec" && !mapExecToPolicy) {
+            log("[APort] ALLOW: exec - (exec policy mapping disabled)");
+            return {};
+          }
           if (allowUnmappedTools) {
             log(`[APort] ALLOW: ${toolName} - (unmapped, no policy)`);
             return {};
           }
-          log(`[APort] BLOCKED: ${toolName} - no policy mapping (allowUnmappedTools=false)`);
+          const notice = formatGuardrailNotice({
+            outcome: enforcement === "warn" ? "warn" : "deny",
+            policy: "hook.tool.map",
+            code: "oap.unknown_tool",
+            message: `No policy mapping for ${toolName}`,
+            agentId,
+            passportFile,
+          });
+          log(`[APort] ${enforcement === "warn" ? "WARN" : "BLOCKED"}: ${toolName} - no policy mapping`);
+          if (enforcement === "warn") return {};
           return {
             block: true,
-            blockReason: `🛡️ APort: Tool "${toolName}" has no policy mapping. Unmapped tools are blocked (allowUnmappedTools: false). Set allowUnmappedTools: true in config to allow unmapped custom skills and ClawHub tools.`,
+            blockReason: notice,
           };
         }
 
@@ -94,7 +115,7 @@ export default definePluginEntry({
           }
         }
 
-        const requestContext = ensureIdempotencyKey(context);
+        const requestContext = ensureIdempotencyKey(context, event, hookContext);
         const auditLogPath = join(dirname(passportFile), "audit.log");
         const decision =
           mode === "api"
@@ -105,6 +126,7 @@ export default definePluginEntry({
                 context: requestContext,
                 passport: agentId ? null : JSON.parse(await readFile(passportFile, "utf8")),
                 agentId,
+                signal: hookContext?.abortSignal,
               })
             : evaluateLocalDecision({
                 policyName: effectivePolicyName,
@@ -114,11 +136,22 @@ export default definePluginEntry({
               });
 
         if (!verifyDecisionIntegrity(decision)) {
+          const notice = formatGuardrailNotice({
+            outcome: enforcement === "warn" ? "warn" : "deny",
+            policy: effectivePolicyName,
+            code: "oap.decision_integrity_failed",
+            message: "Decision integrity verification failed.",
+            agentId,
+            passportFile,
+          });
           err(`[APort] Decision integrity check failed for ${effectiveToolName} - content_hash mismatch`);
+          if (enforcement === "warn") {
+            warn(`[APort] WARN: decision integrity failed; report-only mode allowed the tool. ${notice}`);
+            return {};
+          }
           return {
             block: true,
-            blockReason:
-              "🛡️ APort: Decision integrity verification failed (content_hash mismatch). Possible tampering detected.",
+            blockReason: notice,
           };
         }
 
@@ -134,41 +167,50 @@ export default definePluginEntry({
 
         if (!decision.allow) {
           const { reasons, primaryMessage } = formatReasons(decision);
-          const message = primaryMessage || "Policy denied";
-          log(`[APort] BLOCKED: ${effectiveToolName} - ${message}`);
+          const primaryReason = reasons[0] || {};
+          const message = primaryMessage || "Policy denied.";
+          const notice = formatGuardrailNotice({
+            outcome: enforcement === "warn" ? "warn" : "deny",
+            policy: effectivePolicyName,
+            code: primaryReason.code || "oap.denied",
+            message,
+            agentId,
+            passportFile,
+          });
+          log(`[APort] ${enforcement === "warn" ? "WARN" : "BLOCKED"}: ${effectiveToolName} - ${sanitizeDisplayText(message)}`);
 
-          const reasonLines = reasons
-            .map((reason) => `  • ${reason.code || "oap.unknown"}: ${reason.message || ""}`)
-            .join("\n");
+          if (enforcement === "warn") {
+            return {};
+          }
 
           return {
             block: true,
-            blockReason: [
-              "🛡️ APort Policy Denied",
-              "",
-              `Policy: ${effectivePolicyName}`,
-              "",
-              "Reasons (OAP codes):",
-              reasonLines || `  • ${message}`,
-              "",
-              agentId
-                ? `To allow this action, update limits at aport.io (hosted passport: ${agentId})`
-                : `To allow this action, update limits in your passport: ${passportFile}`,
-            ].join("\n"),
+            blockReason: notice,
           };
         }
 
         log(`[APort] ALLOW: ${effectiveToolName}`);
         return {};
       } catch (error) {
-        err(`[APort] Error evaluating policy: ${error.message}`);
-        if (failClosed) {
+        err(`[APort] Error evaluating policy: ${sanitizeDisplayText(error.message)}`);
+        if (failClosed && enforcement !== "warn") {
           return {
             block: true,
-            blockReason: `🛡️ APort Policy Error (fail-closed)\n\nError: ${error.message}\n\nCheck configuration at plugins.entries.openclaw-aport.config`,
+            blockReason: formatGuardrailNotice({
+              outcome: "deny",
+              policy: "hook.runtime",
+              code: "oap.policy_error",
+              message: error.message,
+              agentId,
+              passportFile,
+            }),
           };
         }
-        warn("[APort] Allowing tool despite error (failClosed=false)");
+        warn(
+          enforcement === "warn"
+            ? `[APort] WARN: policy evaluation failed; report-only mode allowed the tool. ${policyReference({ agentId, passportFile })}`
+            : "[APort] Allowing tool despite policy evaluation error because failClosed is disabled.",
+        );
         return {};
       }
     });
@@ -177,8 +219,28 @@ export default definePluginEntry({
   },
 });
 
-function ensureIdempotencyKey(context) {
+function ensureIdempotencyKey(context, event = {}, hookContext = {}) {
   if (context && context.idempotency_key) return context;
+  const stableSeed = [
+    event?.toolCallId,
+    event?.tool_call_id,
+    event?.id,
+    event?.callId,
+    event?.call_id,
+    hookContext?.toolCallId,
+    hookContext?.tool_call_id,
+    hookContext?.toolInvocationId,
+    hookContext?.tool_invocation_id,
+  ]
+    .filter((value) => typeof value === "string" && value.trim())
+    .join(":");
+  if (stableSeed) {
+    const digest = createHash("sha256").update(stableSeed).digest("hex").slice(0, 40);
+    return {
+      ...context,
+      idempotency_key: `openclaw_${digest}`.slice(0, 64),
+    };
+  }
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 10);
   return {
@@ -193,23 +255,130 @@ function expandPath(value) {
 }
 
 function extractContextSummary(context) {
-  if (typeof context?.command === "string" && context.command) return context.command;
-  if (typeof context?.file_path === "string" && context.file_path) return context.file_path;
-  if (typeof context?.recipient === "string" && context.recipient) return context.recipient;
-  if (typeof context?.url === "string" && context.url) return context.url;
+  if (typeof context?.command === "string" && context.command) return sanitizeDisplayText(context.command);
+  if (typeof context?.file_path === "string" && context.file_path) return sanitizeDisplayText(context.file_path);
+  if (typeof context?.recipient === "string" && context.recipient) return sanitizeDisplayText(context.recipient);
+  if (typeof context?.url === "string" && context.url) return sanitizeDisplayText(context.url);
   return undefined;
 }
 
 function parseGuardrailInvocation(command) {
   if (typeof command !== "string" || !command.includes("aport-guardrail")) return null;
-  const match = command.match(/aport-guardrail[^\s]*\s+(\S+)\s+['"]([\s\S]*)['"]\s*$/);
-  if (!match) return null;
+  const trimmed = command.trim();
+  const argv = splitSimpleShellWords(trimmed);
+  if (!argv || argv.length !== 3) return null;
+  const commandName = basename(argv[0]);
+  if (!TRUSTED_GUARDRAIL_BINARIES.has(commandName)) return null;
   try {
     return {
-      innerToolName: match[1],
-      innerContext: match[2].trim() ? JSON.parse(match[2]) : {},
+      innerToolName: argv[1],
+      innerContext: argv[2].trim() ? JSON.parse(argv[2]) : {},
     };
   } catch {
     return null;
   }
+}
+
+const TRUSTED_GUARDRAIL_BINARIES = new Set([
+  "aport-guardrail.sh",
+  "aport-guardrail-bash.sh",
+  "aport-guardrail-api.sh",
+  "aport-guardrail-v2.sh",
+]);
+
+function splitSimpleShellWords(input) {
+  const words = [];
+  let current = "";
+  let quote = "";
+  let hadToken = false;
+  let escaped = false;
+
+  for (const ch of input) {
+    if (escaped) {
+      current += ch;
+      hadToken = true;
+      escaped = false;
+      continue;
+    }
+    if (quote) {
+      if (quote === '"' && ch === "\\") {
+        escaped = true;
+        hadToken = true;
+        continue;
+      }
+      if (ch === quote) {
+        quote = "";
+      } else {
+        current += ch;
+        hadToken = true;
+      }
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      hadToken = true;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      hadToken = true;
+      continue;
+    }
+    if (/[;&|<>`$]/.test(ch)) return null;
+    if (/\s/.test(ch)) {
+      if (hadToken) {
+        words.push(current);
+        current = "";
+        hadToken = false;
+      }
+      continue;
+    }
+    current += ch;
+    hadToken = true;
+  }
+
+  if (quote || escaped) return null;
+  if (hadToken) words.push(current);
+  return words;
+}
+
+function normalizeEnforcementMode(value) {
+  const normalized = String(value || "enforce").toLowerCase().replace(/_/g, "-");
+  if (["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)) return "warn";
+  return "enforce";
+}
+
+function sanitizeDisplayText(value) {
+  return String(value ?? "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+    .replace(/(?:apk|aprt)_[A-Za-z0-9_-]+/g, "[REDACTED_APORT_KEY]")
+    .replace(/github_pat_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
+    .replace(/gh[pousr]_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
+    .replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]")
+    .replace(/(Authorization:?\s*Bearer|Bearer)\s+[A-Za-z0-9._~+/-]+=*/gi, "$1 [REDACTED]")
+    .replace(/(password|passwd|pwd|token|secret|api[_-]?key)=\S+/gi, "$1=[REDACTED]")
+    .slice(0, 320);
+}
+
+function policyReference({ agentId, passportFile }) {
+  const appUrl = String(process.env.APORT_APP_URL || "https://aport.io").replace(/\/$/, "");
+  if (agentId) return `${appUrl}/passports?details=${encodeURIComponent(agentId)}`;
+  if (passportFile) return passportFile;
+  return `${appUrl}/quickstart`;
+}
+
+function formatGuardrailNotice({ outcome, policy, code, message, agentId, passportFile }) {
+  const prefix =
+    outcome === "warn"
+      ? "APort warning: policy would have denied this tool call."
+      : "APort denied this tool call.";
+  const detail = sanitizeDisplayText(message || "");
+  const safeCode = sanitizeDisplayText(code || "oap.denied");
+  const safePolicy = sanitizeDisplayText(policy || "hook.runtime");
+  const reference = sanitizeDisplayText(policyReference({ agentId, passportFile }));
+  const parts = [`${prefix} Policy: ${safePolicy}. Reason: ${safeCode}.`];
+  if (detail && detail !== safeCode) parts.push(`Detail: ${detail}.`);
+  parts.push(`Review: ${reference}`);
+  return parts.join(" ");
 }

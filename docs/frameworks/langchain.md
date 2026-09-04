@@ -25,6 +25,7 @@ npx @aporthq/aport-agent-guardrails langchain   # wizard + config (optional)
 # Optional mode flags:
 #   --mode=api --api-url=https://api.aport.io
 #   --mode=local
+#   --enforcement=warn   # explicit report-only rollout; default is enforce/fail-closed
 pip install aport-agent-guardrails-langchain
 aport-langchain setup
 ```
@@ -41,14 +42,21 @@ npm install @aporthq/aport-agent-guardrails-langchain   # callback handler (depe
 **Python:** Add `APortCallback()` to your agent's callbacks. Config is read from `~/.aport/langchain/` or `.aport/config.yaml`.
 
 ```python
-from langchain.agents import initialize_agent
+from langchain.agents import create_agent
 from aport_guardrails_langchain import APortCallback
 
-agent = initialize_agent(
-    tools=tools,
-    llm=llm,
-    callbacks=[APortCallback()]
+agent = create_agent(model=model, tools=tools)
+
+agent.invoke(
+    {"messages": [{"role": "user", "content": "Run the task"}]},
+    config={"callbacks": [APortCallback()]},
 )
+```
+
+Default enforcement is fail-closed. For rollout/report-only mode:
+
+```python
+APortCallback(enforcement_mode="warn")
 ```
 
 **Node:** Add `APortGuardrailCallback` to your chain/agent callbacks. Config is read from `~/.aport/langchain/` or `.aport/config.yaml`.
@@ -56,7 +64,7 @@ agent = initialize_agent(
 ```ts
 import { APortGuardrailCallback } from '@aporthq/aport-agent-guardrails-langchain';
 
-const callback = new APortGuardrailCallback(); // optional: { configPath: '...', framework: 'langchain' }
+const callback = new APortGuardrailCallback(); // optional: { configPath: '...', framework: 'langchain', enforcementMode: 'warn' }
 // Pass callback to your LangChain run (e.g. callbacks: [callback])
 // On deny, the callback throws GuardrailViolationError.
 ```
@@ -70,6 +78,7 @@ The Node middleware automatically parses JSON tool input and spreads parameters 
 - **Config:** `~/.aport/langchain/` or `.aport/config.yaml`
 - **Usage:** Add the callback to your agent (see above).
 - **`fail_open_on_api_error`**: Set to `true` in config to allow tool execution when the APort API is unreachable (genuine policy denials are never overridden). Default: `false` (fail-closed).
+- **`enforcement_mode`**: `enforce` blocks denied tools. `warn` is explicit report-only rollout: APort records the original deny decision but the adapter lets LangChain continue.
 
 ## Suspend (kill switch)
 

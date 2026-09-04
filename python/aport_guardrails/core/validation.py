@@ -325,7 +325,7 @@ def sanitize_log_value(value: str, field_name: str = "") -> str:
 
     # Detect API keys, tokens, passwords
     sensitive_patterns = [
-        (r'^(aprt_|sk_|pk_)', 4, "****"),  # API keys: show first 4 chars
+        (r'^(apk_|aprt_|sk_|pk_)', 4, "****"),  # API keys: show first 4 chars
         (r'^Bearer\s+', 7, "****"),  # Bearer tokens
         (r'(password|passwd|pwd|secret|token|key)', 0, "[REDACTED]"),  # Sensitive fields
     ]

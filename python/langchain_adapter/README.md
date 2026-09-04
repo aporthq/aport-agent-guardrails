@@ -23,19 +23,18 @@ aport-langchain setup
 
 ```python
 from aport_guardrails_langchain import APortCallback, GuardrailViolation
+from langchain.agents import create_agent
 
 # Add callback to your agent
-agent = initialize_agent(
-    tools=tools,
-    llm=llm,
-    callbacks=[APortCallback()]
-)
+agent = create_agent(model=model, tools=tools)
 
-# On deny, the callback raises GuardrailViolation
 try:
-    result = await agent.ainvoke(...)
+    result = await agent.ainvoke(
+        {"messages": [{"role": "user", "content": "run the task"}]},
+        config={"callbacks": [APortCallback()]},
+    )
 except GuardrailViolation as e:
-    print(f"Blocked: {e.code} — {e}")
+    print(f"Blocked: {e.code} - {e}")
     print("Reasons:", e.reasons)
 ```
 

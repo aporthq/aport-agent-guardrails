@@ -23,11 +23,13 @@
  */
 
 import { Evaluator, toolToPackId } from "../core/evaluator.js";
-import { findConfigPath } from "../core/config.js";
+import { findConfigPath, loadConfig } from "../core/config.js";
 
 export interface OAPGuardrailProviderConfig {
   framework?: string;
   configPath?: string;
+  enforcementMode?: "enforce" | "warn";
+  enforcement_mode?: "enforce" | "warn";
 }
 
 export interface GuardrailRequest {
@@ -56,10 +58,18 @@ export class OAPGuardrailProvider {
   name = "aport";
 
   private evaluator: Evaluator;
+  private enforcementMode: "enforce" | "warn";
 
   constructor(config: OAPGuardrailProviderConfig | Record<string, unknown> = {}) {
     const framework = (config as OAPGuardrailProviderConfig).framework ?? "generic";
     const configPath = (config as OAPGuardrailProviderConfig).configPath ?? findConfigPath(framework);
+    const loadedConfig = configPath ? loadConfig(configPath) : {};
+    this.enforcementMode = resolveEnforcementMode(
+      (config as OAPGuardrailProviderConfig).enforcementMode ??
+        (config as OAPGuardrailProviderConfig).enforcement_mode ??
+        loadedConfig.enforcementMode ??
+        loadedConfig.enforcement_mode,
+    );
     this.evaluator = new Evaluator(configPath, framework);
   }
 
@@ -84,7 +94,7 @@ export class OAPGuardrailProvider {
       { capability: packId },
       ctx,
     );
-    return toDecision(decision, packId);
+    return toDecision(decision, packId, this.enforcementMode);
   }
 
   evaluateSync(request: GuardrailRequest): GuardrailDecision {
@@ -95,7 +105,7 @@ export class OAPGuardrailProvider {
       { capability: packId },
       ctx,
     );
-    return toDecision(decision, packId);
+    return toDecision(decision, packId, this.enforcementMode);
   }
 
   async healthCheck(): Promise<{ ok: boolean; message?: string }> {
@@ -106,6 +116,7 @@ export class OAPGuardrailProvider {
 function toDecision(
   raw: { allow: boolean; reasons?: Array<{ code?: string; message?: string }> },
   packId: string,
+  enforcementMode: "enforce" | "warn" = "enforce",
 ): GuardrailDecision {
   const reasons: GuardrailReason[] = (raw.reasons ?? []).map((r) => ({
     code: r.code ?? "oap.denied",
@@ -114,9 +125,32 @@ function toDecision(
   if (reasons.length === 0) {
     reasons.push({ code: raw.allow ? "allowed" : "oap.denied" });
   }
+  const originalAllow = raw.allow;
+  const effectiveAllow = enforcementMode === "warn" ? true : originalAllow;
+  const metadata =
+    enforcementMode === "warn" || effectiveAllow !== originalAllow
+      ? { enforcementMode, originalAllow }
+      : undefined;
   return {
-    allow: raw.allow,
+    allow: effectiveAllow,
     reasons,
     policyId: packId,
+    ...(metadata && { metadata }),
   };
+}
+
+function resolveEnforcementMode(value: unknown): "enforce" | "warn" {
+  const raw = String(
+    value ??
+      process.env.APORT_ENFORCEMENT_MODE ??
+      process.env.APORT_ENFORCEMENT ??
+      process.env.APORT_GUARDRAIL_ENFORCEMENT ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  if (["warn", "report-only", "report_only", "audit-only", "audit_only"].includes(raw)) {
+    return "warn";
+  }
+  return "enforce";
 }

@@ -16,7 +16,7 @@ set -e
 __aport_api_crash_handler() {
     local exit_code="$?"
     local line_no="$1"
-    echo "APort API guardrail crashed (exit=${exit_code} at aport-guardrail-api.sh:${line_no}). Set DEBUG_APORT=1 for trace." >&2
+    echo "APort API guardrail crashed (exit=${exit_code} at aport-guardrail-api.sh:${line_no})." >&2
     exit 1
 }
 trap '__aport_api_crash_handler "$LINENO"' ERR
@@ -27,6 +27,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "${SCRIPT_DIR}/bin/aport-resolve-paths.sh"
 # shellcheck source=bin/lib/tool-mapping.sh
 . "${SCRIPT_DIR}/bin/lib/tool-mapping.sh"
+# shellcheck source=bin/lib/validation.sh
+. "${SCRIPT_DIR}/bin/lib/validation.sh"
 
 NODE_EVALUATOR="$SCRIPT_DIR/src/evaluator.js"
 
@@ -37,7 +39,7 @@ CONTEXT_JSON="${2:-$DEFAULT_CONTEXT}"
 # DEBUG: Print received arguments
 if [ -n "$DEBUG_APORT" ]; then
     echo "DEBUG: TOOL_NAME=$TOOL_NAME" >&2
-    echo "DEBUG: CONTEXT_JSON=$CONTEXT_JSON" >&2
+    echo "DEBUG: CONTEXT_JSON=$(sanitize_log_value "$CONTEXT_JSON" context)" >&2
 fi
 
 # Ensure APort data dir exists (for decision, audit)
@@ -107,6 +109,7 @@ if [ -f "$DECISION_FILE" ]; then
     ALLOW=$(jq -r '.allow // false' "$DECISION_FILE" 2> /dev/null || echo "false")
     DENY_CODE=$(jq -r '.reasons[0].code // "unknown"' "$DECISION_FILE" 2> /dev/null || echo "unknown")
     DENY_MSG=$(jq -r '.reasons[0].message // ""' "$DECISION_FILE" 2> /dev/null | tr '\n' ' ' | head -c 200 | sed 's/"/\\"/g')
+    DENY_MSG="$(sanitize_log_value "$DENY_MSG" reason)"
     AUDIT_LINE="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$DECISION_ID allow=$ALLOW policy=$POLICY_ID code=$DENY_CODE"
     [ -n "$DENY_MSG" ] && AUDIT_LINE="${AUDIT_LINE} reason=\"$DENY_MSG\""
     echo "$AUDIT_LINE" >> "$AUDIT_LOG" 2> /dev/null || true
@@ -119,7 +122,7 @@ if [ "$EXIT_CODE" -ne 0 ] && [ -f "$DECISION_FILE" ]; then
     REASON_MSG=$(jq -r '.reasons[0].message // empty' "$DECISION_FILE" 2> /dev/null)
     REASON_CODE=$(jq -r '.reasons[0].code // empty' "$DECISION_FILE" 2> /dev/null)
     if [ -n "$REASON_MSG" ] || [ -n "$REASON_CODE" ]; then
-        echo "APort deny (${REASON_CODE:-unknown}): ${REASON_MSG:-no message}" >&2
+        echo "APort deny ($(sanitize_log_value "${REASON_CODE:-unknown}" code)): $(sanitize_log_value "${REASON_MSG:-no message}" reason)" >&2
     fi
 fi
 

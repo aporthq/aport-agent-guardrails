@@ -6,7 +6,29 @@ Use this when you want report-only evidence first, then blocking controls for hi
 
 ## Recommended Path
 
-Use hosted verification for GitHub Actions.
+Use hosted verification for GitHub Actions. To generate the starter workflow from a repository root:
+
+```bash
+npx @aporthq/aport-agent-guardrails github
+```
+
+Add `--policy` if you also want a starter `.aport/policy.yaml`. Existing workflow or policy files are left untouched unless you pass `--force`. Use `--branches main,staging` to include additional protected push branches.
+
+For blocking enforcement on protected branches:
+
+```bash
+npx @aporthq/aport-agent-guardrails github --mode hosted --branches main,staging
+```
+
+For repositories with sensitive release, workflow, package, or guardrail code, pass the same protected-path globs you want the Action to check:
+
+```bash
+npx @aporthq/aport-agent-guardrails github \
+  --mode hosted \
+  --branches main,staging \
+  --block-protected-paths \
+  --protected-paths ".github/workflows/**,.aport/**,bin/**,packages/**,scripts/**,package.json,package-lock.json"
+```
 
 Hosted mode gives APort the context it needs for production-grade repository controls:
 
@@ -24,7 +46,7 @@ Local mode is still useful for developer/offline smoke tests, but it cannot inde
 | --- | --- | --- |
 | PR create/update | `git.create_pr` -> `code.repository.merge.v1` | `repo.pr.create`, allowed repos, base branch, changed paths, PR size |
 | PR merge | `git.merge` -> `code.repository.merge.v1` | `repo.merge`, allowed repos, base branch, changed paths |
-| Repository push | `git.push` -> `code.repository.merge.v1` | `repo.pr.create`, allowed repos, target branch, changed paths |
+| Repository push | `git.push` -> `code.repository.merge.v1` | `repo.push`, allowed repos, target branch, changed paths. Free GitHub OIDC passports do not include `repo.push` by default, so direct pushes are detected and denied unless the repo explicitly authorizes them. |
 
 Explicit release publishing uses the same guardrail mapping, but is not part of the first Repository Guard Action workflow:
 
@@ -46,23 +68,25 @@ permissions:
 
 steps:
   - name: APort repository guard
-    uses: aporthq/policy-verify-action@v1.0.2
+    uses: aporthq/policy-verify-action@v1
     with:
       mode: auto
 ```
 
-Default `auto` mode requests GitHub OIDC, creates or reuses a hosted repository/workflow-scoped OAP passport, records a report-only decision through APort Verify, and falls back to labelled evidence-only reporting if hosted verification is unavailable. No APort API key is required for that free report-only path.
+Default `auto` mode requests GitHub OIDC, creates or reuses a hosted repository-scoped OAP passport, records a report-only decision through APort Verify, and falls back to labelled evidence-only reporting if hosted verification is unavailable. No APort API key is required for that free report-only path.
 
 For blocking enforcement, switch to explicit hosted mode after the org has reviewed the first decisions and tuned passport limits:
 
 ```yaml
 - name: APort repository guard
-  uses: aporthq/policy-verify-action@v1.0.2
+  uses: aporthq/policy-verify-action@v1
   with:
     mode: hosted
+    block-protected-paths: true
+    protected-paths: ".github/workflows/**,.aport/**,src/**,packages/**,package.json"
 ```
 
-Explicit `hosted` mode fails the workflow when hosted verification cannot return a valid signed decision, returns `allow: false`, or reports a high/error structural finding.
+Explicit `hosted` mode fails the workflow when hosted verification cannot return a valid signed decision, returns `allow: false`, or reports a high/error structural finding. `block-protected-paths: true` escalates protected-path changes from warning to high severity; leave it off during first rollout if you only want visibility.
 
 ## Passport Requirements
 
@@ -142,7 +166,7 @@ cat /tmp/aport-summary.md
 cat /tmp/aport-output.txt
 ```
 
-To verify hosted behavior, push the workflow and open or update a PR. `mode: auto` should request GitHub OIDC, create or reuse a hosted repository/workflow-scoped OAP passport, write a signed APort decision, and fall back to labelled evidence-only only if hosted verification is unavailable.
+To verify hosted behavior, push the workflow and open or update a PR. `mode: auto` should request GitHub OIDC, create or reuse a hosted repository-scoped OAP passport, write a signed APort decision, and fall back to labelled evidence-only only if hosted verification is unavailable.
 
 ```bash
 aport-guardrail git.create_pr '{

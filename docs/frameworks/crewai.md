@@ -16,9 +16,6 @@ Bootstrap config, passport, and local runtime with the Python-native CLI:
 
 ```bash
 uvx --from aport-agent-guardrails aport setup --framework=crewai
-# Optional mode flags:
-#   --mode=api --api-url=https://api.aport.io
-#   --mode=local
 ```
 
 Or use the Node bootstrap if you prefer:
@@ -28,6 +25,7 @@ npx -y @aporthq/aport-agent-guardrails crewai
 # Optional mode flags:
 #   --mode=api --api-url=https://api.aport.io
 #   --mode=local
+#   --enforcement=warn   # explicit report-only rollout; default is enforce/fail-closed
 ```
 
 For CI or other non-interactive environments with the Python-native CLI:
@@ -70,6 +68,7 @@ This path works with released CrewAI because it plugs directly into CrewAI's exi
 ## Option 2: Native Provider Mode
 
 Use this only with a CrewAI build that exposes the native guardrail provider API.
+Released CrewAI users should use compatibility mode above.
 
 Bootstrap with native-mode instructions using the Python-native CLI:
 
@@ -91,25 +90,21 @@ Install the Python runtime package:
 uv add aport-agent-guardrails
 ```
 
-Enable the provider before your crew runs:
+If your CrewAI build documents a native guardrail-provider hook, wire APort's
+provider through that hook before your crew runs:
 
 ```python
-from crewai.hooks import enable_guardrail
 from aport_guardrails.providers import OAPGuardrailProvider
 
-enable_guardrail(
-    OAPGuardrailProvider(
-        framework="crewai",
-        config_path="~/.aport/crewai/config.yaml",
-    ),
-    fail_closed=True,
+provider = OAPGuardrailProvider(
+    framework="crewai",
+    config_path="~/.aport/crewai/config.yaml",
 )
-
-crew.kickoff()
 ```
 
 If you bootstrap into a project-local config directory, point `config_path` at that
-file instead.
+file instead. Current released CrewAI users should use compatibility mode unless
+their CrewAI version explicitly documents a native provider hook.
 
 ## What The Bootstrap Installs
 
@@ -140,6 +135,7 @@ The provider and adapter read the standard APort config:
 - `agent_id` for hosted passports
 - `passport_path` for explicit local passport paths
 - `guardrail_script` to override the local evaluator script path
+- `enforcement_mode: enforce` to block by default, or `warn` for explicit report-only rollout
 - `audit_log` to enable or disable audit logging
 
 With the default bootstrap, you usually do not need to set `guardrail_script`

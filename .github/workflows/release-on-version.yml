@@ -1,0 +1,84 @@
+name: Dispatch Release On Version Bump
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "package.json"
+      - "packages/**/package.json"
+      - "extensions/openclaw-aport/package.json"
+      - "python/**/pyproject.toml"
+      - "CHANGELOG.md"
+      - "docs/RELEASE.md"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: guardrails-release-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.repository == 'aporthq/aport-agent-guardrails'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve version change
+        id: version
+        run: |
+          set -euo pipefail
+
+          CURRENT_VERSION="$(node -p "require('./package.json').version")"
+          if ! [[ "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid package.json version: ${CURRENT_VERSION}"
+            exit 1
+          fi
+
+          PREVIOUS_VERSION=""
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BEFORE_SHA="${{ github.event.before }}"
+            if git cat-file -e "${BEFORE_SHA}:package.json" 2>/dev/null; then
+              PREVIOUS_VERSION="$(git show "${BEFORE_SHA}:package.json" | node -e "let input=''; process.stdin.on('data', d => input += d); process.stdin.on('end', () => { try { console.log(JSON.parse(input).version || '') } catch { console.log('') } });")"
+            fi
+          fi
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "$CURRENT_VERSION" = "$PREVIOUS_VERSION" ]; then
+            echo "package.json version unchanged (${CURRENT_VERSION}); skipping release dispatch."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/v${CURRENT_VERSION}" >/dev/null 2>&1; then
+            echo "Release tag v${CURRENT_VERSION} already exists; skipping release dispatch."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch Release workflow
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "version=${VERSION}"
+          echo "Dispatched Release workflow for v${VERSION}."
