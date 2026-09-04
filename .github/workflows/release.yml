@@ -55,6 +55,20 @@ jobs:
             echo "::error::Manual releases must be dispatched from refs/heads/main."
             exit 1
           fi
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="v${{ steps.version.outputs.VERSION }}"
+            EXISTING_SHA="$(git rev-list -n 1 "$TAG" 2>/dev/null || true)"
+            CURRENT_SHA="$(git rev-parse HEAD)"
+            if [ -n "$EXISTING_SHA" ]; then
+              if ! git merge-base --is-ancestor "$EXISTING_SHA" origin/main; then
+                echo "::error::Existing release tag ${TAG} is not reachable from origin/main."
+                exit 1
+              fi
+            elif ! git merge-base --is-ancestor "$CURRENT_SHA" origin/main; then
+              echo "::error::Manual release commit ${CURRENT_SHA} is not reachable from origin/main."
+              exit 1
+            fi
+          fi
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             TAG_SHA="$(git rev-parse "${GITHUB_REF}^{commit}")"
             if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
@@ -200,6 +214,11 @@ jobs:
             echo "RELEASE_REF=$TAG" >> "$GITHUB_OUTPUT"
             echo "RELEASE_SHA=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && ! git merge-base --is-ancestor "$CURRENT_SHA" origin/main; then
+            echo "::error::Manual release commit ${CURRENT_SHA} is not reachable from origin/main."
+            exit 1
           fi
 
           git config user.name "APort Release Bot"

@@ -60,7 +60,7 @@ def _tool_input(input_str: Any, inputs: Any) -> str | dict[str, Any]:
 
 
 def _sanitize_display(value: Any) -> str:
-    text = str(value or "").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    text = str(value or "").replace("\n", " ").replace("\r", " ").replace("\t", " ").replace("::", ": :")
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
     replacements = (
         (r"(?:apk|aprt)_[A-Za-z0-9_-]+", "[REDACTED_APORT_KEY]"),
@@ -101,6 +101,9 @@ class APortCallback(AsyncCallbackHandler):
             msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
             code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
             if self.enforcement_mode == "warn":
-                print(f"[APort] warning: policy would have denied {tool_name}. Reason: {_sanitize_display(code)}.")
+                print(
+                    f"[APort] warning: policy would have denied "
+                    f"{_sanitize_display(tool_name)}. Reason: {_sanitize_display(code)}."
+                )
                 return
             raise GuardrailViolation(msg, code=code, reasons=reasons)

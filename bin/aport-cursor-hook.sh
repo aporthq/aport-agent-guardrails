@@ -133,7 +133,7 @@ allow() {
 }
 
 if ! printf '%s' "$INPUT" | jq -e . > /dev/null 2>&1; then
-    deny "$(aport_format_guardrail_notice deny hook.input oap.invalid_json "Invalid hook JSON")"
+    deny_or_warn "hook.input" "oap.invalid_json" "Invalid hook JSON"
 fi
 
 # Safe jq extraction: returns '{}' on any jq error
