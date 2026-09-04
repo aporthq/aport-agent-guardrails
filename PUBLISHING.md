@@ -4,9 +4,16 @@ How we publish **APort Agent Guardrails** to npm and what gets shipped.
 
 ## What gets published
 
-Each **GitHub Release** (e.g. `v1.0.0`) triggers the [Release workflow](.github/workflows/release.yml), which runs `npm publish` from the repo root.
+Each version bump merged to `main` dispatches the [Release workflow](.github/workflows/release.yml),
+which tags the matching source, publishes npm/PyPI packages, bundles enterprise scripts, and
+creates or repairs the GitHub Release.
 
-**Published package:** [`@aporthq/aport-agent-guardrails`](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails)
+**Primary npm package:** [`@aporthq/aport-agent-guardrails`](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails)
+
+The release also publishes the workspace npm packages documented in
+[docs/RELEASE.md](docs/RELEASE.md), including the Node core package, framework adapters,
+`@aporthq/openclaw-aport`, and the deprecated compatibility alias. Python packages are published
+to PyPI from the same version tag.
 
 **Contents of the npm tarball:**
 
@@ -17,7 +24,7 @@ Each **GitHub Release** (e.g. `v1.0.0`) triggers the [Release workflow](.github/
 | `extensions/openclaw-aport/` | OpenClaw plugin (deterministic enforcement) |
 | `external/` | Policy packs and spec (aport-policies, aport-spec) — bundled at publish time from submodules |
 | `docs/` | QUICKSTART, TOOL_POLICY_MAPPING, etc. |
-| `templates/`, `policies/`, `LICENSE`, `README.md` | Supporting files |
+| `templates/`, `local-overrides/`, `skills/`, `LICENSE`, `README.md` | Supporting files |
 
 So after `npm install @aporthq/aport-agent-guardrails` or `npx @aporthq/aport-agent-guardrails`, the package is **self-contained**: no git clone or submodule init required.
 
@@ -28,42 +35,43 @@ So after `npm install @aporthq/aport-agent-guardrails` or `npx @aporthq/aport-ag
 - **`npx @aporthq/aport-agent-guardrails`** — runs the setup wizard (`bin/openclaw`): passport, plugin install, gateway restart, smoke test. This is the recommended one-command flow.
 - **`aport-guardrail`** (from installed package) — run a single guardrail check (e.g. from CI or after setup).
 
-## Release workflow (tag-driven)
+## Release workflow
 
-**Merges to main are not releases.** A release happens only when you push a **tag** `v*`.
+**Merges to main are releases only when the package version changes.** The
+`release-on-version.yml` dispatcher compares the previous and current `package.json` version.
+When the version changes, it dispatches `release.yml` on `main` with that version.
 
 The canonical process (single version for all packages, Changesets, Python sync) is in **[docs/RELEASE.md](docs/RELEASE.md)**. Summary:
 
 1. **Bump version** using `npm run version` (runs Changesets for the fixed workspace group, then syncs the root CLI package, Python packages, lockfiles, manifests, and release docs). Commit the version bump and changelog updates.
-2. **Publish** Node packages (e.g. `npx changeset publish`) and Python packages to PyPI as needed.
-4. **Tag and push** (from your local `main`, or from the merge commit):
-   ```bash
-   git checkout main && git pull
-   git tag v1.0.1   # must match package.json "version"
-   git push origin v1.0.1
-   ```
-5. **CI runs automatically:** the [Release workflow](.github/workflows/release.yml) triggers on tag push. It:
-   - Checks out that tag with submodules
-   - Runs `npm publish`
-   - Creates the GitHub Release for that tag (with generated notes)
+2. **Merge the release PR to `main`.**
+3. **CI runs automatically:** the release dispatcher triggers the [Release workflow](.github/workflows/release.yml). It:
+   - Verifies the requested version matches the tagged source
+   - Creates the missing annotated `vX.Y.Z` tag when needed
+   - Publishes npm packages and PyPI packages, skipping already-published artifacts during recovery
+   - Bundles enterprise scripts for macOS, Linux, and Windows
+   - Creates or repairs the GitHub Release for that tag
 
-So: **same process every time** — bump version, merge to main, then `git tag vX.Y.Z && git push origin vX.Y.Z`. No need to create the release in the GitHub UI. See [docs/RELEASE.md](docs/RELEASE.md) for the exact checklist.
+Manual tag pushes still work as a fallback when the tag matches `package.json`, but the normal
+path is version bump PR -> merge to `main` -> automatic release dispatch. See
+[docs/RELEASE.md](docs/RELEASE.md) for the exact checklist.
 
 ## Comparison to agent-passport
 
 | Aspect | agent-passport | aport-agent-guardrails |
 |--------|----------------|------------------------|
 | Structure | Monorepo (SDK node/python, middleware) | Single npm package + bundled submodules |
-| Publish trigger | Tags / manual “Publish Packages” | Tag push `v*` (then npm publish + release created) |
+| Publish trigger | Tags / manual “Publish Packages” | Version bump on `main` dispatches release; tag push remains a fallback |
 | Version bump | `npm run version:patch` etc. | `npm run version` (Changesets + sync-version) |
-| What’s published | Multiple packages (npm + PyPI) | One package: `@aporthq/aport-agent-guardrails` |
+| What’s published | Multiple packages (npm + PyPI) | Root CLI package, workspace npm packages, OpenClaw plugin package, deprecated alias, and Python packages |
 
 ## Prerequisites
 
-- **GitHub:** Push a tag `vX.Y.Z`; workflow runs and creates the release.
+- **GitHub:** Merge the version bump to `main`; the dispatcher creates the tag and release workflow run.
 - **npm:** `NPM_TOKEN` (Automation token) in repo secrets so the workflow can publish.
+- **PyPI:** `PYPI_TOKEN` in repo secrets or trusted publishing configured for the `Release` workflow.
 
 ## Troubleshooting
 
 - **Publish fails:** Ensure `NPM_TOKEN` is set and the version in `package.json` is **newer** than the last published version.
-- **Package missing policies/spec:** Ensure the Release workflow uses `actions/checkout` with `submodules: recursive` so `external/` is included in the tarball.
+- **Package missing policy/spec submodules:** Ensure the Release workflow uses `actions/checkout` with `submodules: recursive` so `external/` is included in the tarball.
