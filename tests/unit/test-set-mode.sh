@@ -119,6 +119,24 @@ grep -q "^api_url: 'https://staging-api.aport.io'$" "$LANGCHAIN_DIR/config.yaml"
     exit 1
 }
 
+cat > "$LANGCHAIN_DIR/config.yaml" << 'EOF'
+framework: 'langchain'
+mode: local
+enforcement_mode: warn
+passport_path: '/tmp/passport.json'
+EOF
+APORT_LANGCHAIN_CONFIG_DIR="$LANGCHAIN_DIR" "$MODE_HELPER" langchain --mode=api --api-url=https://staging-api.aport.io > "$TEST_DIR/langchain-preserve-enforcement.out"
+grep -q '^APORT_ENFORCEMENT=warn$' "$LANGCHAIN_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: generic mode-only update should preserve existing warn enforcement" >&2
+    cat "$LANGCHAIN_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+grep -q "^enforcement_mode: 'warn'$" "$LANGCHAIN_DIR/config.yaml" || {
+    echo "FAIL: generic config should preserve warn enforcement_mode" >&2
+    cat "$LANGCHAIN_DIR/config.yaml" >&2
+    exit 1
+}
+
 PROJECT_DIR="$TEST_DIR/project-local-langchain"
 PROJECT_HOME="$TEST_DIR/project-local-home"
 mkdir -p "$PROJECT_DIR/.aport" "$PROJECT_HOME/.aport/langchain"
@@ -200,6 +218,19 @@ if (plugin.agentId !== "ap_existing") process.exit(2);
 if (plugin.enforcementMode !== "warn") process.exit(3);
 ' "$OPENCLAW_DIR/openclaw.json" || {
     echo "FAIL: OpenClaw JSON config should preserve mode/passport and update enforcement" >&2
+    cat "$OPENCLAW_DIR/openclaw.json" >&2
+    exit 1
+}
+
+APORT_OPENCLAW_CONFIG_DIR="$OPENCLAW_DIR" "$MODE_HELPER" openclaw --mode=api > "$TEST_DIR/openclaw-preserve-enforcement.out"
+node -e '
+const fs = require("fs");
+const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const plugin = cfg.plugins.entries["openclaw-aport"].config;
+if (plugin.mode !== "api") process.exit(1);
+if (plugin.enforcementMode !== "warn") process.exit(2);
+' "$OPENCLAW_DIR/openclaw.json" || {
+    echo "FAIL: OpenClaw mode-only update should preserve existing warn enforcement" >&2
     cat "$OPENCLAW_DIR/openclaw.json" >&2
     exit 1
 }

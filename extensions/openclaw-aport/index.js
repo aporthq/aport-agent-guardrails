@@ -290,32 +290,55 @@ function splitSimpleShellWords(input) {
   const words = [];
   let current = "";
   let quote = "";
+  let hadToken = false;
+  let escaped = false;
 
   for (const ch of input) {
+    if (escaped) {
+      current += ch;
+      hadToken = true;
+      escaped = false;
+      continue;
+    }
     if (quote) {
+      if (quote === '"' && ch === "\\") {
+        escaped = true;
+        hadToken = true;
+        continue;
+      }
       if (ch === quote) {
         quote = "";
       } else {
         current += ch;
+        hadToken = true;
       }
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      hadToken = true;
       continue;
     }
     if (ch === "'" || ch === '"') {
       quote = ch;
+      hadToken = true;
       continue;
     }
+    if (/[;&|<>`$]/.test(ch)) return null;
     if (/\s/.test(ch)) {
-      if (current) {
+      if (hadToken) {
         words.push(current);
         current = "";
+        hadToken = false;
       }
       continue;
     }
     current += ch;
+    hadToken = true;
   }
 
-  if (quote) return null;
-  if (current) words.push(current);
+  if (quote || escaped) return null;
+  if (hadToken) words.push(current);
   return words;
 }
 
