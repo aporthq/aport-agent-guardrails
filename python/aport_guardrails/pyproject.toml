@@ -7,7 +7,7 @@ name = "aport-agent-guardrails"
 version = "1.0.30"
 description = "APort Agent Guardrail — shared core for AI agent and LLM frameworks (pre-action authorization)"
 readme = "README.md"
-license = "Apache-2.0"
+license = { text = "Apache-2.0" }
 authors = [{ name = "APort Technologies Inc." }]
 keywords = ["aport", "agent guardrail", "LLM guardrail", "AI agent", "guardrails", "authorization", "policy", "agent security"]
 classifiers = [

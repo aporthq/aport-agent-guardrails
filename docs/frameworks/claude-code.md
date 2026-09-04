@@ -57,6 +57,19 @@ npx --yes @aporthq/aport-agent-guardrails claude-code "ap_..." --non-interactive
 
 That setup writes `~/.claude/aport/guardrail-mode.env`, and the Claude hook loads those values before every tool call. Hosted mode is fail-closed: if the API evaluator is unreachable, the tool call is denied rather than silently downgraded to local mode.
 
+Default enforcement is `enforce` (fail-closed). To roll out without blocking developers while tuning policy, opt in explicitly:
+
+```bash
+npx @aporthq/aport-agent-guardrails claude-code --enforcement=warn
+```
+
+To change enforcement later without creating a new passport or reinstalling the hook:
+
+```bash
+npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=warn
+npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=enforce
+```
+
 ## Reset / uninstall
 
 To remove APort-owned Claude hook wiring and local config:
@@ -69,24 +82,29 @@ npx @aporthq/aport-agent-guardrails claude-code reset --yes
 
 This removes `~/.claude/aport/` and strips APort hook entries from `~/.claude/settings.json` while preserving unrelated Claude hooks where possible.
 
-### Marketplace install (Claude plugins)
+### Marketplace catalog
 
-APort now includes a Claude plugin marketplace catalog at `.claude-plugin/marketplace.json`.
+APort includes a Claude plugin marketplace catalog at `.claude-plugin/marketplace.json`.
+Treat this as a discovery surface for now. The supported runtime setup is still the
+`npx @aporthq/aport-agent-guardrails claude-code` installer because it writes the
+Claude Code `PreToolUse` hook, hosted/local passport settings, and enforcement mode
+from one maintained path.
 
-Use Claude commands:
+If you add the catalog with Claude commands:
 
 ```text
 /plugin marketplace add https://github.com/aporthq/aport-agent-guardrails.git
 /plugin install aport-guardrails-claude-code@aport-plugins
 ```
 
-Then run:
+then run the supported installer in your shell:
 
-```text
-/aport-setup
+```bash
+npx @aporthq/aport-agent-guardrails claude-code
 ```
 
-This command intentionally runs the same supported installer flow (`npx @aporthq/aport-agent-guardrails claude-code`) so runtime hook wiring remains centralized in the main installer.
+This keeps runtime hook wiring centralized in the same tested installer used by direct
+CLI setup.
 
 ---
 
@@ -103,6 +121,8 @@ This command intentionally runs the same supported installer flow (`npx @aporthq
 | Agent, Task, TaskCreate, TaskUpdate, TaskStop, Skill, EnterWorktree, ExitWorktree, SendMessage, TeamCreate, TeamDelete, RemoteTrigger | agent.session.create.v1 | Enforce  |
 | CronCreate, CronDelete | agent.session.create.v1 | Enforce  |
 | mcp__&lt;server&gt;__&lt;tool&gt; | mcp.tool.execute.v1 | Enforce  |
+| Artifact, EndConversation, SendFeedback | — | Allow as internal UX/feedback tools |
+| Workflow | agent.session.create.v1 | Enforce |
 | **Unknown tool**    | —                         | **Denied (fail-closed)** |
 
 Permission-rule specifiers such as `Agent(Explore)` are stripped before mapping (the hook receives `Agent(Explore)` and normalizes to `agent`).

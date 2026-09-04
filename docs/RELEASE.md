@@ -45,18 +45,27 @@ So: **root = CLI/setup**; **core = library**. We publish core so that (1) the ad
    ```  
    This runs `changeset version` for the fixed workspace group, then `node scripts/sync-version.mjs` to align the root CLI package, Python packages, lockfiles, manifests, and release docs to that same version.
 3. **Commit** the version bump and changelog updates (e.g. “chore(release): 1.3.0”).
-4. **Tag and push** — this triggers the release workflow and publishes both npm and PyPI:
-   ```bash
-   git tag v1.3.0
-   git push origin v1.3.0
-   ```
-5. **CI (`.github/workflows/release.yml`)**: on tag push `v*`:
+4. **Merge the release PR to `main`**. The `Dispatch Release On Version Bump` workflow detects the package version change and dispatches `.github/workflows/release.yml` with that version.
+5. **CI (`.github/workflows/release.yml`)**:
+   - On `workflow_dispatch`, verifies the requested version matches `package.json`, runs the release regression gate, creates the annotated `vX.Y.Z` tag when it is missing, and then publishes.
+   - On manual tag push `v*`, verifies the tag version matches `package.json`, runs the release regression gate, and then publishes.
    - **publish-npm**: publishes the **root** package `@aporthq/aport-agent-guardrails` (CLI), workspace packages `@aporthq/aport-agent-guardrails-core`, `-langchain`, `-crewai`, `-cursor`, `-claude-code`, `@aporthq/openclaw-aport`, and the deprecated compatibility alias `@aporthq/agent-guardrails` to npm. The **n8n** package is not published yet (coming soon). Uses `NPM_TOKEN` secret.
    - **publish-python**: builds and publishes `aport-agent-guardrails`, `aport-agent-guardrails-langchain`, and `aport-agent-guardrails-crewai` to PyPI (uses `PYPI_TOKEN` secret). Uploads use `--skip-existing`, so reruns or recovery releases can still publish any missing Python artifacts for the same version.
    - **workflow_dispatch**: supports release recovery for an existing version after workflow fixes land on `main`.
    - **create-release**: creates the GitHub Release with install notes for both ecosystems.
 
    **PyPI**: In [PyPI project settings](https://pypi.org/help/#project-urls), set Repository and (if using trusted publishing) add this repo and workflow name **Release**. Otherwise configure the `PYPI_TOKEN` secret in the GitHub repo.
+
+### Manual fallback
+
+If the automatic dispatcher is unavailable, run the existing release workflow manually from GitHub Actions with the desired `version`. The workflow will create the missing tag if the requested version matches `package.json`.
+
+You can still push a tag manually if needed:
+
+```bash
+git tag v1.3.0
+git push origin v1.3.0
+```
 
 ---
 

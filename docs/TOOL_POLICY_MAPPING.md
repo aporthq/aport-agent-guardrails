@@ -24,7 +24,7 @@ This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guard
 | `payment.charge`, `finance.payment.charge` | `finance.payment.charge.v1` | `external/aport-policies/finance.payment.charge.v1/` |
 | `database.write`, `database.*`, `data.export` | `data.export.create.v1` | `external/aport-policies/data.export.create.v1/` |
 
-**Unknown tool:** In the **bash/API guardrail script**, an unknown tool name results in deny (exit 1). In the **OpenClaw plugin**, unmapped tools are **allowed** by default so custom skills and ClawHub tools work; set `allowUnmappedTools: false` in plugin config for strict (block unmapped).
+**Unknown tool:** In the **bash/API guardrail script**, an unknown tool name results in deny (exit 1). In the **OpenClaw plugin**, unmapped tools are **blocked** by default. Set `allowUnmappedTools: true` only when explicitly rolling out trusted custom skills and accepting that unmapped tools bypass policy checks.
 
 ## How OpenClaw uses it
 

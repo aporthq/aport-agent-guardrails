@@ -169,7 +169,7 @@ node_modules/.bin/agent-guardrails
 ./bin/openclaw
 
 # Which registers plugin
-openclaw plugins install -l <path>
+openclaw plugins install --link <path>
 ```
 
 **This is standard npm lifecycle.** Every package with a bin script does this.

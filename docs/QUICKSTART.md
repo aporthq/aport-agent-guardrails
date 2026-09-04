@@ -1,31 +1,100 @@
 # Quick Start Guide
-**Get started with APort Agent Guardrails in one command**
+**Get started with APort Repository Guard and runtime guardrails in one command**
 
 ---
 
-## Recommended: one command (npm, no clone)
+## 1. Protect a GitHub repository
+
+```bash
+npx @aporthq/aport-agent-guardrails github
+```
+
+This creates `.github/workflows/aport-guard.yml` using the public
+[APort Repository Guard](https://github.com/marketplace/actions/aport-repository-guard)
+Action (`aporthq/policy-verify-action@v1`).
+
+Default `mode: auto` uses GitHub OIDC, creates or reuses a repository-scoped
+hosted OAP passport, and starts with report-only evidence. Pair hosted
+enforcement with branch protection when you are ready to block merges or
+protected-branch pushes.
+
+Blocking hosted setup:
+
+```bash
+npx @aporthq/aport-agent-guardrails github --mode hosted --branches main,staging --block-protected-paths
+```
+
+Guide: [GITHUB_PROTECTION.md](GITHUB_PROTECTION.md)
+
+## 2. Install runtime guardrails
+
+Use this on the machine where the agent or coding tool runs:
 
 ```bash
 npx @aporthq/aport-agent-guardrails
 ```
 
-Choose a framework, then choose hosted setup to create a passport and setup key immediately. If you already have an agent_id from aport.io, run `npx @aporthq/aport-agent-guardrails openclaw <agent_id>` to use a hosted passport (no local file). See [HOSTED_PASSPORT_SETUP.md](HOSTED_PASSPORT_SETUP.md).
+Choose a framework when prompted: `cursor`, `claude-code`, `openclaw`,
+`langchain`, `crewai`, `deerflow`, or `n8n`.
 
-Install URL alternative:
+Direct examples:
+
+```bash
+npx @aporthq/aport-agent-guardrails cursor
+npx @aporthq/aport-agent-guardrails claude-code
+npx @aporthq/aport-agent-guardrails openclaw
+```
+
+When prompted for passport setup:
+
+1. `Create hosted APort passport now` — recommended; creates a hosted passport and narrow setup key.
+2. `Use existing hosted passport ID` — paste an existing `agent_id`.
+3. `Create local passport file` — offline/local JSON passport.
+
+Hosted mode is the default public path because it gives you centralized audit,
+remote suspend/status, and signed hosted decisions. Local JSON remains available
+for offline or privacy-sensitive deployments.
+
+Install URL alternative for runtime hooks:
 
 ```bash
 curl -fsSL https://aport.io/install.sh | bash -s -- claude-code
 ```
 
-This uses the [npm package](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails): downloads the package, runs the setup wizard, installs the plugin and wrappers, and runs a smoke test.
+This thin shim uses the
+[npm package](https://www.npmjs.com/package/@aporthq/aport-agent-guardrails).
 
-**Alternative: from the repo** (if you cloned the repo):
+## 3. Change enforcement without recreating passports
+
+APort is fail-closed by default. Use warn/report-only mode only when you
+explicitly choose an audit rollout:
 
 ```bash
-make openclaw-setup
+npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=warn
+npx @aporthq/aport-agent-guardrails mode cursor --enforcement=enforce
 ```
 
-Or:
+The `mode` command preserves the existing hosted passport, setup key, API URL,
+and local passport path. It only changes mode/enforcement settings.
+
+## 4. Enterprise device rollout
+
+For IT-managed fleets, use the bundled deploy/enforce/uninstall scripts:
+
+```bash
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy" | sudo -E bash
+```
+
+Docs: [ENTERPRISE_DEVICE_DEPLOYMENT.md](ENTERPRISE_DEVICE_DEPLOYMENT.md)
+
+## Manual OpenClaw local walkthrough
+
+The remaining steps are retained for lower-level OpenClaw/local testing. Most
+users should prefer `npx @aporthq/aport-agent-guardrails github` for repository
+protection or `npx @aporthq/aport-agent-guardrails <framework>` for runtime
+hooks.
+
+**From the repo** (if you cloned the repo):
 
 ```bash
 ./bin/openclaw

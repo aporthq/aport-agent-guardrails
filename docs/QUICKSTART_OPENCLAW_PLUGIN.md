@@ -20,7 +20,7 @@ No repo clone is required.
 
 1. Prompts for your OpenClaw config directory
 2. Creates a local passport or wires a hosted `agent_id`
-3. Installs the `openclaw-aport` plugin with `openclaw plugins install -l ...`
+3. Installs the `openclaw-aport` plugin with `openclaw plugins install --link ...`
 4. Writes plugin config into `config.yaml` and `openclaw.json`
 5. Installs `aport-*` wrappers under `CONFIG_DIR/.skills/`
 6. Runs a smoke test so you know the setup is complete
@@ -55,6 +55,8 @@ plugins:
         passportFile: ~/.openclaw/aport/passport.json
         apiUrl: https://api.aport.io
         failClosed: true
+        enforcementMode: enforce
+        allowUnmappedTools: false
 ```
 
 Hosted passports use `agentId` instead of `passportFile`.
@@ -73,6 +75,8 @@ plugins:
         mode: local
         passportFile: ~/.openclaw/aport/passport.json
         failClosed: true
+        enforcementMode: enforce
+        allowUnmappedTools: false
 ```
 
 Current plugin versions use a built-in JavaScript evaluator in local mode. The setup command still installs `aport-guardrail-bash.sh` for manual smoke tests and shell tooling, but the plugin does not depend on `child_process` or the bash script for local-mode enforcement.
@@ -82,7 +86,7 @@ Current plugin versions use a built-in JavaScript evaluator in local mode. The s
 If you are developing from a local checkout:
 
 ```bash
-openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport
+openclaw plugins install --link /path/to/aport-agent-guardrails/extensions/openclaw-aport
 ```
 
 Public users should prefer the `npx @aporthq/aport-agent-guardrails openclaw` path.

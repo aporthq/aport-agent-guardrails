@@ -27,7 +27,7 @@ For Cursor, you almost always use **Guardrails (CLI)** once to install the hook;
 - **Cursor CLI coverage:** Cursor CLI hook coverage has changed over time and may lag the IDE. APort installs the supported hook entries and uses fail-closed `deny` for enforcement, but direct coverage depends on the Cursor version and which hook events that version emits.
 - **Claude Code:** Uses `~/.claude/settings.json` with a **different** output format (`hookSpecificOutput.permissionDecision`). Use the **dedicated Claude Code integration** instead of this Cursor hook — see [claude-code.md](./claude-code.md).
 
-Our script accepts Cursor payloads and a small set of legacy tool payloads (e.g. `command`, or `tool`/`input`), maps to the matching APort policy, calls the guardrail evaluator, and returns `permission: allow|deny` plus optional `agentMessage`.
+Our script accepts Cursor payloads and a small set of legacy tool payloads (e.g. `command`, or `tool`/`input`), maps to the matching APort policy, calls the guardrail evaluator, and returns Cursor-compatible JSON with `permission`, `agent_message`, and `user_message`.
 
 **Hook script path:** The hook script (`aport-cursor-hook.sh`) resolves `bin/aport-guardrail-bash.sh` relative to its own directory (script dir → parent = package root). When you install via **npx**, the installer writes the path to the script inside the npx cache (e.g. `…/node_modules/@aporthq/aport-agent-guardrails/bin/aport-cursor-hook.sh`), so the guardrail script is found at `…/bin/aport-guardrail-bash.sh`. If you copy the hook script elsewhere, ensure `bin/aport-guardrail-bash.sh` exists at the same relative location or set `APORT_GUARDRAIL_SCRIPT` (or equivalent) so the hook can find the evaluator.
 
@@ -39,7 +39,20 @@ npx @aporthq/aport-agent-guardrails cursor
 npx @aporthq/aport-agent-guardrails --framework=cursor
 ```
 
-This runs setup and writes **`~/.cursor/hooks.json`** with the path to the APort hook script. Choose hosted setup for passport and setup-key creation, or local setup to write a passport at the framework default path: **`~/.cursor/aport/passport.json`**. In non-interactive local mode you can pass **`--output /path/to/passport.json`** to choose the path. Restart Cursor (or reload the window) after setup so the hooks are loaded.
+This runs setup and writes **`~/.cursor/hooks.json`** with fail-closed APort hook entries for shell/tool/MCP/file-read events. Choose hosted setup for passport and setup-key creation, or local setup to write a passport at the framework default path: **`~/.cursor/aport/passport.json`**. In non-interactive local mode you can pass **`--output /path/to/passport.json`** to choose the path. Restart Cursor (or reload the window) after setup so the hooks are loaded.
+
+Default enforcement is `enforce` (fail-closed). To roll out in report-only mode, opt in explicitly:
+
+```bash
+npx @aporthq/aport-agent-guardrails cursor --enforcement=warn
+```
+
+To change enforcement later without creating a new passport or reinstalling hooks:
+
+```bash
+npx @aporthq/aport-agent-guardrails mode cursor --enforcement=warn
+npx @aporthq/aport-agent-guardrails mode cursor --enforcement=enforce
+```
 
 ## Is it installed? How to check
 
@@ -48,7 +61,7 @@ This runs setup and writes **`~/.cursor/hooks.json`** with the path to the APort
   npx @aporthq/aport-agent-guardrails cursor
   ```
   (or `npx @aporthq/aport-agent-guardrails --framework=cursor`). The installer writes `~/.cursor/hooks.json` and configures hosted or local passport mode.
-- **Hooks file:** After installing, open `~/.cursor/hooks.json` (user-level) or `.cursor/hooks.json` (project). You should see `beforeShellExecution` and/or `preToolUse` entries whose `command` is the path to `aport-cursor-hook.sh`.
+- **Hooks file:** After installing, open `~/.cursor/hooks.json` (user-level) or `.cursor/hooks.json` (project). You should see `beforeShellExecution`, `preToolUse`, `beforeMCPExecution`, and `beforeReadFile` entries whose `command` is the path to `aport-cursor-hook.sh`.
 - **Restart required:** Cursor loads hooks at startup. After installing, **restart Cursor** (or **Reload Window** from the command palette) so the new hooks are active.
 - **Passport/config:** In hosted mode, the hook loads `~/.cursor/aport/guardrail-mode.env`. In local mode, it uses the passport created at **`~/.cursor/aport/passport.json`** by default (each framework has its own default; see [Default paths](#config) below).
 
@@ -117,8 +130,8 @@ Then run `bin/aport-status.sh` and `cat ~/.cursor/aport/audit.log` to confirm th
 ## Config
 
 - **Hooks file:** `~/.cursor/hooks.json` (user) or `.cursor/hooks.json` (project). The installer writes the former by default.
-- **Passport and default paths:** Each framework stores passport and evaluation data in its own default location. For Cursor the default is **`~/.cursor/aport/passport.json`** (with `decision.json` and `audit.log` in `~/.cursor/aport/`). You can always choose a different path: in the wizard the first question is the passport path (default shown in brackets); in non-interactive mode use **`--output /path/to/passport.json`**. The Python evaluator and bash resolver use the same default-path map (e.g. `python/aport_guardrails/core/evaluator.py` → `DEFAULT_PASSPORT_PATHS`, `bin/lib/config.sh` → `get_default_passport_path`).
-- **Hook script:** `bin/aport-cursor-hook.sh` in this repo (or in the npm package when installed via npx). The installer puts its absolute path into `hooks.json`. The hook does not set a config dir; the path resolver probes `~/.cursor`, `~/.openclaw`, `~/.aport/langchain`, etc., and uses the first directory that contains `aport/passport.json`.
+- **Passport and default paths:** Each framework stores passport and evaluation data in its own default location. For Cursor the default is **`~/.cursor/aport/passport.json`** (with `decision.json`, `audit.log`, and `guardrail-mode.env` in `~/.cursor/aport/`). Hosted mode uses the `agent_id` and API key stored in `guardrail-mode.env`; it does not need a local passport JSON file. You can always choose a different local path: in the wizard the first question is the passport path (default shown in brackets); in non-interactive mode use **`--output /path/to/passport.json`**.
+- **Hook script:** `bin/aport-cursor-hook.sh` in this repo (or in the npm package when installed via npx). The installer puts its absolute path into `hooks.json`. The Cursor hook anchors config resolution to the Cursor config directory and loads `~/.cursor/aport/guardrail-mode.env` when present.
 
 ## Status and logs
 

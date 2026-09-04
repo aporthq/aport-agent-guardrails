@@ -55,7 +55,8 @@ run_setup() {
     if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
         export APORT_API_URL="${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
     fi
-    MODE_FILE="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id")"
+    select_guardrail_enforcement
+    MODE_FILE="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id" "$APORT_SELECTED_ENFORCEMENT")"
 
     # Resolve absolute path to hook script (works from repo or npx package)
     HOOK_SCRIPT="$(resolve_hook_script_path "${APORT_CLAUDE_CODE_HOOK_SCRIPT:-}" "aport-claude-code-hook.sh" "$LIB")"
@@ -84,6 +85,7 @@ run_setup() {
     echo "  1. Settings written to: $SETTINGS_FILE"
     echo "  2. Hook script: $HOOK_SCRIPT"
     echo "  3. Guardrail mode: $APORT_SELECTED_GUARDRAIL_MODE"
+    echo "     Enforcement: $APORT_SELECTED_ENFORCEMENT"
     if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
         echo "     API URL: ${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
     fi

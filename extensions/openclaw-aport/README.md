@@ -22,7 +22,7 @@ That command:
 
 1. Chooses your OpenClaw config directory
 2. Creates a passport or wires a hosted `agent_id`
-3. Installs this plugin with `openclaw plugins install -l ...`
+3. Installs this plugin with `openclaw plugins install --link ...`
 4. Writes plugin config into `config.yaml` and `openclaw.json`
 5. Installs wrappers under `CONFIG_DIR/.skills/` for manual guardrail and status commands
 6. Runs a setup smoke test
@@ -76,7 +76,7 @@ If OpenClaw's built-in sandbox and tool policy are enough for your deployment, u
 If you are working from a local checkout, install the plugin directly from the extension directory:
 
 ```bash
-openclaw plugins install -l /path/to/aport-agent-guardrails/extensions/openclaw-aport
+openclaw plugins install --link /path/to/aport-agent-guardrails/extensions/openclaw-aport
 ```
 
 That command installs only the OpenClaw plugin bundle. It does not create a passport, choose API vs local mode, or write plugin config. For a full working setup, use:
@@ -98,7 +98,8 @@ plugins:
         passportFile: ~/.openclaw/aport/passport.json
         apiUrl: https://api.aport.io
         failClosed: true
-        allowUnmappedTools: true
+        enforcementMode: enforce
+        allowUnmappedTools: false
 ```
 
 Hosted passport mode uses `agentId` instead of `passportFile`.
@@ -129,7 +130,9 @@ The plugin keeps the existing OpenClaw-specific tool mappings. Common examples:
 - `write`, `edit`, `multiedit` -> `data.file.write.v1`
 - bundle MCP tools exposed as `serverName__toolName` -> `mcp.tool.execute.v1`
 
-`allowUnmappedTools: true` keeps the previous OpenClaw compatibility behavior for custom skills and unmapped tools.
+Unmapped tools are blocked by default. Set `allowUnmappedTools: true` only when you intentionally want the previous compatibility behavior for trusted custom skills and unmapped tools.
+
+`enforcementMode: warn` is available for report-only rollout. It records the original deny decision but lets OpenClaw continue; default `enforce` blocks denied actions.
 
 ## Exec behavior
 

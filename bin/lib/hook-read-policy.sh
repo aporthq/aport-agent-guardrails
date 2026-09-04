@@ -8,7 +8,7 @@
 
 aport_hook_read_tools_with_path() {
     case "$1" in
-        read | readfile | read_file | semanticsearch) return 0 ;;
+        read | readfile | read_file | semanticsearch | presentfile | present_file | viewimage | view_image) return 0 ;;
         *) return 1 ;;
     esac
 }
