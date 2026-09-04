@@ -16,7 +16,7 @@ __aport_emit_crash_deny() {
     local line_no="$1"
     local script_name
     script_name="$(basename "${BASH_SOURCE[0]:-aport-claude-code-hook}")"
-    local reason="🛡️ APort: hook internal error (exit=${exit_code} at ${script_name}:${line_no}). Run with DEBUG_APORT=1 for details."
+    local reason="APort denied this tool call. Policy: hook.runtime. Reason: oap.hook_error. Detail: ${script_name}:${line_no} exited ${exit_code}."
     if command -v jq > /dev/null 2>&1; then
         jq -n --arg reason "$reason" --arg event "PreToolUse" \
             '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"deny",permissionDecisionReason:$reason}}' 2> /dev/null \
@@ -55,8 +55,33 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
     fi
 fi
 
+emit_claude_input_too_large() {
+    local decision="deny"
+    local notice
+    if aport_hook_is_warn_mode; then
+        decision="allow"
+        notice="$(aport_format_guardrail_notice warn hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
+    else
+        notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
+    fi
+
+    if command -v jq > /dev/null 2>&1; then
+        jq -n --arg reason "$notice" --arg event "PreToolUse" --arg decision "$decision" \
+            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:$decision,permissionDecisionReason:$reason}}'
+    elif [ "$decision" = "allow" ]; then
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}}\n'
+    else
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}}\n'
+    fi
+    exit 0
+}
+
 # Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
 INPUT="$(aport_read_stdin_with_timeout)"
+
+if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
+    emit_claude_input_too_large
+fi
 
 # No input means the host did not provide a tool-call payload. Fail closed.
 if [ -z "$INPUT" ]; then
@@ -112,6 +137,27 @@ deny() {
     exit 0
 }
 
+warn_allow() {
+    local reason="$1"
+    jq -n --arg reason "$reason" \
+        --arg event "PreToolUse" \
+        '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"allow",permissionDecisionReason:$reason}}'
+    exit 0
+}
+
+deny_or_warn() {
+    local policy="$1"
+    local code="${2:-oap.denied}"
+    local message="${3:-}"
+    local notice
+    if aport_hook_is_warn_mode; then
+        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
+        warn_allow "$notice"
+    fi
+    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
+    deny "$notice"
+}
+
 # Tool name passed to guardrail (must match aport-guardrail-bash.sh case patterns)
 GUARDRAIL_TOOL=""
 CONTEXT_JSON="{}"
@@ -130,7 +176,15 @@ case "$TOOL_NAME_NORM" in
             exit 0
         fi
         ;;
-    glob | ls | grep | lsp | todoread | toolsearch | askuserquestion | listmcpresourcestool | readmcpresourcetool | waitformcpservers)
+    artifact | endconversation | sendfeedback)
+        # Claude Code internal UX/feedback tools do not act on the user's system.
+        exit 0
+        ;;
+    readmcpresourcetool)
+        GUARDRAIL_TOOL="mcp.tool"
+        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{server: (.server // .mcp_server // .mcp_server_name // ""), mcp_server: (.server // .mcp_server // .mcp_server_name // ""), tool: (.tool // .mcp_tool // .name // "resources.read"), mcp_tool: (.tool // .mcp_tool // .name // "resources.read"), uri: (.uri // .resource_uri // ""), parameters: .}')"
+        ;;
+    glob | ls | grep | lsp | todoread | toolsearch | askuserquestion | listmcpresourcestool | waitformcpservers)
         # Search/list/read tools without a single file_path: allow without evaluator
         exit 0
         ;;
@@ -166,9 +220,13 @@ case "$TOOL_NAME_NORM" in
         GUARDRAIL_TOOL="mcp.tool"
         CONTEXT_JSON="$TOOL_INPUT"
         ;;
+    workflow)
+        GUARDRAIL_TOOL="session.create"
+        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .name // .workflow // "")}')"
+        ;;
     unknown | *)
         # Unknown tool: fail-closed (deny)
-        deny "🛡️ APort: unknown tool '$TOOL_NAME' — fail-closed policy"
+        deny_or_warn "hook.tool.map" "oap.unknown_tool" "Unknown tool: $TOOL_NAME (fail-closed)"
         ;;
 esac
 
@@ -202,7 +260,8 @@ GUARDRAIL_EXIT=$?
 set -e
 trap '__aport_emit_crash_deny "$LINENO"' ERR
 if [ -n "$DEBUG_APORT" ] && [ -n "$GUARDRAIL_STDERR" ]; then
-    printf '%s\n' "$GUARDRAIL_STDERR" >&2
+    aport_sanitize_display_text "$GUARDRAIL_STDERR" >&2
+    printf '\n' >&2
 fi
 
 # Clean up per-invocation decision file on exit
@@ -217,17 +276,20 @@ fi
 # Deny: prefer reason from decision file (structured), fall back to captured
 # stderr from the guardrail, then a generic message. Never silent.
 REASON=""
+REASON_CODE=""
 if [ -n "$HOOK_DECISION_FILE" ] && [ -f "$HOOK_DECISION_FILE" ] && command -v jq &> /dev/null; then
     R="$(jq -r '.reasons[0].message // empty' "$HOOK_DECISION_FILE" 2> /dev/null)"
     [ -n "$R" ] && REASON="$R"
+    C="$(aport_hook_reason_code "$HOOK_DECISION_FILE")"
+    [ -n "$C" ] && REASON_CODE="$C"
 fi
 if [ -z "$REASON" ] && [ -n "$GUARDRAIL_STDERR" ]; then
     # Take the last non-empty line of stderr as the most actionable signal.
     REASON="$(printf '%s' "$GUARDRAIL_STDERR" | awk 'NF{last=$0} END{print last}')"
 fi
 if [ -z "$REASON" ]; then
-    REASON="Policy denied this action (guardrail exit=${GUARDRAIL_EXIT}, no reason recorded). Run with DEBUG_APORT=1 to see evaluator output."
+    REASON="Policy denied this action (guardrail exit=${GUARDRAIL_EXIT}, no reason recorded)."
 fi
 aport_append_local_session_decision "$HOOK_DECISION_FILE" "claude-code" "$INPUT" "$TOOL_NAME" "$GUARDRAIL_TOOL" "$CONTEXT_JSON"
 cleanup_decision
-deny "🛡️ APort: $REASON"
+deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON"

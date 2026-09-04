@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Main dispatcher: detect or prompt for framework, then run framework setup.
 # Usage:
-#   agent-guardrails                    # detect from cwd or prompt
+#   agent-guardrails                    # detect runtime framework or prompt
+#   agent-guardrails github             # generate GitHub Repository Guard workflow
 #   agent-guardrails openclaw           # explicit framework
 #   agent-guardrails openclaw ap_xxx    # openclaw with agent_id (pass-through)
 #   agent-guardrails --framework=langchain
 #   agent-guardrails -f crewai
-# Supported: openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n
+# Supported frameworks: openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n
+# Project setup target: github
 #
 # Backward compatibility: All arguments after the framework are passed through to
 # the framework script. For OpenClaw, bin/openclaw receives them (e.g. agent_id).
@@ -90,6 +92,27 @@ if [[ -n "$noninteractive_requested" ]]; then
   export APORT_NONINTERACTIVE=1
 fi
 
+if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]] && { [[ "${REST[0]}" == "mode" ]] || [[ "${REST[0]}" == "set-mode" ]]; }; then
+  mode_script="$SCRIPT_DIR/aport-set-mode.sh"
+  if [[ ! -x "$mode_script" ]]; then
+    echo "[aport] ERROR: Mode helper not found: $mode_script" >&2
+    exit 1
+  fi
+  exec "$mode_script" "${REST[@]:1}"
+fi
+
+# Project-level setup target. Keep this out of framework auto-detection so the
+# existing runtime framework flow and prompts remain unchanged.
+if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]] && [[ "${REST[0]}" == "github" ]]; then
+  github_script="$SCRIPT_DIR/github.sh"
+  if [[ ! -x "$github_script" ]]; then
+    echo "[aport] ERROR: GitHub setup helper not found: $github_script" >&2
+    exit 1
+  fi
+  echo "[aport] Selected target: github" >&2
+  exec "$github_script" "${REST[@]:1}"
+fi
+
 # If no framework from args, check if first REST argument is a framework name
 if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]]; then
   first_arg="${REST[0]}"
@@ -139,6 +162,7 @@ if [[ -z "$framework" ]]; then
           if [[ -n "$noninteractive" ]]; then
             echo "[aport] ERROR: Multiple frameworks detected: $detected_list" >&2
             echo "  Set APORT_FRAMEWORK or use --framework=openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n" >&2
+            echo "  For repository protection, run: npx @aporthq/aport-agent-guardrails github" >&2
             exit 1
           fi
           echo ""
@@ -168,15 +192,31 @@ if [[ -z "$framework" ]]; then
   echo "  APort Agent Guardrails — Framework setup"
   echo "  ─────────────────────────────────────────"
   echo "  No framework detected in current directory."
-  echo "  Choose: openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n"
-  echo "  Example: npx @aporthq/aport-agent-guardrails openclaw"
+  prompt_default="openclaw"
+  project_dir="${APORT_PROJECT_DIR:-$PWD}"
+  if command -v git > /dev/null 2>&1 && git -C "$project_dir" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    prompt_default="github"
+  fi
+  echo "  Choose: github | openclaw | langchain | crewai | cursor | claude-code | deerflow | n8n"
+  echo "  Example: npx @aporthq/aport-agent-guardrails github"
+  echo "           npx @aporthq/aport-agent-guardrails claude-code"
   echo "           npx @aporthq/aport-agent-guardrails --framework=langchain"
   echo ""
-  read -p "  Framework [openclaw]: " framework
-  framework="${framework:-openclaw}"
+  read -p "  Target [$prompt_default]: " framework
+  framework="${framework:-$prompt_default}"
 fi
 
 framework="$(echo "$framework" | tr '[:upper:]' '[:lower:]')"
+
+if [[ "$framework" == "github" ]]; then
+  github_script="$SCRIPT_DIR/github.sh"
+  if [[ ! -x "$github_script" ]]; then
+    echo "[aport] ERROR: GitHub setup helper not found: $github_script" >&2
+    exit 1
+  fi
+  echo "[aport] Selected target: github" >&2
+  exec "$github_script" ${REST+"${REST[@]}"}
+fi
 
 # SECURITY: Validate framework name (alphanumeric + hyphen only, prevents path traversal)
 if [[ ! "$framework" =~ ^[a-z0-9-]+$ ]]; then

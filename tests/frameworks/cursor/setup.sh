@@ -68,10 +68,11 @@ if command -v jq &> /dev/null; then
         .hooks.beforeShellExecution[]?,
         .hooks.preToolUse[]?,
         .hooks.beforeMCPExecution[]?,
+        .hooks.beforeReadFile[]?,
         .hooks.subagentStart[]?
-    ] | map(select(.__aport_hook == true and .timeout == 10)) | length' "$CURSOR_DIR/hooks.json")
-    if [[ "$MARKER_COUNT" -ne 4 ]]; then
-        echo "FAIL: expected one marker-owned APort hook with timeout=10 for each supported Cursor event" >&2
+    ] | map(select(.__aport_hook == true and .timeout == 10 and .failClosed == true)) | length' "$CURSOR_DIR/hooks.json")
+    if [[ "$MARKER_COUNT" -ne 5 ]]; then
+        echo "FAIL: expected one marker-owned APort hook with timeout=10 and failClosed=true for each supported Cursor event" >&2
         jq -c '.hooks' "$CURSOR_DIR/hooks.json" >&2
         exit 1
     fi
@@ -82,6 +83,7 @@ if command -v jq &> /dev/null; then
         .hooks.beforeShellExecution[]?,
         .hooks.preToolUse[]?,
         .hooks.beforeMCPExecution[]?,
+        .hooks.beforeReadFile[]?,
         .hooks.subagentStart[]?
     ] | map(select(.__aport_hook == true) | .command // "") | map(select(test("aport-cursor-hook\\.sh$") and test("/\\.npm/_npx/"))) | length' "$CURSOR_DIR/hooks.json")
     if [[ "$STALE_COUNT" -ne 0 ]]; then
@@ -95,6 +97,7 @@ if command -v jq &> /dev/null; then
         .hooks.beforeShellExecution[]?,
         .hooks.preToolUse[]?,
         .hooks.beforeMCPExecution[]?,
+        .hooks.beforeReadFile[]?,
         .hooks.subagentStart[]?
     ] | map(select(.command == "/opt/custom/aport-cursor-hook.sh")) | length' "$CURSOR_DIR/hooks.json")
     if [[ "$LEGACY_UNMARKED_COUNT" -ne 0 ]]; then

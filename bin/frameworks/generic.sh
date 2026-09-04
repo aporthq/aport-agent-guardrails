@@ -133,10 +133,12 @@ persist_python_framework_config() {
     local selected_api_url="$3"
     local hosted_id="$4"
     local local_passport_path="$5"
+    local selected_enforcement="${6:-enforce}"
 
     touch "$config_file"
     _config_replace_or_append "$config_file" "framework" "$(_yaml_quote "$framework")"
     _config_replace_or_append "$config_file" "mode" "$selected_mode"
+    _config_replace_or_append "$config_file" "enforcement_mode" "$(_yaml_quote "$selected_enforcement")"
 
     if [[ "$selected_mode" == "api" ]]; then
         _config_replace_or_append "$config_file" "api_url" "$(_yaml_quote "${selected_api_url:-$DEFAULT_APORT_API_URL}")"
@@ -189,10 +191,11 @@ run_setup() {
     log_info "Local runtime installed at: $config_dir/aport/runtime"
     select_guardrail_mode "$framework" "$hosted_agent_id"
     select_guardrail_api_url "$APORT_SELECTED_GUARDRAIL_MODE"
+    select_guardrail_enforcement
     if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
         export APORT_API_URL="${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
     fi
-    mode_file="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id")"
+    mode_file="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id" "$APORT_SELECTED_ENFORCEMENT")"
     local_passport_path=""
     if [[ -f "$config_dir/aport/passport.json" ]]; then
         local_passport_path="$config_dir/aport/passport.json"
@@ -202,8 +205,10 @@ run_setup() {
         "$APORT_SELECTED_GUARDRAIL_MODE" \
         "${APORT_SELECTED_API_URL:-}" \
         "$hosted_agent_id" \
-        "$local_passport_path"
+        "$local_passport_path" \
+        "$APORT_SELECTED_ENFORCEMENT"
     log_info "Guardrail mode: $APORT_SELECTED_GUARDRAIL_MODE"
+    log_info "Enforcement: $APORT_SELECTED_ENFORCEMENT"
     if [[ "$APORT_SELECTED_GUARDRAIL_MODE" = "api" ]]; then
         log_info "Guardrail API URL: ${APORT_SELECTED_API_URL:-$DEFAULT_APORT_API_URL}"
     fi

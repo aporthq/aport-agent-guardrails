@@ -14,6 +14,8 @@ on:
       - review_request_removed
   pull_request_review:
     types: [submitted, dismissed]
+  push:
+    branches: ["main", "staging"]
   merge_group:
 
 permissions:
@@ -24,13 +26,18 @@ permissions:
 jobs:
   aport:
     name: APort / OAP code.repository.merge.v1
+    if: >-
+      github.event_name != 'pull_request_review' ||
+      github.event.action == 'dismissed' ||
+      github.event.review.state != 'commented'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: APort repository guard
-        uses: aporthq/policy-verify-action@v1.0.2
+        uses: aporthq/policy-verify-action@v1.0.5
         with:
-          mode: auto
+          mode: hosted
+          block-protected-paths: true
           protected-paths: >-
             .github/workflows/**,
             .aport/**,

@@ -1,7 +1,7 @@
 {
   "name": "@aporthq/aport-agent-guardrails",
   "version": "1.0.30",
-  "description": "Policy enforcement guardrails for OpenClaw-compatible agent frameworks",
+  "description": "APort Repository Guard and pre-action authorization guardrails for GitHub, Claude Code, Cursor, OpenClaw, LangChain, CrewAI, DeerFlow, and n8n",
   "workspaces": [
     "packages/*",
     "extensions/openclaw-aport"
@@ -30,6 +30,10 @@
   },
   "keywords": [
     "openclaw",
+    "github-actions",
+    "repository-guard",
+    "claude-code",
+    "cursor",
     "ironclaw",
     "aport",
     "agent",

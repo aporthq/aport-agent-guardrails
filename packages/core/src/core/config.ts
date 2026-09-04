@@ -20,6 +20,9 @@ export interface Config {
   fail_open_when_missing_config?: boolean;
   /** When true, API errors (4xx/5xx, network failures) return allow instead of deny. Default false = fail-closed on API errors. */
   fail_open_on_api_error?: boolean;
+  /** Enforcement behavior for framework adapters. Default enforce = block/throw on deny. */
+  enforcement_mode?: "enforce" | "warn";
+  enforcementMode?: "enforce" | "warn";
   /** SSL verification toggle (dev/test only). */
   verify_ssl?: boolean;
   /** Path to local audit log file, or true to use default path. Default: false (no audit logging). */

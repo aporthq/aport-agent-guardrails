@@ -9,6 +9,13 @@ is_aport_hosted_agent_id() {
     [[ "${1:-}" =~ ^(ap|apt|agt_inst|agt_tmpl)_[A-Za-z0-9_-]+$ ]]
 }
 
+is_aport_api_key() {
+    local value="${1:-}"
+    [[ -n "$value" ]] || return 1
+    [[ "${#value}" -le 4096 ]] || return 1
+    [[ ! "$value" =~ [[:space:][:cntrl:]] ]]
+}
+
 parse_guardrail_mode_args() {
     APORT_GUARDRAIL_MODE_CLI="${APORT_GUARDRAIL_MODE_CLI:-}"
     APORT_GUARDRAIL_API_URL_CLI="${APORT_GUARDRAIL_API_URL_CLI:-}"
@@ -16,6 +23,7 @@ parse_guardrail_mode_args() {
     APORT_QUICK_HOSTED_CLI="${APORT_QUICK_HOSTED_CLI:-}"
     APORT_OWNER_EMAIL_CLI="${APORT_OWNER_EMAIL_CLI:-}"
     APORT_ISSUE_URL_CLI="${APORT_ISSUE_URL_CLI:-}"
+    APORT_ENFORCEMENT_CLI="${APORT_ENFORCEMENT_CLI:-}"
     APORT_FRAMEWORK_ARGS=()
 
     while [[ $# -gt 0 ]]; do
@@ -41,6 +49,23 @@ parse_guardrail_mode_args() {
                 fi
                 APORT_GUARDRAIL_API_URL_CLI="$2"
                 shift
+                ;;
+            --enforcement=*)
+                APORT_ENFORCEMENT_CLI="${1#*=}"
+                ;;
+            --enforcement)
+                if [[ -z "${2:-}" ]]; then
+                    echo "[aport] ERROR: --enforcement requires a value (enforce|warn)" >&2
+                    return 1
+                fi
+                APORT_ENFORCEMENT_CLI="$2"
+                shift
+                ;;
+            --warn | --report-only | --audit-only)
+                APORT_ENFORCEMENT_CLI="warn"
+                ;;
+            --block | --enforce)
+                APORT_ENFORCEMENT_CLI="enforce"
                 ;;
             --quick-hosted | --hosted)
                 APORT_QUICK_HOSTED_CLI="1"
@@ -86,13 +111,93 @@ parse_guardrail_mode_args() {
 
     export APORT_GUARDRAIL_MODE_CLI APORT_GUARDRAIL_API_URL_CLI APORT_HOSTED_AGENT_ID_CLI
     export APORT_QUICK_HOSTED_CLI APORT_OWNER_EMAIL_CLI APORT_ISSUE_URL_CLI
+    export APORT_ENFORCEMENT_CLI
     return 0
+}
+
+normalize_aport_enforcement() {
+    local value="${1:-enforce}"
+    value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | tr '_' '-')"
+    case "$value" in
+        "" | block | enforce | enforced | fail-closed)
+            printf 'enforce'
+            ;;
+        warn | report-only | audit-only | observe | observation)
+            printf 'warn'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 write_env_assignment() {
     local key="$1"
     local value="$2"
-    printf '%s=%q\n' "$key" "$value"
+    if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+        echo "[aport] ERROR: Refusing to write multiline guardrail mode value for $key" >&2
+        return 1
+    fi
+    printf '%s=%s\n' "$key" "$value"
+}
+
+validate_guardrail_mode_assignment() {
+    local key="$1"
+    local value="$2"
+
+    if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+        echo "[aport] ERROR: Refusing to write multiline guardrail mode value for $key" >&2
+        return 1
+    fi
+
+    case "$key" in
+        APORT_GUARDRAIL_MODE)
+            case "$value" in
+                local | api) ;;
+                *)
+                    echo "[aport] ERROR: Invalid APORT_GUARDRAIL_MODE value: $value" >&2
+                    return 1
+                    ;;
+            esac
+            ;;
+        APORT_ENFORCEMENT_MODE | APORT_ENFORCEMENT)
+            normalize_aport_enforcement "$value" > /dev/null || {
+                echo "[aport] ERROR: Invalid $key value: $value" >&2
+                return 1
+            }
+            ;;
+        APORT_API_URL)
+            if [[ ! "$value" =~ ^https?://[A-Za-z0-9._~:/?#@%+=,-]+$ ]]; then
+                echo "[aport] ERROR: Invalid APORT_API_URL value" >&2
+                return 1
+            fi
+            ;;
+        APORT_AGENT_ID)
+            if ! is_aport_hosted_agent_id "$value"; then
+                echo "[aport] ERROR: Invalid APORT_AGENT_ID value" >&2
+                return 1
+            fi
+            ;;
+        APORT_API_KEY)
+            if ! is_aport_api_key "$value"; then
+                echo "[aport] ERROR: Invalid APORT_API_KEY value" >&2
+                return 1
+            fi
+            ;;
+        *)
+            echo "[aport] ERROR: Unsupported guardrail mode key $key" >&2
+            return 1
+            ;;
+    esac
+}
+
+add_guardrail_mode_entry() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+
+    validate_guardrail_mode_assignment "$key" "$value" || return 1
+    printf '%s=%s\n' "$key" "$value" >> "$file"
 }
 
 select_guardrail_mode() {
@@ -171,28 +276,68 @@ select_guardrail_api_url() {
     return 0
 }
 
+select_guardrail_enforcement() {
+    local selected="${APORT_ENFORCEMENT_CLI:-${APORT_ENFORCEMENT_MODE:-${APORT_ENFORCEMENT:-${APORT_GUARDRAIL_ENFORCEMENT:-enforce}}}}"
+    local normalized
+    if ! normalized="$(normalize_aport_enforcement "$selected")"; then
+        echo "[aport] ERROR: Unsupported --enforcement value: $selected (expected enforce|warn)" >&2
+        return 1
+    fi
+    APORT_SELECTED_ENFORCEMENT="$normalized"
+    export APORT_SELECTED_ENFORCEMENT
+    return 0
+}
+
 write_guardrail_mode_file() {
     local config_dir="$1"
     local mode="$2"
     local api_url="$3"
     local hosted_agent_id="${4:-}"
+    local enforcement="${5:-${APORT_SELECTED_ENFORCEMENT:-${APORT_ENFORCEMENT_MODE:-${APORT_ENFORCEMENT:-${APORT_GUARDRAIL_ENFORCEMENT:-enforce}}}}}"
 
     local aport_dir="$config_dir/aport"
     local mode_file="$aport_dir/guardrail-mode.env"
     mkdir -p "$aport_dir"
 
-    {
-        write_env_assignment "APORT_GUARDRAIL_MODE" "$mode"
-        if [[ "$mode" = "api" ]]; then
-            write_env_assignment "APORT_API_URL" "${api_url:-$DEFAULT_APORT_API_URL}"
-        fi
-        if [[ -n "$hosted_agent_id" ]]; then
-            write_env_assignment "APORT_AGENT_ID" "$hosted_agent_id"
-        fi
-        if [[ -n "${APORT_API_KEY:-}" ]]; then
-            write_env_assignment "APORT_API_KEY" "$APORT_API_KEY"
-        fi
-    } > "$mode_file"
+    local normalized_enforcement
+    normalized_enforcement="$(normalize_aport_enforcement "$enforcement" 2> /dev/null || printf 'enforce')"
+
+    local tmpfile
+    tmpfile="$(mktemp "${mode_file}.XXXXXX")" || return 1
+    add_guardrail_mode_entry "$tmpfile" "APORT_GUARDRAIL_MODE" "$mode" || {
+        rm -f "$tmpfile"
+        return 1
+    }
+    add_guardrail_mode_entry "$tmpfile" "APORT_ENFORCEMENT_MODE" "$normalized_enforcement" || {
+        rm -f "$tmpfile"
+        return 1
+    }
+    add_guardrail_mode_entry "$tmpfile" "APORT_ENFORCEMENT" "$normalized_enforcement" || {
+        rm -f "$tmpfile"
+        return 1
+    }
+    if [[ "$mode" = "api" ]]; then
+        add_guardrail_mode_entry "$tmpfile" "APORT_API_URL" "${api_url:-$DEFAULT_APORT_API_URL}" || {
+            rm -f "$tmpfile"
+            return 1
+        }
+    fi
+    if [[ "$mode" = "api" && -n "$hosted_agent_id" ]]; then
+        add_guardrail_mode_entry "$tmpfile" "APORT_AGENT_ID" "$hosted_agent_id" || {
+            rm -f "$tmpfile"
+            return 1
+        }
+    fi
+    if [[ "$mode" = "api" && -n "${APORT_API_KEY:-}" ]]; then
+        add_guardrail_mode_entry "$tmpfile" "APORT_API_KEY" "$APORT_API_KEY" || {
+            rm -f "$tmpfile"
+            return 1
+        }
+    fi
+    mv "$tmpfile" "$mode_file" || {
+        rm -f "$tmpfile"
+        return 1
+    }
     chmod 600 "$mode_file" 2> /dev/null || true
     echo "$mode_file"
 }
@@ -200,10 +345,65 @@ write_guardrail_mode_file() {
 load_guardrail_mode_for_hooks() {
     local config_dir="$1"
     local mode_file="$config_dir/aport/guardrail-mode.env"
-    if [[ -f "$mode_file" ]]; then
-        set -a
-        # shellcheck disable=SC1090
-        source "$mode_file"
-        set +a
-    fi
+    local line key value
+    [[ -f "$mode_file" ]] || return 0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ ! "$line" =~ ^[A-Z0-9_]+= ]]; then
+            echo "[aport] ERROR: Unsafe guardrail mode entry in $mode_file" >&2
+            return 1
+        fi
+
+        key="${line%%=*}"
+        value="${line#*=}"
+        if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+            value="${value:1:${#value}-2}"
+        elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+
+        case "$key" in
+            APORT_GUARDRAIL_MODE)
+                case "$value" in
+                    local | api) ;;
+                    *)
+                        echo "[aport] ERROR: Invalid APORT_GUARDRAIL_MODE in $mode_file" >&2
+                        return 1
+                        ;;
+                esac
+                ;;
+            APORT_ENFORCEMENT_MODE | APORT_ENFORCEMENT | APORT_GUARDRAIL_ENFORCEMENT)
+                if ! value="$(normalize_aport_enforcement "$value")"; then
+                    echo "[aport] ERROR: Invalid $key in $mode_file" >&2
+                    return 1
+                fi
+                ;;
+            APORT_API_URL)
+                if [[ ! "$value" =~ ^https?://[A-Za-z0-9._~:/?#@%+=,-]+$ ]]; then
+                    echo "[aport] ERROR: Invalid APORT_API_URL in $mode_file" >&2
+                    return 1
+                fi
+                ;;
+            APORT_AGENT_ID)
+                if ! is_aport_hosted_agent_id "$value"; then
+                    echo "[aport] ERROR: Invalid APORT_AGENT_ID in $mode_file" >&2
+                    return 1
+                fi
+                ;;
+            APORT_API_KEY)
+                if ! is_aport_api_key "$value"; then
+                    echo "[aport] ERROR: Invalid APORT_API_KEY in $mode_file" >&2
+                    return 1
+                fi
+                ;;
+            *)
+                echo "[aport] ERROR: Unsupported guardrail mode key $key in $mode_file" >&2
+                return 1
+                ;;
+        esac
+
+        export "$key=$value"
+    done < "$mode_file"
 }

@@ -261,7 +261,7 @@ if true; then
 		echo ""
 		echo "  ⚠️  OpenClaw CLI not found in PATH"
 		echo "     The plugin will be configured, but you'll need to install it manually:"
-		echo "     openclaw plugins install -l $APORT_PLUGIN_PATH"
+		echo "     openclaw plugins install --link $APORT_PLUGIN_PATH"
 		echo ""
 		prompt_with_default continue_anyway "  Continue anyway? [Y/n]: " "y"
 		if [ "$continue_anyway" != "y" ] && [ "$continue_anyway" != "Y" ]; then
@@ -279,8 +279,8 @@ if true; then
 				echo "  Existing openclaw-aport version: $INSTALLED_PLUGIN_VERSION"
 			fi
 			echo "  Installing plugin from: $APORT_PLUGIN_PATH"
-			echo "  (Using -l to link local directory; OpenClaw accepts only registry or --link for install.)"
-			if openclaw plugins install -l "$APORT_PLUGIN_PATH" 2>&1; then
+			echo "  (Using --link to link the local plugin directory.)"
+			if openclaw plugins install --link "$APORT_PLUGIN_PATH" 2>&1; then
 				echo "  ✅ Plugin installed successfully"
 				PLUGIN_INSTALLED=true
 			else
@@ -288,7 +288,7 @@ if true; then
 				echo "     OpenClaw did not accept the plugin bundle, so setup is stopping here"
 				echo "     instead of writing plugin config that points at a broken install."
 				echo "     Retry after fixing the bundle or install it manually:"
-				echo "     openclaw plugins install -l $APORT_PLUGIN_PATH"
+				echo "     openclaw plugins install --link $APORT_PLUGIN_PATH"
 				exit 1
 			fi
 		fi
@@ -355,13 +355,20 @@ if true; then
 	fi
 
 	echo ""
-	echo "  Strict mode (optional): block tools with no policy mapping."
-	prompt_with_default strict_mode "  Enable strict mode? [y/N]: " "n"
-	if [ "$strict_mode" = "y" ] || [ "$strict_mode" = "Y" ]; then
-		ALLOW_UNMAPPED="false"
-	else
+	echo "  Unmapped tools are blocked by default. Allowing unmapped tools is useful for exploration, but weakens fail-closed enforcement."
+	prompt_with_default allow_unmapped_choice "  Allow unmapped tools? [y/N]: " "n"
+	if [ "$allow_unmapped_choice" = "y" ] || [ "$allow_unmapped_choice" = "Y" ]; then
 		ALLOW_UNMAPPED="true"
+	else
+		ALLOW_UNMAPPED="false"
 	fi
+
+	select_guardrail_enforcement
+	PLUGIN_ENFORCEMENT="$APORT_SELECTED_ENFORCEMENT"
+	MODE_FILE="$(write_guardrail_mode_file "$CONFIG_DIR" "$PLUGIN_MODE" "${api_url:-$CONFIGURED_API_URL}" "$HOSTED_AGENT_ID" "$PLUGIN_ENFORCEMENT")"
+	echo ""
+	echo "  Enforcement: $PLUGIN_ENFORCEMENT"
+	echo "  Mode config:  $MODE_FILE"
 
 	# Create or update config.yaml
 	if [ ! -f "$CONFIG_YAML" ]; then
@@ -415,6 +422,9 @@ YAML
         # Fail-closed: block on error (default: true)
         failClosed: true
 
+        # Enforcement: "enforce" blocks denied actions; "warn" records and allows
+        enforcementMode: $PLUGIN_ENFORCEMENT
+
         # Allow unmapped tools (false = strict: block custom skills/ClawHub unless mapped)
         allowUnmappedTools: $ALLOW_UNMAPPED
 YAML
@@ -433,6 +443,7 @@ YAML
 					APORT_YAML_PASSPORT_FILE="$PASSPORT_FILE" \
 					APORT_YAML_GUARDRAIL_SCRIPT="$CONFIG_DIR/.skills/aport-guardrail-bash.sh" \
 					APORT_YAML_ALLOW_UNMAPPED="$ALLOW_UNMAPPED" \
+					APORT_YAML_ENFORCEMENT="$PLUGIN_ENFORCEMENT" \
 					node - "$CONFIG_YAML" <<'NODE'; then
 const fs = require("node:fs");
 const file = process.argv[2];
@@ -489,6 +500,7 @@ if (mode === "api") {
   block.push(`${indent}    apiUrl: ${q(process.env.APORT_YAML_API_URL)}`);
 }
 block.push(`${indent}    failClosed: true`);
+block.push(`${indent}    enforcementMode: ${q(process.env.APORT_YAML_ENFORCEMENT || "enforce")}`);
 block.push(`${indent}    allowUnmappedTools: ${process.env.APORT_YAML_ALLOW_UNMAPPED === "true" ? "true" : "false"}`);
 const mapExecToPolicy = readConfigValue("mapExecToPolicy");
 if (mapExecToPolicy) {
@@ -523,6 +535,7 @@ NODE
 					echo "        apiUrl: $api_url"
 				fi
 				echo "        failClosed: true"
+				echo "        enforcementMode: $PLUGIN_ENFORCEMENT"
 				echo "        allowUnmappedTools: $ALLOW_UNMAPPED"
 			} >"$APORT_SNIPPET"
 			echo "  ⚠️  Existing plugins block detected in $CONFIG_YAML; skipped raw append to avoid duplicate YAML keys."
@@ -553,6 +566,7 @@ NODE
 			fi
 
 			echo "        failClosed: true" >>"$CONFIG_YAML"
+			echo "        enforcementMode: $PLUGIN_ENFORCEMENT" >>"$CONFIG_YAML"
 			echo "        allowUnmappedTools: $ALLOW_UNMAPPED" >>"$CONFIG_YAML"
 			echo "  ✅ Appended plugin configuration to $CONFIG_YAML"
 		fi
@@ -577,7 +591,8 @@ NODE
 				--arg api_key "${APORT_API_KEY:-}" \
 				--arg api_url "$api_url_val" \
 				--arg allow_unmapped "$ALLOW_UNMAPPED" \
-				'{ mode: $mode, agentId: $agent_id, failClosed: true, allowUnmappedTools: ($allow_unmapped == "true") } + (if $mode == "api" then { apiUrl: $api_url } else {} end) + (if $api_key != "" then { apiKey: $api_key } else {} end)')
+				--arg enforcement "$PLUGIN_ENFORCEMENT" \
+				'{ mode: $mode, agentId: $agent_id, failClosed: true, enforcementMode: $enforcement, allowUnmappedTools: ($allow_unmapped == "true") } + (if $mode == "api" then { apiUrl: $api_url } else {} end) + (if $api_key != "" then { apiKey: $api_key } else {} end)')
 		else
 			# Local passport config (passportFile in aport/)
 			CONFIG_JSON=$(jq -n \
@@ -586,7 +601,8 @@ NODE
 				--arg gs "$CONFIG_DIR/.skills/aport-guardrail-bash.sh" \
 				--arg api_url "$api_url_val" \
 				--arg allow_unmapped "$ALLOW_UNMAPPED" \
-				'{ mode: $mode, passportFile: $pf, guardrailScript: $gs, failClosed: true, allowUnmappedTools: ($allow_unmapped == "true") } + (if $mode == "api" then { apiUrl: $api_url } else {} end)')
+				--arg enforcement "$PLUGIN_ENFORCEMENT" \
+				'{ mode: $mode, passportFile: $pf, guardrailScript: $gs, failClosed: true, enforcementMode: $enforcement, allowUnmappedTools: ($allow_unmapped == "true") } + (if $mode == "api" then { apiUrl: $api_url } else {} end)')
 		fi
 
 		if jq --argjson cfg "$CONFIG_JSON" '
@@ -633,6 +649,10 @@ write_wrapper() {
 CONFIG_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
 APORT_REPO_ROOT="\$(cat "\$CONFIG_DIR/.aport-repo" 2>/dev/null)"
 [ -z "\$APORT_REPO_ROOT" ] && { echo "Error: \$CONFIG_DIR/.aport-repo missing. Re-run bin/openclaw from the guardrails repo." >&2; exit 1; }
+if [ -f "\$APORT_REPO_ROOT/bin/lib/guardrail-mode.sh" ]; then
+  . "\$APORT_REPO_ROOT/bin/lib/guardrail-mode.sh"
+  load_guardrail_mode_for_hooks "\$CONFIG_DIR" || exit 2
+fi
 export APORT_CONFIG_DIR="\${APORT_CONFIG_DIR:-\${OPENCLAW_CONFIG_DIR:-\$CONFIG_DIR}}"
 export OPENCLAW_CONFIG_DIR="\$APORT_CONFIG_DIR"
 export APORT_PASSPORT_FILE="\${APORT_PASSPORT_FILE:-\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}}"
@@ -819,7 +839,7 @@ cat <<'TABLE'
 	   write, edit, multiedit            → data.file.write.v1
 TABLE
 echo "   Plugin mapping source: extensions/openclaw-aport/tool-mapping.js"
-echo "   Unmapped tools are allowed by default; set allowUnmappedTools: false for strict mode."
+echo "   Unmapped tools are blocked by default; set allowUnmappedTools: true only for explicit exploration/reporting."
 echo
 
 # 5. Enforcement summary
@@ -849,7 +869,7 @@ else
 	echo "     This is NOT deterministic and can be bypassed."
 	echo ""
 	echo "     To install the plugin later, run:"
-	echo "     openclaw plugins install -l $APORT_PLUGIN_PATH"
+	echo "     openclaw plugins install --link $APORT_PLUGIN_PATH"
 	echo ""
 fi
 

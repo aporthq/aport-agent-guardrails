@@ -10,8 +10,8 @@ CORE="$ENTERPRISE_DIR/aport-device-core.mjs"
 SCRIPT="$ENTERPRISE_DIR/aport-device-deploy.sh"
 ENFORCE_SCRIPT="$ENTERPRISE_DIR/aport-device-enforce.sh"
 UNINSTALL_SCRIPT="$ENTERPRISE_DIR/aport-device-uninstall.sh"
-DIST="$SCRIPT_DIR/dist/enterprise-scripts"
 TMP_DIR="${APORT_TEST_DIR:-$(mktemp -d)}"
+DIST="$TMP_DIR/dist/enterprise-scripts"
 FAKE_BIN="$TMP_DIR/fake-bin"
 LOG_DIR="$TMP_DIR/logs"
 HOME_DIR="$TMP_DIR/home"
@@ -427,9 +427,11 @@ grep -q "reset', cfg.framework" "$CORE" || {
     exit 1
 }
 
-# Bundled artifacts (what IT deploys) must be self-contained
+# Bundled artifacts (what IT deploys) must be self-contained. Build into the
+# test temp dir so local test runs never delete or rewrite checked-out artifacts.
 rm -rf "$DIST"
 APORT_BUNDLE_VERSION="$(node -p "require('$SCRIPT_DIR/package.json').version")" \
+APORT_BUNDLE_DIST_DIR="$DIST" \
     bash "$SCRIPT_DIR/scripts/bundle-enterprise-scripts.sh"
 for name in aport-device-deploy.bundled.sh aport-device-enforce.bundled.sh aport-device-uninstall.bundled.sh; do
     f="$DIST/$name"

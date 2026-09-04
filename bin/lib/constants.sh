@@ -121,8 +121,9 @@ readonly LOG_FORMAT="${APORT_LOG_FORMAT:-text}"
 # Sensitive field patterns for log redaction (space-separated)
 readonly SENSITIVE_FIELD_PATTERNS="password passwd pwd secret token key api bearer"
 
-# API key prefix patterns (space-separated)
-readonly API_KEY_PREFIXES="aprt_ sk_ pk_"
+# Known APort API key prefixes for redaction/display hints only. Runtime
+# validation treats bearer keys as opaque so future key formats keep working.
+readonly API_KEY_PREFIXES="apk_ aprt_"
 
 # ============================================================================
 # PERFORMANCE
