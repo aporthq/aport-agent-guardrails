@@ -214,6 +214,7 @@ existing_config_agent_id=""
 existing_config_api_url=""
 existing_config_api_key=""
 existing_config_passport_file=""
+existing_config_enforcement=""
 if [[ "$framework" == "openclaw" ]]; then
     openclaw_json="$config_dir/openclaw.json"
     existing_config_mode="$(read_openclaw_json_config_value "$openclaw_json" "mode" || true)"
@@ -221,13 +222,15 @@ if [[ "$framework" == "openclaw" ]]; then
     existing_config_api_url="$(read_openclaw_json_config_value "$openclaw_json" "apiUrl" || true)"
     existing_config_api_key="$(read_openclaw_json_config_value "$openclaw_json" "apiKey" || true)"
     existing_config_passport_file="$(read_openclaw_json_config_value "$openclaw_json" "passportFile" || true)"
-    if [[ -z "$existing_config_mode" || -z "$existing_config_agent_id" || -z "$existing_config_api_url" || -z "$existing_config_api_key" || -z "$existing_config_passport_file" ]]; then
+    existing_config_enforcement="$(read_openclaw_json_config_value "$openclaw_json" "enforcementMode" || true)"
+    if [[ -z "$existing_config_mode" || -z "$existing_config_agent_id" || -z "$existing_config_api_url" || -z "$existing_config_api_key" || -z "$existing_config_passport_file" || -z "$existing_config_enforcement" ]]; then
         openclaw_yaml="$config_dir/config.yaml"
         [[ -z "$existing_config_mode" ]] && existing_config_mode="$(read_openclaw_yaml_config_value "$openclaw_yaml" "mode" || true)"
         [[ -z "$existing_config_agent_id" ]] && existing_config_agent_id="$(read_openclaw_yaml_config_value "$openclaw_yaml" "agentId" || true)"
         [[ -z "$existing_config_api_url" ]] && existing_config_api_url="$(read_openclaw_yaml_config_value "$openclaw_yaml" "apiUrl" || true)"
         [[ -z "$existing_config_api_key" ]] && existing_config_api_key="$(read_openclaw_yaml_config_value "$openclaw_yaml" "apiKey" || true)"
         [[ -z "$existing_config_passport_file" ]] && existing_config_passport_file="$(read_openclaw_yaml_config_value "$openclaw_yaml" "passportFile" || true)"
+        [[ -z "$existing_config_enforcement" ]] && existing_config_enforcement="$(read_openclaw_yaml_config_value "$openclaw_yaml" "enforcementMode" || true)"
     fi
 elif [[ "$framework" == "langchain" || "$framework" == "crewai" || "$framework" == "deerflow" || "$framework" == "n8n" ]]; then
     generic_config="$config_dir/config.yaml"
@@ -235,6 +238,8 @@ elif [[ "$framework" == "langchain" || "$framework" == "crewai" || "$framework" 
     existing_config_agent_id="$(read_yaml_scalar "$generic_config" "agent_id" || true)"
     existing_config_api_url="$(read_yaml_scalar "$generic_config" "api_url" || true)"
     existing_config_passport_file="$(read_yaml_scalar "$generic_config" "passport_path" || true)"
+    existing_config_enforcement="$(read_yaml_scalar "$generic_config" "enforcement_mode" || true)"
+    [[ -z "$existing_config_enforcement" ]] && existing_config_enforcement="$(read_yaml_scalar "$generic_config" "enforcementMode" || true)"
 fi
 
 existing_mode="${APORT_GUARDRAIL_MODE:-${existing_config_mode:-local}}"
@@ -251,7 +256,7 @@ esac
 existing_agent_id="${APORT_HOSTED_AGENT_ID_CLI:-${APORT_AGENT_ID:-$existing_config_agent_id}}"
 selected_api_url="${APORT_GUARDRAIL_API_URL_CLI:-${APORT_API_URL:-${existing_config_api_url:-$DEFAULT_APORT_API_URL}}}"
 selected_api_key="${APORT_API_KEY:-$existing_config_api_key}"
-selected_enforcement_input="${APORT_ENFORCEMENT_CLI:-${APORT_ENFORCEMENT_MODE:-${APORT_ENFORCEMENT:-${APORT_GUARDRAIL_ENFORCEMENT:-enforce}}}}"
+selected_enforcement_input="${APORT_ENFORCEMENT_CLI:-${APORT_ENFORCEMENT_MODE:-${APORT_ENFORCEMENT:-${APORT_GUARDRAIL_ENFORCEMENT:-${existing_config_enforcement:-enforce}}}}}"
 if ! selected_enforcement="$(normalize_aport_enforcement "$selected_enforcement_input")"; then
     log_error "Unsupported --enforcement value: $selected_enforcement_input (expected enforce|warn)"
     exit 1

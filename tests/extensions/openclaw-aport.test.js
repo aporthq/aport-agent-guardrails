@@ -827,12 +827,13 @@ describe("plugin hook contract", () => {
 
   it("unwraps delegated guardrail JSON without rejecting shell syntax inside the quoted context", async () => {
     const originalFetch = globalThis.fetch;
-    let seenBody = null;
+    const seenCommands = [];
     globalThis.fetch = async (_url, opts) => {
-      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      const body = JSON.parse(String(opts?.body ?? "{}"));
+      seenCommands.push(body.context.command);
       const decision = withContentHash({
         allow: true,
-        decision_id: "dec-delegated",
+        decision_id: `dec-delegated-${seenCommands.length}`,
         reasons: [{ code: "oap.allowed", message: "ok" }],
       });
       return {
@@ -851,7 +852,21 @@ describe("plugin hook contract", () => {
         params: { command: `${guardrail} system.command.execute '{"command":"git status && git diff"}'` },
       });
       assert.deepStrictEqual(result, {});
-      assert.strictEqual(seenBody.context.command, "git status && git diff");
+      assert.strictEqual(seenCommands.at(-1), "git status && git diff");
+
+      const apostropheResult = await beforeToolCall({
+        toolName: "exec.run",
+        params: { command: `${guardrail} system.command.execute '{"command":"printf '\\''hello'\\''"}'` },
+      });
+      assert.deepStrictEqual(apostropheResult, {});
+      assert.strictEqual(seenCommands.at(-1), "printf 'hello'");
+
+      const doubleQuotedResult = await beforeToolCall({
+        toolName: "exec.run",
+        params: { command: `${guardrail} system.command.execute "{\\"command\\":\\"echo hi\\"}"` },
+      });
+      assert.deepStrictEqual(doubleQuotedResult, {});
+      assert.strictEqual(seenCommands.at(-1), "echo hi");
     } finally {
       globalThis.fetch = originalFetch;
     }
