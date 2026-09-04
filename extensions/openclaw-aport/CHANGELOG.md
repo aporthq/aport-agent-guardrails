@@ -1,8 +1,8 @@
 # Changelog - APort OpenClaw Plugin
 
-## 1.1.0
+## 1.0.31
 
-### Minor Changes
+### Patch Changes
 
 - 3b01f93: Add GitHub Repository Guard as the first-class setup target, explicit warn-mode enforcement for gradual rollout, framework drift monitoring, and updated hosted/local guardrail docs.
 

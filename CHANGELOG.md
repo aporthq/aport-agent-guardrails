@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-09-04
+## [1.0.31] - 2026-09-04
 
 ### Added
 - **GitHub Repository Guard:** Added first-class CLI setup for repository protection with `npx @aporthq/aport-agent-guardrails github`, generating a GitHub Actions workflow that uses APort hosted/OIDC verification through the published Repository Guard action.
