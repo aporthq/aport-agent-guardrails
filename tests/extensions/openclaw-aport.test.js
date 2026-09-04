@@ -690,6 +690,23 @@ describe("plugin hook contract", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("allows exec when exec policy mapping is explicitly disabled", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      mapExecToPolicy: false,
+    });
+
+    const result = await beforeToolCall({
+      toolName: "exec",
+      params: { command: "ls -la" },
+    });
+    assert.deepStrictEqual(result, {});
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("allows unmapped tools in warn mode while surfacing the unknown-tool warning", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const beforeToolCall = await registerPlugin({

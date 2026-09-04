@@ -421,20 +421,31 @@ async function inspectGithubTagsSource(source, baseline, args) {
   const url = `https://api.github.com/repos/${source.repo}/tags?per_page=1`;
   const { response, text } = await fetchWithTimeout(url, { headers }, args.timeoutMs);
   let latestTag = null;
+  let latestTagSha = null;
   if (response.ok) {
     const tags = JSON.parse(text);
-    latestTag = Array.isArray(tags) && tags[0]?.name ? tags[0].name : null;
+    const latest = Array.isArray(tags) ? tags[0] : null;
+    latestTag = latest?.name || null;
+    latestTagSha = latest?.commit?.sha || null;
   }
   const baselineTag = baseline?.latestTag || null;
-  const drift = Boolean(baselineTag && latestTag && latestTag !== baselineTag);
+  const baselineTagSha = baseline?.latestTagSha || null;
+  const drift = Boolean(
+    (baselineTag && latestTag && latestTag !== baselineTag) ||
+      (baselineTagSha && latestTagSha && latestTagSha !== baselineTagSha),
+  );
   return {
     ...baseResult(source),
     status: response.ok && latestTag ? "ok" : "error",
     httpStatus: response.status,
     latestTag,
+    latestTagSha,
     baselineLatestTag: baselineTag,
+    baselineLatestTagSha: baselineTagSha,
     drift,
-    summary: latestTag ? `latest tag ${latestTag}` : `HTTP ${response.status}`,
+    summary: latestTag
+      ? `latest tag ${latestTag}${latestTagSha ? ` @ ${latestTagSha.slice(0, 12)}` : ""}`
+      : `HTTP ${response.status}`,
   };
 }
 
@@ -515,6 +526,9 @@ function buildBaseline(report, previousBaseline = {}) {
         url: source.url,
         sha256: refreshed ? source.sha256 || undefined : previous.sha256 || undefined,
         latestTag: refreshed ? source.latestTag || undefined : previous.latestTag || undefined,
+        latestTagSha: refreshed
+          ? source.latestTagSha || undefined
+          : previous.latestTagSha || undefined,
         capturedAt: refreshed
           ? report.generatedAt
           : previous.capturedAt || report.generatedAt,
