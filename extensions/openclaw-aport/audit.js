@@ -13,7 +13,7 @@ export function logAuditEntry(auditLogPath, entry) {
       const sanitized = String(entry.context)
         .replace(/[\r\n]+/g, " ")
         .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-        .replace(/apk_[A-Za-z0-9_-]+/g, "[REDACTED_APORT_KEY]")
+        .replace(/(?:apk|aprt)_[A-Za-z0-9_-]+/g, "[REDACTED_APORT_KEY]")
         .replace(/github_pat_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
         .replace(/gh[pousr]_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
         .replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]")

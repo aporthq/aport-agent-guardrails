@@ -63,7 +63,7 @@ def _sanitize_display(value: Any) -> str:
     text = str(value or "").replace("\n", " ").replace("\r", " ").replace("\t", " ")
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
     replacements = (
-        (r"apk_[A-Za-z0-9_-]+", "[REDACTED_APORT_KEY]"),
+        (r"(?:apk|aprt)_[A-Za-z0-9_-]+", "[REDACTED_APORT_KEY]"),
         (r"github_pat_[A-Za-z0-9_]+", "[REDACTED_GITHUB_TOKEN]"),
         (r"gh[pousr]_[A-Za-z0-9_]+", "[REDACTED_GITHUB_TOKEN]"),
         (r"xox[baprs]-[A-Za-z0-9-]+", "[REDACTED_SLACK_TOKEN]"),

@@ -46,7 +46,7 @@ function sanitizeDisplayText(value: unknown): string {
   return String(value ?? "")
     .replace(/[\r\n\t]+/g, " ")
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-    .replace(/apk_[A-Za-z0-9_-]+/g, "[REDACTED_APORT_KEY]")
+    .replace(/(?:apk|aprt)_[A-Za-z0-9_-]+/g, "[REDACTED_APORT_KEY]")
     .replace(/github_pat_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
     .replace(/gh[pousr]_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
     .replace(/xox[baprs]-[A-Za-z0-9-]+/g, "[REDACTED_SLACK_TOKEN]")

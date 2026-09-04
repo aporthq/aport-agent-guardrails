@@ -63,6 +63,20 @@ jq -e '.permission == "deny" and .allowed == false and (.reason | contains("oap.
 }
 echo "  ✅ oversized stdin: fail-closed deny"
 
+# Byte cap must count UTF-8 bytes, not shell characters. Two emoji are 8 bytes.
+# Use octal escapes to keep this source file ASCII-stable.
+# shellcheck source=bin/lib/hook-runtime.sh
+source "$REPO_ROOT/bin/lib/hook-runtime.sh"
+MULTIBYTE_RESULT="$(
+    APORT_HOOK_STDIN_MAX_BYTES=4 APORT_HOOK_STDIN_CHUNK_BYTES=8 \
+        aport_read_stdin_with_timeout < <(printf '\360\237\230\200\360\237\230\200')
+)"
+[[ "$MULTIBYTE_RESULT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]] || {
+    echo "FAIL: hook stdin cap must enforce bytes for multibyte payloads" >&2
+    exit 1
+}
+echo "  ✅ multibyte oversized stdin: byte cap enforced"
+
 # Helper: run hook with input, check exit code and output
 run_hook() {
     local desc="$1" input="$2" expect_exit="$3" expect_field="$4"
@@ -152,6 +166,15 @@ run_hook "preToolUse Edit: allow" \
 # --- preToolUse: MCP:<name> ---
 run_hook "preToolUse MCP:tool: allow" \
     '{"tool_name":"MCP:github_search","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "preToolUse ReadMcpResourceTool: preserve resource operation" \
+    '{"tool_name":"ReadMcpResourceTool","mcp_server_name":"github","tool_input":{"tool":"github.resources.read","uri":"mcp://github/repo/README.md"}}' 0 '"permission":"allow"'
+tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '.context.tool == "github.resources.read" and .context.mcp_tool == "github.resources.read"' > /dev/null || {
+    echo "FAIL: ReadMcpResourceTool should evaluate the resource operation, not the wrapper tool name" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
 
 # --- preToolUse: unknown tool (fail-closed) ---
 run_hook "preToolUse unknown: deny (fail-closed)" \

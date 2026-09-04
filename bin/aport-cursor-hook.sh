@@ -162,8 +162,8 @@ elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -n "$TOOL_NAME" ] && echo "
       {
         server: (.mcp_server_name // .server // .url // ""),
         mcp_server: (.mcp_server_name // .server // .url // ""),
-        tool: (.tool_name // .mcp_tool // ""),
-        mcp_tool: (.tool_name // .mcp_tool // ""),
+        tool: ($params.tool // $params.name // $params.operation // .mcp_tool // .tool_name // ""),
+        mcp_tool: ($params.tool // $params.name // $params.operation // .mcp_tool // .tool_name // ""),
         tool_name: (.tool_name // ""),
         tool_input: $params,
         parameters: $params
@@ -198,8 +198,8 @@ elif [ -n "$TOOL_NAME" ]; then
               {
                 server: (.mcp_server_name // .server // .url // $params.server // $params.mcp_server // ""),
                 mcp_server: (.mcp_server_name // .server // .url // $params.server // $params.mcp_server // ""),
-                tool: (.tool_name // .mcp_tool // $params.tool // $params.name // "resources.read"),
-                mcp_tool: (.tool_name // .mcp_tool // $params.tool // $params.name // "resources.read"),
+                tool: ($params.tool // $params.name // $params.operation // .mcp_tool // "resources.read"),
+                mcp_tool: ($params.tool // $params.name // $params.operation // .mcp_tool // "resources.read"),
                 uri: ($params.uri // $params.resource_uri // ""),
                 tool_input: $params,
                 parameters: $params

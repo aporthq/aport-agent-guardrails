@@ -25,6 +25,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const pluginDir = path.resolve(__dirname, "../../extensions/openclaw-aport");
 
+function withContentHash(decision) {
+  return {
+    ...decision,
+    content_hash: `sha256:${createHash("sha256").update(canonicalize(decision), "utf8").digest("hex")}`,
+  };
+}
+
 async function createTestPassport() {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "aport-openclaw-plugin-"));
   const aportDir = path.join(tempDir, "aport");
@@ -763,6 +770,100 @@ describe("plugin hook contract", () => {
       assert.strictEqual(seenBody.context.path, "README.md");
       assert.strictEqual(seenSignal, abortController.signal);
       assert.match(seenBody.context.idempotency_key, /^openclaw_[a-f0-9]+$/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not derive API idempotency keys from run-level OpenClaw identifiers", async () => {
+    const originalFetch = globalThis.fetch;
+    const seenKeys = [];
+    globalThis.fetch = async (_url, opts) => {
+      const body = JSON.parse(String(opts?.body ?? "{}"));
+      seenKeys.push(body.context.idempotency_key);
+      const decision = withContentHash({
+        allow: true,
+        decision_id: `dec-${seenKeys.length}`,
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({ mode: "api", agentId: "ap_test" });
+      const hookContext = { runId: "run-1", registrationId: "registration-1" };
+      assert.deepStrictEqual(await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } }, hookContext), {});
+      assert.deepStrictEqual(await beforeToolCall({ toolName: "exec.run", params: { command: "git status" } }, hookContext), {});
+      assert.strictEqual(seenKeys.length, 2);
+      assert.match(seenKeys[0], /^idem_/);
+      assert.match(seenKeys[1], /^idem_/);
+      assert.notStrictEqual(seenKeys[0], seenKeys[1]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("unwraps delegated guardrail JSON without rejecting shell syntax inside the quoted context", async () => {
+    const originalFetch = globalThis.fetch;
+    let seenBody = null;
+    globalThis.fetch = async (_url, opts) => {
+      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      const decision = withContentHash({
+        allow: true,
+        decision_id: "dec-delegated",
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({ mode: "api", agentId: "ap_test" });
+      const guardrail = path.resolve(__dirname, "../../bin/aport-guardrail-bash.sh");
+      const result = await beforeToolCall({
+        toolName: "exec.run",
+        params: { command: `${guardrail} system.command.execute '{"command":"git status && git diff"}'` },
+      });
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(seenBody.context.command, "git status && git diff");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("honors warn mode when an API decision integrity check fails", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      async json() {
+        return {
+          decision: {
+            allow: true,
+            decision_id: "dec-bad-integrity",
+            reasons: [{ code: "oap.allowed", message: "ok" }],
+            content_hash: "sha256:bad",
+          },
+        };
+      },
+    });
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.deepStrictEqual(result, {});
     } finally {
       globalThis.fetch = originalFetch;
     }

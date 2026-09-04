@@ -183,4 +183,20 @@ grep -q '^        apiKey: "apk_existing_config_key"$' "$CONFIG_YAML" || {
     exit 1
 }
 
+cat > "$OPENCLAW_HOME/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=https://api.aport.io
+UNSAFE=$(touch /tmp/aport-openclaw-wrapper-unsafe)
+EOF
+set +e
+"$OPENCLAW_HOME/.skills/aport-guardrail-bash.sh" system.command.execute '{"command":"ls"}' > "$TEST_DIR/wrapper-mode.out" 2> "$TEST_DIR/wrapper-mode.err"
+WRAPPER_EXIT=$?
+set -e
+if [ "$WRAPPER_EXIT" -ne 2 ]; then
+    echo "FAIL: generated OpenClaw wrapper should stop on invalid guardrail mode file, got $WRAPPER_EXIT" >&2
+    cat "$TEST_DIR/wrapper-mode.out" >&2
+    cat "$TEST_DIR/wrapper-mode.err" >&2
+    exit 1
+fi
+
 echo "OK test-openclaw-noninteractive.sh"

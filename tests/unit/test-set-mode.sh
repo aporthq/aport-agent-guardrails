@@ -119,6 +119,45 @@ grep -q "^api_url: 'https://staging-api.aport.io'$" "$LANGCHAIN_DIR/config.yaml"
     exit 1
 }
 
+PROJECT_DIR="$TEST_DIR/project-local-langchain"
+PROJECT_HOME="$TEST_DIR/project-local-home"
+mkdir -p "$PROJECT_DIR/.aport" "$PROJECT_HOME/.aport/langchain"
+cat > "$PROJECT_DIR/.aport/config.yaml" << 'EOF'
+framework: 'langchain'
+mode: warn
+agent_id: 'ap_project_existing'
+api_url: 'https://project-old.aport.io'
+EOF
+cat > "$PROJECT_HOME/.aport/langchain/config.yaml" << 'EOF'
+framework: 'langchain'
+mode: local
+api_url: 'https://home-old.aport.io'
+EOF
+(
+    cd "$PROJECT_DIR"
+    HOME="$PROJECT_HOME" "$MODE_HELPER" langchain --mode=api --api-url=https://project-api.aport.io --enforcement=warn
+) > "$TEST_DIR/langchain-project-local.out"
+grep -q '^mode: api$' "$PROJECT_DIR/.aport/config.yaml" || {
+    echo "FAIL: project-local generic config should update the active .aport config" >&2
+    cat "$PROJECT_DIR/.aport/config.yaml" >&2
+    exit 1
+}
+grep -q "^api_url: 'https://project-api.aport.io'$" "$PROJECT_DIR/.aport/config.yaml" || {
+    echo "FAIL: project-local generic config should update the project API URL" >&2
+    cat "$PROJECT_DIR/.aport/config.yaml" >&2
+    exit 1
+}
+grep -q "Config dir:  $PROJECT_DIR/.aport" "$TEST_DIR/langchain-project-local.out" || {
+    echo "FAIL: set-mode output should identify the active project-local config" >&2
+    cat "$TEST_DIR/langchain-project-local.out" >&2
+    exit 1
+}
+if grep -q "project-api.aport.io" "$PROJECT_HOME/.aport/langchain/config.yaml"; then
+    echo "FAIL: project-local set-mode should not update the inactive home config" >&2
+    cat "$PROJECT_HOME/.aport/langchain/config.yaml" >&2
+    exit 1
+fi
+
 cat > "$LANGCHAIN_DIR/passport.json" << 'EOF'
 {"agent_id":"ap_local_langchain_test","capabilities":[],"limits":{}}
 EOF

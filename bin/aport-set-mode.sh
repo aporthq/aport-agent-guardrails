@@ -53,7 +53,40 @@ fi
 
 parse_guardrail_mode_args "$@"
 
-config_dir="$(get_config_dir "$framework")"
+has_explicit_config_dir_override() {
+    case "$framework" in
+        langchain)
+            [[ -n "${APORT_CONFIG_DIR:-${APORT_LANGCHAIN_CONFIG_DIR:-}}" ]]
+            ;;
+        crewai)
+            [[ -n "${APORT_CONFIG_DIR:-${APORT_CREWAI_CONFIG_DIR:-}}" ]]
+            ;;
+        deerflow)
+            [[ -n "${APORT_CONFIG_DIR:-${APORT_DEERFLOW_CONFIG_DIR:-}}" ]]
+            ;;
+        n8n)
+            [[ -n "${APORT_CONFIG_DIR:-${APORT_N8N_CONFIG_DIR:-}}" ]]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+resolve_set_mode_config_dir() {
+    case "$framework" in
+        langchain | crewai | deerflow | n8n)
+            if ! has_explicit_config_dir_override && [[ -f "$PWD/.aport/config.yaml" ]]; then
+                printf '%s/.aport' "$PWD"
+                return 0
+            fi
+            ;;
+    esac
+
+    get_config_dir "$framework"
+}
+
+config_dir="$(resolve_set_mode_config_dir)"
 config_dir="${config_dir/#\~/$HOME}"
 mkdir -p "$config_dir/aport"
 chmod 700 "$config_dir/aport" 2> /dev/null || true

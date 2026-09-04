@@ -649,7 +649,10 @@ write_wrapper() {
 CONFIG_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
 APORT_REPO_ROOT="\$(cat "\$CONFIG_DIR/.aport-repo" 2>/dev/null)"
 [ -z "\$APORT_REPO_ROOT" ] && { echo "Error: \$CONFIG_DIR/.aport-repo missing. Re-run bin/openclaw from the guardrails repo." >&2; exit 1; }
-[ -f "\$APORT_REPO_ROOT/bin/lib/guardrail-mode.sh" ] && { . "\$APORT_REPO_ROOT/bin/lib/guardrail-mode.sh"; load_guardrail_mode_for_hooks "\$CONFIG_DIR"; }
+if [ -f "\$APORT_REPO_ROOT/bin/lib/guardrail-mode.sh" ]; then
+  . "\$APORT_REPO_ROOT/bin/lib/guardrail-mode.sh"
+  load_guardrail_mode_for_hooks "\$CONFIG_DIR" || exit 2
+fi
 export APORT_CONFIG_DIR="\${APORT_CONFIG_DIR:-\${OPENCLAW_CONFIG_DIR:-\$CONFIG_DIR}}"
 export OPENCLAW_CONFIG_DIR="\$APORT_CONFIG_DIR"
 export APORT_PASSPORT_FILE="\${APORT_PASSPORT_FILE:-\${OPENCLAW_PASSPORT_FILE:-\$CONFIG_DIR/aport/passport.json}}"
