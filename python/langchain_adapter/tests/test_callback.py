@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from aport_guardrails_langchain import APortCallback, GuardrailViolation
+from langchain_adapter.middleware import APortCallback as CompatAPortCallback
 
 
 class TestAPortCallback:
@@ -84,6 +85,24 @@ class TestAPortCallback:
     async def test_warn_mode_sanitizes_tool_name(self, capsys):
         """Warn logs must not let dynamic tool names forge terminal or CI records."""
         callback = APortCallback(config_path="/nonexistent", enforcement_mode="warn")
+        callback.evaluator = AsyncMock()
+        callback.evaluator.verify = AsyncMock(
+            return_value={
+                "allow": False,
+                "reasons": [{"code": "oap.command_not_allowed", "message": "Command not in allowlist"}],
+            }
+        )
+
+        await callback.on_tool_start({"name": "run_command\n::error::fake"}, None, inputs={})
+
+        captured = capsys.readouterr()
+        assert "run_command : :error: :fake" in captured.out
+        assert "\n::error::fake" not in captured.out
+
+    @pytest.mark.asyncio
+    async def test_compat_warn_mode_sanitizes_tool_name(self, capsys):
+        """The compatibility import path must sanitize warn logs too."""
+        callback = CompatAPortCallback(config_path="/nonexistent", enforcement_mode="warn")
         callback.evaluator = AsyncMock()
         callback.evaluator.verify = AsyncMock(
             return_value={

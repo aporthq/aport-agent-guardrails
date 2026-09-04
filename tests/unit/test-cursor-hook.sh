@@ -221,11 +221,21 @@ run_hook "Guardrail self-check with chained command: deny" \
     '{"command":"'"$REPO_ROOT"'/bin/aport-guardrail-bash.sh system.command.execute '\''{}'\''; sudo reboot"}' 2 '"permission":"deny"'
 
 # --- Invalid JSON -> fail-closed with Cursor JSON ---
+MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
 run_hook "Invalid JSON: deny (fail-closed)" \
     '{"tool_name":"Shell","tool_input":' 2 '"permission":"deny"'
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+run_hook "Invalid JSON: warn mode allows with warning" \
+    '{"tool_name":"Shell","tool_input":' 0 '"permission":"allow"'
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+
 # --- mode selection: local vs api ---
-MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=api
 APORT_API_URL=http://127.0.0.1:9

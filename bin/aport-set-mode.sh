@@ -382,10 +382,16 @@ if (entry) {
   config.enforcementMode = process.env.APORT_SET_ENFORCEMENT || "enforce";
   if (mode === "api") {
     config.apiUrl = process.env.APORT_SET_API_URL || "https://api.aport.io";
-    if (process.env.APORT_SET_AGENT_ID) config.agentId = process.env.APORT_SET_AGENT_ID;
+    if (process.env.APORT_SET_AGENT_ID) {
+      config.agentId = process.env.APORT_SET_AGENT_ID;
+      delete config.passportFile;
+      delete config.guardrailScript;
+    } else {
+      delete config.agentId;
+      config.passportFile = process.env.APORT_SET_PASSPORT_FILE;
+      config.guardrailScript = process.env.APORT_SET_GUARDRAIL_SCRIPT;
+    }
     if (process.env.APORT_SET_API_KEY) config.apiKey = process.env.APORT_SET_API_KEY;
-    delete config.passportFile;
-    delete config.guardrailScript;
   } else {
     config.passportFile = process.env.APORT_SET_PASSPORT_FILE;
     config.guardrailScript = process.env.APORT_SET_GUARDRAIL_SCRIPT;
@@ -420,26 +426,53 @@ const lines = input.split(/\n/);
 const start = lines.findIndex((line) => /^\s*openclaw-aport:\s*$/.test(line));
 if (start < 0) process.exit(0);
 const indent = (lines[start].match(/^\s*/) || [""])[0];
+const pluginIndentLength = indent.length;
 let end = start + 1;
 for (; end < lines.length; end += 1) {
   const line = lines[end];
   if (!line.trim()) continue;
   const currentIndent = (line.match(/^\s*/) || [""])[0].length;
-  if (currentIndent <= indent.length) break;
+  if (currentIndent <= pluginIndentLength) break;
 }
 let configIndex = lines.findIndex((line, index) => index > start && index < end && /^\s*config:\s*$/.test(line));
+function inferIndentUnit() {
+  for (let i = start + 1; i < end; i += 1) {
+    if (!lines[i].trim()) continue;
+    const currentIndent = (lines[i].match(/^\s*/) || [""])[0].length;
+    if (currentIndent > pluginIndentLength) return currentIndent - pluginIndentLength;
+  }
+  return 2;
+}
 if (configIndex < 0) {
-  lines.splice(end, 0, `${indent}  config:`);
+  const unit = inferIndentUnit();
+  lines.splice(end, 0, `${indent}${" ".repeat(unit)}config:`);
   configIndex = end;
   end += 1;
 }
+const configIndent = (lines[configIndex].match(/^\s*/) || [""])[0];
+const configIndentLength = configIndent.length;
+let childIndent = "";
+for (let i = configIndex + 1; i < end; i += 1) {
+  if (!lines[i].trim()) continue;
+  const currentIndent = (lines[i].match(/^\s*/) || [""])[0];
+  if (currentIndent.length > configIndentLength) {
+    childIndent = currentIndent;
+    break;
+  }
+  if (currentIndent.length <= configIndentLength) break;
+}
+if (!childIndent) {
+  const unit = Math.max(2, configIndentLength - pluginIndentLength || inferIndentUnit());
+  childIndent = `${configIndent}${" ".repeat(unit)}`;
+}
 const q = (value) => JSON.stringify(String(value || ""));
-const configIndent = `${indent}    `;
-const escapedIndent = configIndent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapedIndent = childIndent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function upsert(key, value) {
   const pattern = new RegExp(`^${escapedIndent}${key}:\\s*`);
-  const replacement = `${configIndent}${key}: ${value}`;
-  for (let i = start + 1; i < end; i += 1) {
+  const replacement = `${childIndent}${key}: ${value}`;
+  for (let i = configIndex + 1; i < end; i += 1) {
+    const currentIndent = (lines[i].match(/^\s*/) || [""])[0].length;
+    if (lines[i].trim() && currentIndent <= configIndentLength) break;
     if (pattern.test(lines[i])) {
       lines[i] = replacement;
       return;
@@ -462,10 +495,16 @@ upsert("mode", q(mode));
 upsert("enforcementMode", q(process.env.APORT_SET_ENFORCEMENT || "enforce"));
 if (mode === "api") {
   upsert("apiUrl", q(process.env.APORT_SET_API_URL || "https://api.aport.io"));
-  if (process.env.APORT_SET_AGENT_ID) upsert("agentId", q(process.env.APORT_SET_AGENT_ID));
+  if (process.env.APORT_SET_AGENT_ID) {
+    upsert("agentId", q(process.env.APORT_SET_AGENT_ID));
+    remove("passportFile");
+    remove("guardrailScript");
+  } else {
+    remove("agentId");
+    upsert("passportFile", q(process.env.APORT_SET_PASSPORT_FILE));
+    upsert("guardrailScript", q(process.env.APORT_SET_GUARDRAIL_SCRIPT));
+  }
   if (process.env.APORT_SET_API_KEY) upsert("apiKey", q(process.env.APORT_SET_API_KEY));
-  remove("passportFile");
-  remove("guardrailScript");
 } else {
   upsert("passportFile", q(process.env.APORT_SET_PASSPORT_FILE));
   upsert("guardrailScript", q(process.env.APORT_SET_GUARDRAIL_SCRIPT));

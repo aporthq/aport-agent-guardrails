@@ -267,6 +267,31 @@ if (plugin.enforcementMode !== "warn") process.exit(2);
     exit 1
 }
 
+OPENCLAW_JSON_PASSPORT_DIR="$TEST_DIR/openclaw-json-passport-api"
+mkdir -p "$OPENCLAW_JSON_PASSPORT_DIR"
+cat > "$OPENCLAW_JSON_PASSPORT_DIR/custom-passport.json" << 'EOF'
+{"agent_id":"ap_local_api_openclaw_test","capabilities":[],"limits":{}}
+EOF
+cat > "$OPENCLAW_JSON_PASSPORT_DIR/openclaw.json" << EOF
+{"plugins":{"entries":{"openclaw-aport":{"enabled":true,"config":{"mode":"local","passportFile":"$OPENCLAW_JSON_PASSPORT_DIR/custom-passport.json","guardrailScript":"/custom/aport-guardrail-bash.sh","enforcementMode":"warn"}}}}}
+EOF
+APORT_OPENCLAW_CONFIG_DIR="$OPENCLAW_JSON_PASSPORT_DIR" "$MODE_HELPER" openclaw --mode=api --api-url=https://api.aport.io > "$TEST_DIR/openclaw-json-passport-api.out"
+node -e '
+const fs = require("fs");
+const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const expectedPassport = process.argv[2];
+const plugin = cfg.plugins.entries["openclaw-aport"].config;
+if (plugin.mode !== "api") process.exit(1);
+if (plugin.agentId) process.exit(2);
+if (plugin.passportFile !== expectedPassport) process.exit(3);
+if (!plugin.guardrailScript) process.exit(4);
+if (plugin.enforcementMode !== "warn") process.exit(5);
+' "$OPENCLAW_JSON_PASSPORT_DIR/openclaw.json" "$OPENCLAW_JSON_PASSPORT_DIR/custom-passport.json" || {
+    echo "FAIL: OpenClaw JSON API mode without hosted agentId should preserve local passport payload config" >&2
+    cat "$OPENCLAW_JSON_PASSPORT_DIR/openclaw.json" >&2
+    exit 1
+}
+
 OPENCLAW_YAML_DIR="$TEST_DIR/openclaw-yaml"
 mkdir -p "$OPENCLAW_YAML_DIR"
 cat > "$OPENCLAW_YAML_DIR/aport-passport.json" << 'EOF'
@@ -302,6 +327,73 @@ grep -q 'enforcementMode: "warn"' "$OPENCLAW_YAML_DIR/config.yaml" || {
     cat "$OPENCLAW_YAML_DIR/config.yaml" >&2
     exit 1
 }
+
+OPENCLAW_YAML_4_DIR="$TEST_DIR/openclaw-yaml-four-space"
+mkdir -p "$OPENCLAW_YAML_4_DIR"
+cat > "$OPENCLAW_YAML_4_DIR/aport-passport.json" << 'EOF'
+{"agent_id":"ap_local_openclaw_4_space_test","capabilities":[],"limits":{}}
+EOF
+cat > "$OPENCLAW_YAML_4_DIR/config.yaml" << EOF
+plugins:
+    entries:
+        openclaw-aport:
+            enabled: true
+            config:
+                mode: api
+                agentId: "ap_yaml_4_existing"
+                apiUrl: "https://api.aport.io"
+                passportFile: "$OPENCLAW_YAML_4_DIR/aport-passport.json"
+                enforcementMode: "warn"
+EOF
+APORT_OPENCLAW_CONFIG_DIR="$OPENCLAW_YAML_4_DIR" "$MODE_HELPER" openclaw --enforcement=enforce > "$TEST_DIR/openclaw-yaml-four-space.out"
+grep -q '^                enforcementMode: "enforce"$' "$OPENCLAW_YAML_4_DIR/config.yaml" || {
+    echo "FAIL: OpenClaw YAML should update fields under config: with existing four-space indentation" >&2
+    cat "$OPENCLAW_YAML_4_DIR/config.yaml" >&2
+    exit 1
+}
+if grep -q '^            enforcementMode:' "$OPENCLAW_YAML_4_DIR/config.yaml"; then
+    echo "FAIL: OpenClaw YAML should not write enforcementMode alongside config:" >&2
+    cat "$OPENCLAW_YAML_4_DIR/config.yaml" >&2
+    exit 1
+fi
+
+OPENCLAW_YAML_PASSPORT_DIR="$TEST_DIR/openclaw-yaml-passport-api"
+mkdir -p "$OPENCLAW_YAML_PASSPORT_DIR"
+cat > "$OPENCLAW_YAML_PASSPORT_DIR/custom-passport.json" << 'EOF'
+{"agent_id":"ap_local_openclaw_api_test","capabilities":[],"limits":{}}
+EOF
+cat > "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml" << EOF
+plugins:
+  entries:
+    openclaw-aport:
+      enabled: true
+      config:
+        mode: local
+        passportFile: "$OPENCLAW_YAML_PASSPORT_DIR/custom-passport.json"
+        guardrailScript: "/custom/aport-guardrail-bash.sh"
+        enforcementMode: "warn"
+EOF
+APORT_OPENCLAW_CONFIG_DIR="$OPENCLAW_YAML_PASSPORT_DIR" "$MODE_HELPER" openclaw --mode=api --api-url=https://api.aport.io > "$TEST_DIR/openclaw-yaml-passport-api.out"
+grep -q 'mode: "api"' "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml" || {
+    echo "FAIL: OpenClaw YAML should switch local-passport API config to api mode" >&2
+    cat "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml" >&2
+    exit 1
+}
+grep -q "passportFile: \"$OPENCLAW_YAML_PASSPORT_DIR/custom-passport.json\"" "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml" || {
+    echo "FAIL: OpenClaw YAML API mode without hosted agentId should preserve passportFile" >&2
+    cat "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml" >&2
+    exit 1
+}
+grep -q 'guardrailScript: "' "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml" || {
+    echo "FAIL: OpenClaw YAML API mode without hosted agentId should preserve guardrailScript" >&2
+    cat "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml" >&2
+    exit 1
+}
+if grep -q 'agentId:' "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml"; then
+    echo "FAIL: OpenClaw YAML local-passport API mode should not invent hosted agentId" >&2
+    cat "$OPENCLAW_YAML_PASSPORT_DIR/config.yaml" >&2
+    exit 1
+fi
 
 OPENCLAW_EMPTY_DIR="$TEST_DIR/openclaw-empty"
 mkdir -p "$OPENCLAW_EMPTY_DIR/aport"
