@@ -616,7 +616,10 @@ Defense in depth: policy *before* execution, runtime safety *during* execution.
 
 ## 🤝 Contributing
 
-Contributions welcome: policy packs, framework adapters, docs. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions welcome: framework adapters, setup improvements, local evaluator support, and docs.
+For new public policy packs, start with the policy proposal flow in
+[`aporthq/aport-policies`](https://github.com/aporthq/aport-policies), then update this repo's
+submodule and mappings as needed. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

@@ -78,16 +78,18 @@ Create `~/.openclaw/passport.json`:
 
 ### Step 3: Create Policy Files
 
-Copy the 4 OpenClaw policies to `~/.openclaw/policies/`:
+If you installed with `npx @aporthq/aport-agent-guardrails openclaw`, the runtime already points
+at the policy packs bundled in the npm package. No manual policy copy is required.
+
+If you are developing from a clone and need a manual local copy, copy from this repository's
+`external/aport-policies` submodule, not from another local checkout:
 
 ```bash
 mkdir -p ~/.openclaw/policies
-
-# Copy from agent-passport repo
-cp /Users/uchi/Downloads/projects/agent-passport/policies/system.command.execute.v1/policy.json ~/.openclaw/policies/
-cp /Users/uchi/Downloads/projects/agent-passport/policies/mcp.tool.execute.v1/policy.json ~/.openclaw/policies/
-cp /Users/uchi/Downloads/projects/agent-passport/policies/agent.session.create.v1/policy.json ~/.openclaw/policies/
-cp /Users/uchi/Downloads/projects/agent-passport/policies/agent.tool.register.v1/policy.json ~/.openclaw/policies/
+cp external/aport-policies/system.command.execute.v1/policy.json ~/.openclaw/policies/
+cp external/aport-policies/mcp.tool.execute.v1/policy.json ~/.openclaw/policies/
+cp external/aport-policies/agent.session.create.v1/policy.json ~/.openclaw/policies/
+cp external/aport-policies/agent.tool.register.v1/policy.json ~/.openclaw/policies/
 ```
 
 ---
@@ -558,9 +560,9 @@ EOF
 
 ### Problem: "API server not running"
 ```bash
-# Start local API server
-cd /Users/uchi/Downloads/projects/agent-passport
-npm run dev
+# Hosted mode uses https://api.aport.io by default. For local development,
+# start your own compatible APort API and point the guardrail at it:
+APORT_API_URL=http://localhost:8787 npx @aporthq/aport-agent-guardrails openclaw
 ```
 
 ### Problem: "All commands denied"
