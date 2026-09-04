@@ -49,6 +49,37 @@ grep -q '^APORT_API_KEY=apk_runtime_key_to_preserve$' "$CLAUDE_DIR/aport/guardra
     exit 1
 }
 
+if APORT_CLAUDE_CODE_CONFIG_DIR="$CLAUDE_DIR" "$DISPATCHER" mode claude-code --mode=local > "$TEST_DIR/claude-local-missing.out" 2>&1; then
+    echo "FAIL: hosted-only set-mode should reject local mode without a local passport" >&2
+    cat "$TEST_DIR/claude-local-missing.out" >&2
+    exit 1
+fi
+grep -q "no valid local passport exists" "$TEST_DIR/claude-local-missing.out" || {
+    echo "FAIL: local mode rejection should explain the missing passport" >&2
+    cat "$TEST_DIR/claude-local-missing.out" >&2
+    exit 1
+}
+grep -q '^APORT_GUARDRAIL_MODE=api$' "$CLAUDE_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: failed local switch should leave hosted mode intact" >&2
+    cat "$CLAUDE_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+
+cat > "$CLAUDE_DIR/aport/passport.json" << 'EOF'
+{"agent_id":"ap_local_claude_test","capabilities":[],"limits":{}}
+EOF
+APORT_CLAUDE_CODE_CONFIG_DIR="$CLAUDE_DIR" "$DISPATCHER" mode claude-code --mode=local > "$TEST_DIR/claude-local.out"
+grep -q '^APORT_GUARDRAIL_MODE=local$' "$CLAUDE_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: valid local passport should allow local mode" >&2
+    cat "$CLAUDE_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+if grep -Eq '^APORT_(AGENT_ID|API_KEY|API_URL)=' "$CLAUDE_DIR/aport/guardrail-mode.env"; then
+    echo "FAIL: local mode file should not preserve hosted credentials" >&2
+    cat "$CLAUDE_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
 LANGCHAIN_DIR="$TEST_DIR/langchain"
 mkdir -p "$LANGCHAIN_DIR"
 cat > "$LANGCHAIN_DIR/config.yaml" << 'EOF'
@@ -88,6 +119,33 @@ grep -q "^api_url: 'https://staging-api.aport.io'$" "$LANGCHAIN_DIR/config.yaml"
     exit 1
 }
 
+cat > "$LANGCHAIN_DIR/passport.json" << 'EOF'
+{"agent_id":"ap_local_langchain_test","capabilities":[],"limits":{}}
+EOF
+cat > "$LANGCHAIN_DIR/config.yaml" << EOF
+framework: 'langchain'
+mode: api
+agent_id: 'ap_langchain_hosted'
+api_url: 'https://api.aport.io'
+passport_path: '$LANGCHAIN_DIR/passport.json'
+EOF
+APORT_LANGCHAIN_CONFIG_DIR="$LANGCHAIN_DIR" "$MODE_HELPER" langchain --mode=local > "$TEST_DIR/langchain-local.out"
+grep -q '^mode: local$' "$LANGCHAIN_DIR/config.yaml" || {
+    echo "FAIL: generic config should switch to local mode" >&2
+    cat "$LANGCHAIN_DIR/config.yaml" >&2
+    exit 1
+}
+grep -q "^passport_path: '$LANGCHAIN_DIR/passport.json'$" "$LANGCHAIN_DIR/config.yaml" || {
+    echo "FAIL: generic local config should preserve passport_path" >&2
+    cat "$LANGCHAIN_DIR/config.yaml" >&2
+    exit 1
+}
+if grep -Eq '^(agent_id|api_url):' "$LANGCHAIN_DIR/config.yaml"; then
+    echo "FAIL: generic local config should remove hosted API settings" >&2
+    cat "$LANGCHAIN_DIR/config.yaml" >&2
+    exit 1
+fi
+
 OPENCLAW_DIR="$TEST_DIR/openclaw"
 mkdir -p "$OPENCLAW_DIR"
 cat > "$OPENCLAW_DIR/openclaw.json" << 'EOF'
@@ -107,10 +165,49 @@ if (plugin.enforcementMode !== "warn") process.exit(3);
     exit 1
 }
 
+OPENCLAW_YAML_DIR="$TEST_DIR/openclaw-yaml"
+mkdir -p "$OPENCLAW_YAML_DIR"
+cat > "$OPENCLAW_YAML_DIR/aport-passport.json" << 'EOF'
+{"agent_id":"ap_local_openclaw_test","capabilities":[],"limits":{}}
+EOF
+cat > "$OPENCLAW_YAML_DIR/config.yaml" << EOF
+gateway:
+  mode: local
+plugins:
+  entries:
+    openclaw-aport:
+      enabled: true
+      config:
+        mode: api
+        agentId: "ap_yaml_existing"
+        apiUrl: "https://api.aport.io"
+        passportFile: "$OPENCLAW_YAML_DIR/aport-passport.json"
+        enforcementMode: "enforce"
+EOF
+APORT_OPENCLAW_CONFIG_DIR="$OPENCLAW_YAML_DIR" "$MODE_HELPER" openclaw --enforcement=warn > "$TEST_DIR/openclaw-yaml-mode.out"
+grep -q 'mode: "api"' "$OPENCLAW_YAML_DIR/config.yaml" || {
+    echo "FAIL: OpenClaw YAML should preserve plugin api mode instead of reading gateway.mode" >&2
+    cat "$OPENCLAW_YAML_DIR/config.yaml" >&2
+    exit 1
+}
+grep -q 'agentId: "ap_yaml_existing"' "$OPENCLAW_YAML_DIR/config.yaml" || {
+    echo "FAIL: OpenClaw YAML should preserve plugin agentId" >&2
+    cat "$OPENCLAW_YAML_DIR/config.yaml" >&2
+    exit 1
+}
+grep -q 'enforcementMode: "warn"' "$OPENCLAW_YAML_DIR/config.yaml" || {
+    echo "FAIL: OpenClaw YAML should update plugin enforcement" >&2
+    cat "$OPENCLAW_YAML_DIR/config.yaml" >&2
+    exit 1
+}
+
 OPENCLAW_EMPTY_DIR="$TEST_DIR/openclaw-empty"
-mkdir -p "$OPENCLAW_EMPTY_DIR"
+mkdir -p "$OPENCLAW_EMPTY_DIR/aport"
 cat > "$OPENCLAW_EMPTY_DIR/openclaw.json" << 'EOF'
 {"plugins":{"entries":{}}}
+EOF
+cat > "$OPENCLAW_EMPTY_DIR/aport/passport.json" << 'EOF'
+{"agent_id":"ap_local_empty_openclaw_test","capabilities":[],"limits":{}}
 EOF
 APORT_OPENCLAW_CONFIG_DIR="$OPENCLAW_EMPTY_DIR" "$MODE_HELPER" openclaw --enforcement=warn > "$TEST_DIR/openclaw-empty-mode.out"
 node -e '

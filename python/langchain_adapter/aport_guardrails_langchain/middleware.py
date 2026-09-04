@@ -80,6 +80,8 @@ def _sanitize_display(value: Any) -> str:
 class APortCallback(AsyncCallbackHandler):
     """Callback that verifies tool execution with APort before allowing. Auto-loads config from .aport/config.yaml or ~/.aport/langchain/."""
 
+    raise_error = True
+
     def __init__(self, config_path: str | None = None, enforcement_mode: str | None = None) -> None:
         self.evaluator = Evaluator(config_path, framework="langchain")
         self.enforcement_mode = _resolve_enforcement_mode(config_path, "langchain", enforcement_mode)

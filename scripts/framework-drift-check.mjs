@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-const REPO_ROOT = resolve(new URL("..", import.meta.url).pathname, "..");
+const REPO_ROOT = resolve(new URL("..", import.meta.url).pathname);
 const DEFAULT_BASELINE_PATH = resolve(
   REPO_ROOT,
   "docs/framework-drift-baseline.json",
@@ -35,9 +35,8 @@ const WATCHLIST = Object.freeze([
         id: "openclaw-hooks-doc",
         type: "http",
         label: "Plugin hooks doc",
-        url: "https://raw.githubusercontent.com/openclaw/openclaw/main/docs/plugins/hooks.md",
+        url: "https://docs.openclaw.ai/plugins/hooks",
         requiredMarkers: [
-          'api.on("before_tool_call"',
           "before_tool_call",
           "matcher",
           "timeoutMs",
@@ -118,14 +117,14 @@ const WATCHLIST = Object.freeze([
         id: "langchain-middleware-doc",
         type: "http",
         label: "Agent middleware overview",
-        url: "https://docs.langchain.com/oss/python/langchain/middleware/overview",
+        url: "https://raw.githubusercontent.com/langchain-ai/docs/main/src/oss/langchain/overview.mdx",
         requiredMarkers: ["middleware", "create_agent", "tool"],
       },
       {
         id: "langchain-middleware-ref",
         type: "http",
-        label: "Middleware API reference",
-        url: "https://reference.langchain.com/python/langchain/agents/middleware",
+        label: "Middleware type source",
+        url: "https://raw.githubusercontent.com/langchain-ai/langchain/master/libs/langchain_v1/langchain/agents/middleware/types.py",
         requiredMarkers: [
           "wrap_tool_call",
           "before_agent",
@@ -260,13 +259,20 @@ const WATCHLIST = Object.freeze([
         type: "http",
         label: "Workflow syntax reference",
         url: "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax",
-        requiredMarkers: ["on.schedule", "pull_request", "merge_group", "permissions"],
+        requiredMarkers: ["on.schedule", "permissions", "id-token: write"],
+      },
+      {
+        id: "github-events-doc",
+        type: "http",
+        label: "Workflow events reference",
+        url: "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows",
+        requiredMarkers: ["merge_group", "pull_request", "push"],
       },
       {
         id: "github-oidc-doc",
         type: "http",
         label: "OIDC hardening reference",
-        url: "https://docs.github.com/en/actions/how-tos/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect",
+        url: "https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-cloud-providers",
         requiredMarkers: ["id-token: write", "OpenID Connect", "JWT"],
       },
     ],
@@ -289,10 +295,10 @@ function parseArgs(argv) {
     if (arg === "--offline") args.offline = true;
     else if (arg === "--fail-on-drift") args.failOnDrift = true;
     else if (arg === "--update-baseline") args.updateBaseline = true;
-    else if (arg === "--baseline") args.baselinePath = resolveRequiredValue(argv, ++i, arg);
-    else if (arg === "--json") args.jsonPath = resolveRequiredValue(argv, ++i, arg);
-    else if (arg === "--markdown") args.markdownPath = resolveRequiredValue(argv, ++i, arg);
-    else if (arg === "--timeout-ms") args.timeoutMs = Number(resolveRequiredValue(argv, ++i, arg));
+    else if (arg === "--baseline") args.baselinePath = resolveRequiredPath(argv, ++i, arg);
+    else if (arg === "--json") args.jsonPath = resolveRequiredPath(argv, ++i, arg);
+    else if (arg === "--markdown") args.markdownPath = resolveRequiredPath(argv, ++i, arg);
+    else if (arg === "--timeout-ms") args.timeoutMs = Number(readRequiredValue(argv, ++i, arg));
     else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -308,12 +314,16 @@ function parseArgs(argv) {
   return args;
 }
 
-function resolveRequiredValue(argv, index, flag) {
+function readRequiredValue(argv, index, flag) {
   const value = argv[index];
   if (!value || value.startsWith("--")) {
     throw new Error(`${flag} requires a value`);
   }
-  return resolve(REPO_ROOT, value);
+  return value;
+}
+
+function resolveRequiredPath(argv, index, flag) {
+  return resolve(REPO_ROOT, readRequiredValue(argv, index, flag));
 }
 
 function printHelp() {
@@ -330,13 +340,18 @@ Options:
 `);
 }
 
-async function readBaseline(path) {
+async function readBaseline(path, { optional = false } = {}) {
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw);
     return parsed.sources || {};
   } catch (error) {
-    if (error.code === "ENOENT") return {};
+    if (error.code === "ENOENT" && optional) return {};
+    if (error.code === "ENOENT") {
+      throw new Error(
+        `Framework drift baseline not found at ${path}. Run with --update-baseline after reviewing the watchlist sources.`,
+      );
+    }
     throw error;
   }
 }
@@ -453,7 +468,9 @@ async function inspectSource(source, baseline, args) {
 }
 
 async function buildReport(args) {
-  const baseline = await readBaseline(args.baselinePath);
+  const baseline = await readBaseline(args.baselinePath, {
+    optional: args.offline || args.updateBaseline,
+  });
   const frameworks = [];
 
   for (const framework of WATCHLIST) {

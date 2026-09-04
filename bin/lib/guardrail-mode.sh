@@ -243,10 +243,10 @@ write_guardrail_mode_file() {
         if [[ "$mode" = "api" ]]; then
             write_env_assignment "APORT_API_URL" "${api_url:-$DEFAULT_APORT_API_URL}"
         fi
-        if [[ -n "$hosted_agent_id" ]]; then
+        if [[ "$mode" = "api" && -n "$hosted_agent_id" ]]; then
             write_env_assignment "APORT_AGENT_ID" "$hosted_agent_id"
         fi
-        if [[ -n "${APORT_API_KEY:-}" ]]; then
+        if [[ "$mode" = "api" && -n "${APORT_API_KEY:-}" ]]; then
             write_env_assignment "APORT_API_KEY" "$APORT_API_KEY"
         fi
     } > "$mode_file"

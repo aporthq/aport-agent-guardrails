@@ -9,6 +9,11 @@ from aport_guardrails_langchain import APortCallback, GuardrailViolation
 class TestAPortCallback:
     """Test APortCallback with mocked Evaluator."""
 
+    def test_callback_manager_propagates_denials(self):
+        """LangChain callback managers only propagate callback errors when raise_error is true."""
+        assert APortCallback.raise_error is True
+        assert APortCallback(config_path="/nonexistent").raise_error is True
+
     @pytest.mark.asyncio
     async def test_allow_does_not_raise(self):
         """When evaluator returns allow=True, on_tool_start does not raise."""

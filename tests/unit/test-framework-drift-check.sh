@@ -16,6 +16,7 @@ echo "  Unit — framework drift checker"
 
 node "$REPO_ROOT/scripts/framework-drift-check.mjs" \
     --offline \
+    --timeout-ms 5000 \
     --json "$JSON_OUT" \
     --markdown "$MD_OUT"
 
@@ -33,5 +34,15 @@ node -e "
 grep -q "APort Framework Drift Report" "$MD_OUT"
 grep -q "OpenClaw" "$MD_OUT"
 grep -q "GitHub Repository Guard" "$MD_OUT"
+
+if node "$REPO_ROOT/scripts/framework-drift-check.mjs" \
+    --baseline "$TEST_DIR/missing-baseline.json" \
+    --json "$TEST_DIR/missing.json" \
+    --markdown "$TEST_DIR/missing.md" \
+    --timeout-ms 5000 > "$TEST_DIR/missing.out" 2> "$TEST_DIR/missing.err"; then
+    echo "FAIL: online drift checker should require a committed baseline" >&2
+    exit 1
+fi
+grep -q "Framework drift baseline not found" "$TEST_DIR/missing.err"
 
 echo "  ✅ framework drift checker offline report"
