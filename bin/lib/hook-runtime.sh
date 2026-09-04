@@ -7,29 +7,40 @@ APORT_HOOK_STDIN_MAX_BYTES="${APORT_HOOK_STDIN_MAX_BYTES:-1048576}"
 APORT_HOOK_STDIN_TOO_LARGE_SENTINEL="__APORT_HOOK_INPUT_TOO_LARGE__"
 
 aport_read_stdin_with_timeout() {
+    local LC_ALL=C
     local timeout="${1:-$APORT_HOOK_STDIN_TIMEOUT}"
     local input=""
-    local line=""
+    local chunk=""
+    local max_bytes="${APORT_HOOK_STDIN_MAX_BYTES:-0}"
+    local chunk_size="${APORT_HOOK_STDIN_CHUNK_BYTES:-4096}"
 
     if [ -t 0 ]; then
         printf '{}'
         return 0
     fi
 
-    # Hook payloads are expected to be a single JSON object. Keep reading while
-    # data is immediately available, but never let an observational hook hang.
-    while IFS= read -r -t "$timeout" line || [ -n "$line" ]; do
-        if [ -n "$input" ]; then
-            input="${input}
-${line}"
-        else
-            input="$line"
-        fi
-        if [ "${APORT_HOOK_STDIN_MAX_BYTES:-0}" -gt 0 ] && [ "${#input}" -gt "$APORT_HOOK_STDIN_MAX_BYTES" ]; then
+    case "$max_bytes" in
+        "" | *[!0-9]*) max_bytes=0 ;;
+    esac
+    case "$chunk_size" in
+        "" | *[!0-9]*) chunk_size=4096 ;;
+    esac
+    if [ "$chunk_size" -lt 1 ]; then
+        chunk_size=4096
+    fi
+    if [ "$max_bytes" -gt 0 ] && [ "$chunk_size" -gt $((max_bytes + 1)) ]; then
+        chunk_size=$((max_bytes + 1))
+    fi
+
+    # Hook payloads are expected to be a single JSON object. Read bounded chunks
+    # so one huge line cannot be buffered before the size cap is enforced.
+    while IFS= read -r -t "$timeout" -n "$chunk_size" chunk || [ -n "$chunk" ]; do
+        input="${input}${chunk}"
+        if [ "$max_bytes" -gt 0 ] && [ "${#input}" -gt "$max_bytes" ]; then
             printf '%s' "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL"
             return 0
         fi
-        line=""
+        chunk=""
         # macOS ships Bash 3.x, whose `read -t` rejects fractional values.
         # Keep the bounded read portable; EOF returns immediately in normal hook
         # invocations, while broken pipes are capped at one second after data.
@@ -121,7 +132,7 @@ aport_sanitize_display_text() {
     value="$(printf '%s' "$value" | tr '\r\n' '  ')"
     value="$(printf '%s' "$value" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
     value="$(printf '%s' "$value" | sed -E \
-        -e 's/apk_[A-Za-z0-9_-]+/[REDACTED_APORT_KEY]/g' \
+        -e 's/(apk|aprt)_[A-Za-z0-9_-]+/[REDACTED_APORT_KEY]/g' \
         -e 's/(Bearer|Authorization: Bearer)[[:space:]]+[A-Za-z0-9._~+\/=-]+/\1 [REDACTED]/g' \
         -e 's/github_pat_[A-Za-z0-9_]+/[REDACTED_GITHUB_TOKEN]/g' \
         -e 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED_GITHUB_TOKEN]/g' \

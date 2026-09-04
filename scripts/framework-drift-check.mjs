@@ -467,10 +467,7 @@ async function inspectSource(source, baseline, args) {
   }
 }
 
-async function buildReport(args) {
-  const baseline = await readBaseline(args.baselinePath, {
-    optional: args.offline || args.updateBaseline,
-  });
+async function buildReport(args, baseline = {}) {
   const frameworks = [];
 
   for (const framework of WATCHLIST) {
@@ -505,18 +502,25 @@ async function buildReport(args) {
   };
 }
 
-function buildBaseline(report) {
+function buildBaseline(report, previousBaseline = {}) {
   const sources = {};
   for (const framework of report.frameworks) {
     for (const source of framework.sources) {
+      const previous = previousBaseline[source.id] || {};
+      const refreshed = source.status === "ok";
       sources[source.id] = {
         framework: framework.id,
         type: source.type,
         label: source.label,
         url: source.url,
-        sha256: source.sha256 || undefined,
-        latestTag: source.latestTag || undefined,
-        capturedAt: report.generatedAt,
+        sha256: refreshed ? source.sha256 || undefined : previous.sha256 || undefined,
+        latestTag: refreshed ? source.latestTag || undefined : previous.latestTag || undefined,
+        capturedAt: refreshed
+          ? report.generatedAt
+          : previous.capturedAt || report.generatedAt,
+        lastRefreshError: refreshed
+          ? undefined
+          : source.error || source.summary || undefined,
       };
     }
   }
@@ -575,13 +579,16 @@ async function writeJson(path, value) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const report = await buildReport(args);
+  const baseline = await readBaseline(args.baselinePath, {
+    optional: args.offline || args.updateBaseline,
+  });
+  const report = await buildReport(args, baseline);
   await writeJson(args.jsonPath, report);
   await mkdir(dirname(args.markdownPath), { recursive: true });
   await writeFile(args.markdownPath, toMarkdown(report), "utf8");
 
   if (args.updateBaseline) {
-    await writeJson(args.baselinePath, buildBaseline(report));
+    await writeJson(args.baselinePath, buildBaseline(report, baseline));
   }
 
   console.log(

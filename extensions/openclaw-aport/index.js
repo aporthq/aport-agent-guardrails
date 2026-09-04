@@ -132,17 +132,22 @@ export default definePluginEntry({
               });
 
         if (!verifyDecisionIntegrity(decision)) {
+          const notice = formatGuardrailNotice({
+            outcome: enforcement === "warn" ? "warn" : "deny",
+            policy: effectivePolicyName,
+            code: "oap.decision_integrity_failed",
+            message: "Decision integrity verification failed.",
+            agentId,
+            passportFile,
+          });
           err(`[APort] Decision integrity check failed for ${effectiveToolName} - content_hash mismatch`);
+          if (enforcement === "warn") {
+            warn(`[APort] WARN: decision integrity failed; report-only mode allowed the tool. ${notice}`);
+            return {};
+          }
           return {
             block: true,
-            blockReason: formatGuardrailNotice({
-              outcome: "deny",
-              policy: effectivePolicyName,
-              code: "oap.decision_integrity_failed",
-              message: "Decision integrity verification failed.",
-              agentId,
-              passportFile,
-            }),
+            blockReason: notice,
           };
         }
 
@@ -216,9 +221,12 @@ function ensureIdempotencyKey(context, event = {}, hookContext = {}) {
     event?.toolCallId,
     event?.tool_call_id,
     event?.id,
+    event?.callId,
+    event?.call_id,
     hookContext?.toolCallId,
-    hookContext?.runId,
-    hookContext?.registrationId,
+    hookContext?.tool_call_id,
+    hookContext?.toolInvocationId,
+    hookContext?.tool_invocation_id,
   ]
     .filter((value) => typeof value === "string" && value.trim())
     .join(":");
@@ -253,7 +261,6 @@ function extractContextSummary(context) {
 function parseGuardrailInvocation(command) {
   if (typeof command !== "string" || !command.includes("aport-guardrail")) return null;
   const trimmed = command.trim();
-  if (/[\r\n;&|<>`$#()]/.test(trimmed)) return null;
   const argv = splitSimpleShellWords(trimmed);
   if (!argv || argv.length !== 3) return null;
   const commandName = basename(argv[0]);
@@ -318,7 +325,7 @@ function sanitizeDisplayText(value) {
   return String(value ?? "")
     .replace(/[\r\n\t]+/g, " ")
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-    .replace(/apk_[A-Za-z0-9_-]+/g, "[REDACTED_APORT_KEY]")
+    .replace(/(?:apk|aprt)_[A-Za-z0-9_-]+/g, "[REDACTED_APORT_KEY]")
     .replace(/github_pat_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
     .replace(/gh[pousr]_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
     .replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]")

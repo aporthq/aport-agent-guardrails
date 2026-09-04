@@ -178,11 +178,11 @@ SENSITIVE_FIELD_PATTERNS = [
     "bearer",
 ]
 
-# API key prefix patterns for detection
+# Known APort API key prefixes for redaction/display hints only. Runtime
+# validation treats bearer keys as opaque so future key formats keep working.
 API_KEY_PREFIXES = [
-    "aprt_",  # APort API key
-    "sk_",    # Secret key
-    "pk_",    # Public key
+    "apk_",
+    "aprt_",
 ]
 
 # ============================================================================
