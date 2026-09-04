@@ -25,6 +25,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const pluginDir = path.resolve(__dirname, "../../extensions/openclaw-aport");
 
+function withContentHash(decision) {
+  return {
+    ...decision,
+    content_hash: `sha256:${createHash("sha256").update(canonicalize(decision), "utf8").digest("hex")}`,
+  };
+}
+
 async function createTestPassport() {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "aport-openclaw-plugin-"));
   const aportDir = path.join(tempDir, "aport");
@@ -643,8 +650,100 @@ describe("plugin hook contract", () => {
 
     const denyResult = await beforeToolCall({ toolName: "exec.run", params: { command: "sudo ls" } });
     assert.strictEqual(denyResult.block, true);
-    assert.ok(typeof denyResult.blockReason === "string" && denyResult.blockReason.includes("APort Policy Denied"));
+    assert.ok(typeof denyResult.blockReason === "string" && denyResult.blockReason.includes("APort denied this tool call"));
+    assert.ok(!denyResult.blockReason.includes("allowUnmappedTools"));
     assert.ok(!Object.prototype.hasOwnProperty.call(denyResult, "reasons"));
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("allows denied tools only when explicit warn mode is configured", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "warn",
+    });
+
+    const result = await beforeToolCall({ toolName: "exec.run", params: { command: "sudo ls" } });
+    assert.deepStrictEqual(result, {});
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("blocks unmapped tools by default and allows only with explicit allowUnmappedTools", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const strictBeforeToolCall = await registerPlugin({ mode: "local", passportFile: passportPath });
+
+    const denyResult = await strictBeforeToolCall({ toolName: "new_host_tool", params: {} });
+    assert.strictEqual(denyResult.block, true);
+    assert.match(denyResult.blockReason, /oap\.unknown_tool/);
+
+    const permissiveBeforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      allowUnmappedTools: true,
+    });
+    const allowResult = await permissiveBeforeToolCall({ toolName: "new_host_tool", params: {} });
+    assert.deepStrictEqual(allowResult, {});
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("allows exec when exec policy mapping is explicitly disabled", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      mapExecToPolicy: false,
+    });
+
+    const result = await beforeToolCall({
+      toolName: "exec",
+      params: { command: "ls -la" },
+    });
+    assert.deepStrictEqual(result, {});
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("allows unmapped tools in warn mode while surfacing the unknown-tool warning", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "warn",
+    });
+
+    const result = await beforeToolCall({ toolName: "new_host_tool", params: {} });
+    assert.deepStrictEqual(result, {});
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("only unwraps canonical delegated APort guardrail commands", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({ mode: "local", passportFile: passportPath });
+    const guardrail = path.resolve(__dirname, "../../bin/aport-guardrail-bash.sh");
+
+    const allowResult = await beforeToolCall({
+      toolName: "exec.run",
+      params: { command: `${guardrail} system.command.execute '{"command":"ls"}'` },
+    });
+    assert.deepStrictEqual(allowResult, {});
+
+    for (const command of [
+      `${guardrail} system.command.execute '{"command":"ls"}'; sudo reboot`,
+      `${guardrail} system.command.execute '{"command":"ls"}' && sudo reboot`,
+      `${guardrail} system.command.execute '{"command":"ls"}' | sh`,
+      `sudo reboot # ${guardrail} system.command.execute '{"command":"ls"}'`,
+      `${guardrail} system.command.execute '{"command":"ls"}' \`sudo reboot\``,
+      `${guardrail} system.command.execute '{"command":"ls"}' $(sudo reboot)`,
+    ]) {
+      const denyResult = await beforeToolCall({ toolName: "exec.run", params: { command } });
+      assert.strictEqual(denyResult.block, true, command);
+      assert.match(denyResult.blockReason, /APort denied this tool call/, command);
+    }
 
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -652,8 +751,11 @@ describe("plugin hook contract", () => {
   it("normalizes write tool params before API verification", async () => {
     const originalFetch = globalThis.fetch;
     let seenBody = null;
+    let seenSignal = null;
+    const abortController = new AbortController();
     globalThis.fetch = async (_url, opts) => {
       seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      seenSignal = opts?.signal ?? null;
       return {
         ok: true,
         async json() {
@@ -675,11 +777,125 @@ describe("plugin hook contract", () => {
 
     try {
       const beforeToolCall = await registerPlugin({ mode: "api", agentId: "ap_test" });
-      const result = await beforeToolCall({ toolName: "write", params: { path: "README.md", content: "hi" } });
+      const result = await beforeToolCall(
+        { toolName: "write", params: { path: "README.md", content: "hi" } },
+        { abortSignal: abortController.signal, runId: "run-1", toolCallId: "tool-1" },
+      );
       assert.deepStrictEqual(result, {});
       assert.ok(seenBody);
       assert.strictEqual(seenBody.context.file_path, "README.md");
       assert.strictEqual(seenBody.context.path, "README.md");
+      assert.strictEqual(seenSignal, abortController.signal);
+      assert.match(seenBody.context.idempotency_key, /^openclaw_[a-f0-9]+$/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not derive API idempotency keys from run-level OpenClaw identifiers", async () => {
+    const originalFetch = globalThis.fetch;
+    const seenKeys = [];
+    globalThis.fetch = async (_url, opts) => {
+      const body = JSON.parse(String(opts?.body ?? "{}"));
+      seenKeys.push(body.context.idempotency_key);
+      const decision = withContentHash({
+        allow: true,
+        decision_id: `dec-${seenKeys.length}`,
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({ mode: "api", agentId: "ap_test" });
+      const hookContext = { runId: "run-1", registrationId: "registration-1" };
+      assert.deepStrictEqual(await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } }, hookContext), {});
+      assert.deepStrictEqual(await beforeToolCall({ toolName: "exec.run", params: { command: "git status" } }, hookContext), {});
+      assert.strictEqual(seenKeys.length, 2);
+      assert.match(seenKeys[0], /^idem_/);
+      assert.match(seenKeys[1], /^idem_/);
+      assert.notStrictEqual(seenKeys[0], seenKeys[1]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("unwraps delegated guardrail JSON without rejecting shell syntax inside the quoted context", async () => {
+    const originalFetch = globalThis.fetch;
+    const seenCommands = [];
+    globalThis.fetch = async (_url, opts) => {
+      const body = JSON.parse(String(opts?.body ?? "{}"));
+      seenCommands.push(body.context.command);
+      const decision = withContentHash({
+        allow: true,
+        decision_id: `dec-delegated-${seenCommands.length}`,
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({ mode: "api", agentId: "ap_test" });
+      const guardrail = path.resolve(__dirname, "../../bin/aport-guardrail-bash.sh");
+      const result = await beforeToolCall({
+        toolName: "exec.run",
+        params: { command: `${guardrail} system.command.execute '{"command":"git status && git diff"}'` },
+      });
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(seenCommands.at(-1), "git status && git diff");
+
+      const apostropheResult = await beforeToolCall({
+        toolName: "exec.run",
+        params: { command: `${guardrail} system.command.execute '{"command":"printf '\\''hello'\\''"}'` },
+      });
+      assert.deepStrictEqual(apostropheResult, {});
+      assert.strictEqual(seenCommands.at(-1), "printf 'hello'");
+
+      const doubleQuotedResult = await beforeToolCall({
+        toolName: "exec.run",
+        params: { command: `${guardrail} system.command.execute "{\\"command\\":\\"echo hi\\"}"` },
+      });
+      assert.deepStrictEqual(doubleQuotedResult, {});
+      assert.strictEqual(seenCommands.at(-1), "echo hi");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("honors warn mode when an API decision integrity check fails", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      async json() {
+        return {
+          decision: {
+            allow: true,
+            decision_id: "dec-bad-integrity",
+            reasons: [{ code: "oap.allowed", message: "ok" }],
+            content_hash: "sha256:bad",
+          },
+        };
+      },
+    });
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.deepStrictEqual(result, {});
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -765,6 +981,9 @@ describe("scanner compatibility", () => {
     assert.strictEqual(packageJson.openclaw.compat.pluginApi, ">=2026.4.11");
     assert.strictEqual(packageJson.openclaw.build.openclawVersion, "2026.4.11");
     const manifest = JSON.parse(await readFile(path.join(pluginDir, "openclaw.plugin.json"), "utf8"));
+    assert.deepStrictEqual(manifest.activation, { onStartup: true, onCapabilities: ["hook"] });
+    assert.strictEqual(manifest.configSchema.properties.enforcementMode.default, "enforce");
+    assert.strictEqual(manifest.configSchema.properties.allowUnmappedTools.default, false);
     assert.ok(Object.prototype.hasOwnProperty.call(manifest.configSchema.properties, "alwaysVerifyEachToolCall"));
     assert.match(manifest.configSchema.properties.alwaysVerifyEachToolCall.description, /Deprecated compatibility field/);
     await access(path.join(pluginDir, "openclaw.plugin.json"));

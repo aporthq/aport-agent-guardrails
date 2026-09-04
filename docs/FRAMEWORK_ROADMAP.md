@@ -1,14 +1,15 @@
-# Framework support roadmap
+# Supported surfaces roadmap
 
-Public developer view of supported frameworks and roadmap. Details per framework: [docs/frameworks/](frameworks/). **What’s production-ready:** [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md).
+Public developer view of supported repository and runtime surfaces. Details per framework: [docs/frameworks/](frameworks/). **What’s production-ready:** [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md).
 
-## Supported frameworks
+## Supported surfaces
 
-| Framework   | Status   | Implementation | Doc | Install |
+| Surface   | Status   | Implementation | Doc | Install |
 |------------|----------|----------------|-----|--------|
-| **OpenClaw** | Shipped | Full: plugin, wizard, local/API | [openclaw.md](frameworks/openclaw.md) | `npx @aporthq/aport-agent-guardrails openclaw` |
-| **Cursor**   | Shipped | Full: hooks installer + script | [cursor.md](frameworks/cursor.md) | `npx @aporthq/aport-agent-guardrails cursor` |
+| **GitHub Repository Guard** | Shipped | GitHub Action using OIDC, repository-scoped hosted passport issue/reuse, structural findings, report-only or hosted enforcement | [GITHUB_PROTECTION.md](GITHUB_PROTECTION.md) | `npx @aporthq/aport-agent-guardrails github` |
 | **Claude Code** | Shipped | Full: PreToolUse hook installer + hosted/local mode | [claude-code.md](frameworks/claude-code.md) | `npx @aporthq/aport-agent-guardrails claude-code` |
+| **Cursor**   | Shipped | Full: hooks installer + script | [cursor.md](frameworks/cursor.md) | `npx @aporthq/aport-agent-guardrails cursor` |
+| **OpenClaw** | Shipped | Full: plugin, wizard, local/API | [openclaw.md](frameworks/openclaw.md) | `npx @aporthq/aport-agent-guardrails openclaw` |
 | **LangChain / LangGraph** | Shipped | **Python only:** callback, `aport-langchain setup` | [langchain.md](frameworks/langchain.md) | `npx @aporthq/aport-agent-guardrails langchain` then `pip install aport-agent-guardrails-langchain` + `aport-langchain setup` |
 | **CrewAI**   | Shipped | **Python:** released hook adapter by default; native provider mode when available | [crewai.md](frameworks/crewai.md) | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
 | **DeerFlow** | Setup available | Generic setup + framework docs | [deerflow.md](frameworks/deerflow.md) | `npx @aporthq/aport-agent-guardrails deerflow` |
@@ -16,11 +17,11 @@ Public developer view of supported frameworks and roadmap. Details per framework
 
 **Coming soon:** n8n custom node runtime. The CLI option exists today for passport/config setup; workflow-node enforcement ships separately.
 
-All supported frameworks above use the same passport wizard and policy packs; each has a framework-specific installer. OpenClaw and Cursor have full runtime integration; LangChain/CrewAI have full integration **via Python packages**.
+All supported surfaces above use the same OAP passport and policy model. Runtime frameworks use the same passport wizard and policy packs; each has a framework-specific installer. GitHub uses repository-scoped hosted passports through GitHub OIDC. Claude Code, Cursor, and OpenClaw have runtime hook/plugin integration; LangChain/CrewAI have full integration **via Python packages**.
 
 ## Completion
 
-- **CLI:** One entry point `npx @aporthq/aport-agent-guardrails` with detection or `--framework=<name>`.
+- **CLI:** One entry point `npx @aporthq/aport-agent-guardrails` with GitHub setup, detection, or `--framework=<name>`.
 - **Shared:** Passport wizard, guardrail scripts (local + API), policy packs, config/path helpers (`bin/lib/`).
 - **Per framework:** Installer in `bin/frameworks/<name>.sh`, config written to framework-specific path, doc in `docs/frameworks/<name>.md`, integration tests in `tests/frameworks/<name>/`.
 

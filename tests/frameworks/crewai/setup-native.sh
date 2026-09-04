@@ -31,8 +31,8 @@ if ! grep -q "OAPGuardrailProvider" "$TEST_DIR/crewai-native-setup.log"; then
     exit 1
 fi
 
-if ! grep -q "enable_guardrail" "$TEST_DIR/crewai-native-setup.log"; then
-    echo "FAIL: expected enable_guardrail instructions in output" >&2
+if ! grep -q "native guardrail-provider hook" "$TEST_DIR/crewai-native-setup.log"; then
+    echo "FAIL: expected native provider caveat in output" >&2
     exit 1
 fi
 

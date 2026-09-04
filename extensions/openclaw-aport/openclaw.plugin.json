@@ -3,6 +3,12 @@
   "name": "APort Guardrails",
   "description": "Deterministic pre-action authorization via APort policy enforcement. Registers before_tool_call to block disallowed tools.",
   "version": "1.0.30",
+  "activation": {
+    "onStartup": true,
+    "onCapabilities": [
+      "hook"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -39,10 +45,19 @@
         "default": true,
         "description": "Block tool on guardrail error when true"
       },
+      "enforcementMode": {
+        "type": "string",
+        "enum": [
+          "enforce",
+          "warn"
+        ],
+        "default": "enforce",
+        "description": "enforce blocks denied actions; warn records policy decisions but allows execution."
+      },
       "allowUnmappedTools": {
         "type": "boolean",
-        "default": true,
-        "description": "If true (default), allow tools with no policy mapping (custom skills, ClawHub, etc.). Set to false to block unmapped tools for stricter security."
+        "default": false,
+        "description": "If true, allow tools with no policy mapping (custom skills, ClawHub, etc.). Default false blocks unmapped tools for fail-closed security."
       },
       "agentId": {
         "type": "string",

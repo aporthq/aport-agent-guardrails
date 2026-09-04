@@ -1,14 +1,14 @@
 # APort Agent Guardrails — Documentation
 
-**Public documentation** (for users integrating OpenClaw + APort guardrails):
+**Public documentation** (for users integrating APort Repository Guard and runtime guardrails):
 
 | Doc | Purpose |
 |-----|---------|
-| [QUICKSTART_OPENCLAW_PLUGIN.md](QUICKSTART_OPENCLAW_PLUGIN.md) | **OpenClaw plugin** — one-command setup, deterministic enforcement (RECOMMENDED) |
-| [**HOSTED_PASSPORT_SETUP.md**](HOSTED_PASSPORT_SETUP.md) | **Use passport from aport.io** — create hosted during setup or pass `npx @aporthq/aport-agent-guardrails openclaw <agent_id>` |
-| [QUICKSTART.md](QUICKSTART.md) | Interactive setup and step-by-step hosted/local passport options |
-| [ENTERPRISE_DEVICE_DEPLOYMENT.md](ENTERPRISE_DEVICE_DEPLOYMENT.md) | IT-managed deploy, enforce, and uninstall scripts |
 | [GITHUB_PROTECTION.md](GITHUB_PROTECTION.md) | GitHub Actions report/enforce setup for repository provenance, merge/push evidence, and related local release-policy checks |
+| [QUICKSTART.md](QUICKSTART.md) | GitHub-first setup, runtime hook setup, and hosted/local passport options |
+| [**HOSTED_PASSPORT_SETUP.md**](HOSTED_PASSPORT_SETUP.md) | **Use passport from aport.io** — create hosted during setup or pass an existing `agent_id` |
+| [ENTERPRISE_DEVICE_DEPLOYMENT.md](ENTERPRISE_DEVICE_DEPLOYMENT.md) | IT-managed deploy, enforce, and uninstall scripts |
+| [QUICKSTART_OPENCLAW_PLUGIN.md](QUICKSTART_OPENCLAW_PLUGIN.md) | OpenClaw plugin setup for OpenClaw-specific deployments |
 | [OPENCLAW_LOCAL_INTEGRATION.md](OPENCLAW_LOCAL_INTEGRATION.md) | Full OpenClaw setup: API, passport, policies, Python example |
 | [OPENCLAW_TOOLS_AND_POLICIES.md](OPENCLAW_TOOLS_AND_POLICIES.md) | exec, allowed_commands, unmapped tools, passport limits |
 | [TOOL_POLICY_MAPPING.md](TOOL_POLICY_MAPPING.md) | How tool names map to policy packs |

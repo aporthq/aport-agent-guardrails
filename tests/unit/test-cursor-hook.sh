@@ -45,6 +45,63 @@ jq -e '.permission == "deny" and .allowed == false' "$OUT0" > /dev/null || {
 }
 echo "  ✅ empty stdin: fail-closed deny"
 
+OUT0B="$TEST_DIR/cursor-oversized-input.txt"
+set +e
+echo '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' \
+    | APORT_HOOK_STDIN_MAX_BYTES=20 OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT0B" 2> /dev/null
+EXIT0B=$?
+set -e
+[[ "$EXIT0B" -eq 2 ]] || {
+    echo "FAIL: oversized stdin should deny with exit 2, got $EXIT0B (output: $(cat "$OUT0B"))" >&2
+    exit 1
+}
+jq -e '.permission == "deny" and .allowed == false and (.reason | contains("oap.input_too_large"))' "$OUT0B" > /dev/null || {
+    echo "FAIL: oversized stdin should return Cursor deny JSON with oap.input_too_large" >&2
+    cat "$OUT0B" >&2
+    exit 1
+}
+echo "  ✅ oversized stdin: fail-closed deny"
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+OUT0C="$TEST_DIR/cursor-oversized-input-warn.txt"
+set +e
+echo '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' \
+    | APORT_HOOK_STDIN_MAX_BYTES=20 OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT0C" 2> /dev/null
+EXIT0C=$?
+set -e
+[[ "$EXIT0C" -eq 0 ]] || {
+    echo "FAIL: oversized stdin should allow in warn mode, got $EXIT0C (output: $(cat "$OUT0C"))" >&2
+    exit 1
+}
+jq -e '.permission == "allow" and .allowed == true and (.reason | contains("oap.input_too_large"))' "$OUT0C" > /dev/null || {
+    echo "FAIL: oversized stdin should return Cursor warn JSON with oap.input_too_large" >&2
+    cat "$OUT0C" >&2
+    exit 1
+}
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ oversized stdin: warn mode allows with warning"
+
+# Byte cap must count UTF-8 bytes, not shell characters. Two emoji are 8 bytes.
+# Use octal escapes to keep this source file ASCII-stable.
+# shellcheck source=bin/lib/hook-runtime.sh
+source "$REPO_ROOT/bin/lib/hook-runtime.sh"
+MULTIBYTE_RESULT="$(
+    APORT_HOOK_STDIN_MAX_BYTES=4 APORT_HOOK_STDIN_CHUNK_BYTES=8 \
+        aport_read_stdin_with_timeout < <(printf '\360\237\230\200\360\237\230\200')
+)"
+[[ "$MULTIBYTE_RESULT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]] || {
+    echo "FAIL: hook stdin cap must enforce bytes for multibyte payloads" >&2
+    exit 1
+}
+echo "  ✅ multibyte oversized stdin: byte cap enforced"
+
 # Helper: run hook with input, check exit code and output
 run_hook() {
     local desc="$1" input="$2" expect_exit="$3" expect_field="$4"
@@ -96,6 +153,9 @@ run_hook "preToolUse read_file: allow (args path)" \
 run_hook "preToolUse Read: deny (.env sensitive path)" \
     '{"tool_name":"Read","tool_input":{"file_path":"/repo/.env.local"}}' 2 '"permission":"deny"'
 
+run_hook "preToolUse present_file: deny (.env sensitive path)" \
+    '{"tool_name":"present_file","tool_input":{"path":"/repo/.env.local"}}' 2 '"permission":"deny"'
+
 # --- preToolUse: Grep (allow without evaluator) ---
 run_hook "preToolUse Grep: allow (no evaluator)" \
     '{"tool_name":"Grep","tool_input":{"pattern":"TODO"}}' 0 '"permission":"allow"'
@@ -132,6 +192,15 @@ run_hook "preToolUse Edit: allow" \
 run_hook "preToolUse MCP:tool: allow" \
     '{"tool_name":"MCP:github_search","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
 
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "preToolUse ReadMcpResourceTool: preserve resource operation" \
+    '{"tool_name":"ReadMcpResourceTool","mcp_server_name":"github","tool_input":{"tool":"github.resources.read","uri":"mcp://github/repo/README.md"}}' 0 '"permission":"allow"'
+tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '.context.tool == "github.resources.read" and .context.mcp_tool == "github.resources.read"' > /dev/null || {
+    echo "FAIL: ReadMcpResourceTool should evaluate the resource operation, not the wrapper tool name" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+
 # --- preToolUse: unknown tool (fail-closed) ---
 run_hook "preToolUse unknown: deny (fail-closed)" \
     '{"tool_name":"SomethingNew","tool_input":{}}' 2 '"permission":"deny"'
@@ -152,17 +221,53 @@ run_hook "Guardrail self-check with chained command: deny" \
     '{"command":"'"$REPO_ROOT"'/bin/aport-guardrail-bash.sh system.command.execute '\''{}'\''; sudo reboot"}' 2 '"permission":"deny"'
 
 # --- Invalid JSON -> fail-closed with Cursor JSON ---
+MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
 run_hook "Invalid JSON: deny (fail-closed)" \
     '{"tool_name":"Shell","tool_input":' 2 '"permission":"deny"'
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+run_hook "Invalid JSON: warn mode allows with warning" \
+    '{"tool_name":"Shell","tool_input":' 0 '"permission":"allow"'
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+
 # --- mode selection: local vs api ---
-MODE_FILE="$TEST_DIR/aport/guardrail-mode.env"
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=api
 APORT_API_URL=http://127.0.0.1:9
 EOF
 run_hook "Mode=api with unreachable API: deny" \
     '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 2 '"permission":"deny"'
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=warn
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+APORT_API_KEY=apk_cursor_secret_should_redact
+EOF
+run_hook "Mode=api warn with unreachable API: allow with warning" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
+WARN_OUT="$(ls -t "$TEST_DIR"/hook-out-*.txt | head -n 1)"
+grep -q "APort warning" "$WARN_OUT" || {
+    echo "FAIL: warn mode should emit APort warning" >&2
+    cat "$WARN_OUT" >&2
+    exit 1
+}
+grep -q "https://aport.io/passports?details=ap_1234567890abcdef1234567890abcdef" "$WARN_OUT" || {
+    echo "FAIL: hosted warn message should include passport review link" >&2
+    cat "$WARN_OUT" >&2
+    exit 1
+}
+if grep -q "apk_cursor_secret" "$WARN_OUT"; then
+    echo "FAIL: warning output must not leak API keys" >&2
+    cat "$WARN_OUT" >&2
+    exit 1
+fi
 
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local

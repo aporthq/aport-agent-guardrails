@@ -54,4 +54,24 @@ describe("OAPGuardrailProvider", () => {
     const provider = new OAPGuardrailProvider({ framework: "openclaw" } as Record<string, unknown>);
     expect(provider.name).toBe("aport");
   });
+
+  it("keeps default enforcement fail-closed for denied decisions", () => {
+    const provider = new OAPGuardrailProvider({ framework: "nonexistent-framework" });
+    const decision = provider.evaluateSync(makeRequest("bash", { command: "rm -rf /tmp/aport-test" }));
+    expect(decision.allow).toBe(false);
+    expect(decision.metadata).toBeUndefined();
+  });
+
+  it("allows framework execution in warn mode while preserving original deny metadata", () => {
+    const provider = new OAPGuardrailProvider({
+      framework: "nonexistent-framework",
+      enforcementMode: "warn",
+    });
+    const decision = provider.evaluateSync(makeRequest("bash", { command: "rm -rf /tmp/aport-test" }));
+    expect(decision.allow).toBe(true);
+    expect(decision.metadata).toMatchObject({
+      enforcementMode: "warn",
+      originalAllow: false,
+    });
+  });
 });

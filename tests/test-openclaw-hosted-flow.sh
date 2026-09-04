@@ -61,9 +61,9 @@ fi
 echo "  ✅ Invalid agent_id rejected"
 
 # 2. Valid agent_id: run setup with piped defaults (config dir, API URL, strict mode, continue without openclaw)
-#    We pipe newlines to accept defaults. Order: config dir (we pass our CONFIG_DIR via env), then if openclaw missing "Continue? Y", API URL, strict mode.
+#    We pipe newlines to accept defaults. Order: config dir (we pass our CONFIG_DIR via env), then if openclaw missing "Continue? Y", API URL, allow-unmapped default.
 export OPENCLAW_HOME="$CONFIG_DIR"
-# Pass multiple newlines for: config dir Enter, Continue anyway Y, API URL Enter, strict mode N
+# Pass multiple newlines for: config dir Enter, Continue anyway Y, API URL Enter, allow-unmapped N
 printf '\n\n\n\n' | PATH="$FAKE_BIN:$PATH" "$REPO_ROOT/bin/openclaw" "$AGENT_ID" 2>&1 | tee "$TEST_DIR/openclaw-hosted.log" || true
 # Script may exit 0 or 1 (e.g. if openclaw not installed); we only care that config was written
 

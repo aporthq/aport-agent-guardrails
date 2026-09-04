@@ -21,7 +21,7 @@ Canonical pack mapping for **generic** tool names: `packages/core/src/core/tool-
 |-----------|-------------|----------------------------|----------------|
 | **Claude Code** | `bin/aport-claude-code-hook.sh` | Host name → guardrail id → JSON | **Fail-closed** (deny) |
 | **Cursor** | `bin/aport-cursor-hook.sh` | Same pattern as Claude Code | **Fail-closed** |
-| **OpenClaw** | `extensions/openclaw-aport/tool-mapping.js` | `mapToolToPolicy()` in plugin | **Allow** if `allowUnmappedTools: true` (default) |
+| **OpenClaw** | `extensions/openclaw-aport/tool-mapping.js` | `mapToolToPolicy()` in plugin | **Block** by default; allow only if `allowUnmappedTools: true` |
 | **LangChain / LangGraph** | `APortCallback` / `APortGuardrailCallback` | `tool_to_pack_id(tool.name)` only | Uses JSON `default` → `system.command.execute.v1` |
 | **CrewAI** | Python/TS hook middleware | `tool_to_pack_id(tool_name)` only | Same as LangChain |
 | **DeerFlow** | `OAPGuardrailProvider` | `tool_to_pack_id(tool_name)` only | Same as LangChain |
@@ -78,7 +78,7 @@ Hook aligned with Claude Code (v1.0.27+): `WebSearch`, `WebFetch`, `Agent`, `Edi
 | `server__tool`, `mcp.*` | `mcp.tool.execute.v1` | `mcp.tool.execute` |
 | `git.*` | `code.repository.merge.v1` | `repo.merge` / `repo.pr.create` |
 
-Plugin: `extensions/openclaw-aport/tool-mapping.js`. With `allowUnmappedTools: false`, unmapped tools are denied.
+Plugin: `extensions/openclaw-aport/tool-mapping.js`. Unmapped tools are denied unless `allowUnmappedTools: true` is explicitly configured.
 
 ---
 

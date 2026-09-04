@@ -126,7 +126,33 @@ grep -q "No framework detected\|APORT_FRAMEWORK\|--framework" "$out6" || {
 }
 echo "  ✅ Non-interactive (no detection) -> exit 1 and hint"
 
-# 7. Non-interactive: APORT_FRAMEWORK overrides -> runs framework
+# 7. Interactive no-detection in a git repo defaults to GitHub Repository Guard.
+github_default_repo="$TEST_DIR/github_default_repo"
+mkdir -p "$github_default_repo"
+git init -q "$github_default_repo"
+out6b="$TEST_DIR/dispatcher-6b.txt"
+set +e
+printf '\n' | APORT_PROJECT_DIR="$github_default_repo" "$DISPATCHER" > "$out6b" 2>&1
+e6b=$?
+set -e
+[[ "$e6b" -eq 0 ]] || {
+    echo "FAIL: interactive git repo default should set up GitHub guard" >&2
+    cat "$out6b" >&2
+    exit 1
+}
+[[ -f "$github_default_repo/.github/workflows/aport-guard.yml" ]] || {
+    echo "FAIL: expected GitHub workflow to be created by default in git repo" >&2
+    cat "$out6b" >&2
+    exit 1
+}
+grep -q "Selected target: github" "$out6b" || {
+    echo "FAIL: expected dispatcher to select github target" >&2
+    cat "$out6b" >&2
+    exit 1
+}
+echo "  ✅ Interactive git repo default -> github target"
+
+# 8. Non-interactive: APORT_FRAMEWORK overrides -> runs framework
 out7="$TEST_DIR/dispatcher-7.txt"
 run_dispatcher "$out7" "" # we can't set env in run_dispatcher for exec'd process; run inline
 set +e
@@ -144,7 +170,7 @@ grep -q "Invalid agent_id format" "$out7" || {
 }
 echo "  ✅ APORT_FRAMEWORK=openclaw -> runs openclaw (non-interactive)"
 
-# 8. Multiple detected + non-interactive -> exit 1 and show conflict
+# 9. Multiple detected + non-interactive -> exit 1 and show conflict
 conflict_dir="$TEST_DIR/conflict"
 mkdir -p "$conflict_dir"
 echo 'dependencies = ["langchain"]' > "$conflict_dir/pyproject.toml"
@@ -169,7 +195,7 @@ grep -q "langchain" "$out8" && grep -q "openclaw" "$out8" || {
 }
 echo "  ✅ Non-interactive (multiple detected) -> exit 1 and show both options"
 
-# 9. --framework=claude-code -> runs claude-code installer (not "unknown framework")
+# 10. --framework=claude-code -> runs claude-code installer (not "unknown framework")
 out9="$TEST_DIR/dispatcher-9.txt"
 CLAUDE_TEST_DIR="$TEST_DIR/claude_install"
 mkdir -p "$CLAUDE_TEST_DIR"
@@ -185,7 +211,7 @@ if grep -q "Unknown or unsupported framework" "$out9"; then
 fi
 echo "  ✅ --framework=claude-code -> runs claude-code (not unknown)"
 
-# 10. --integration-mode is CrewAI-only -> reject for other frameworks before forwarding
+# 11. --integration-mode is CrewAI-only -> reject for other frameworks before forwarding
 out10="$TEST_DIR/dispatcher-10.txt"
 run_dispatcher "$out10" "" --framework=openclaw --integration-mode=native
 [[ "$DISPATCHER_EXIT" -ne 0 ]] || {
@@ -199,7 +225,7 @@ grep -q "only supported for CrewAI" "$out10" || {
 }
 echo "  ✅ --integration-mode rejected for non-CrewAI frameworks"
 
-# 11. --non-interactive flag should set APORT_NONINTERACTIVE for custom frameworks
+# 12. --non-interactive flag should set APORT_NONINTERACTIVE for custom frameworks
 out11="$TEST_DIR/dispatcher-11.txt"
 CLAUDE_FLAG_DIR="$TEST_DIR/claude_noninteractive_flag"
 mkdir -p "$CLAUDE_FLAG_DIR"
@@ -224,7 +250,7 @@ grep -q 'APORT_AGENT_ID=agt_inst_mppi38zb_ogxgbi' "$CLAUDE_FLAG_DIR/aport/guardr
 }
 echo "  ✅ --non-interactive flag works for hosted Claude setup"
 
-# 12. Non-interactive quick-hosted flags should pass through dispatcher to framework setup
+# 13. Non-interactive quick-hosted flags should pass through dispatcher to framework setup
 out12="$TEST_DIR/dispatcher-12.txt"
 CLAUDE_QUICK_DIR="$TEST_DIR/claude_quick_hosted"
 FAKE_BIN="$TEST_DIR/fake-bin-quick-hosted"

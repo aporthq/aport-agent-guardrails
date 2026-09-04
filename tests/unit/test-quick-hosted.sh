@@ -83,15 +83,19 @@ grep -q '^APORT_API_KEY=apk_runtime_test$' "$MODE_FILE" || {
 
 SENTINEL="$TEST_DIR/mode-file-source-executed"
 export APORT_API_KEY="apk runtime test \$(touch $SENTINEL)"
-MODE_FILE="$(write_guardrail_mode_file "$CONFIG_DIR" api "https://api.aport.io/with space" "$APORT_AGENT_ID")"
-bash -c 'source "$1"; [ "$APORT_API_KEY" = "$2" ] && [ "$APORT_API_URL" = "$3" ]' _ "$MODE_FILE" "$APORT_API_KEY" "https://api.aport.io/with space" || {
-    echo "FAIL: hosted mode file should be shell-safe when sourced" >&2
-    cat "$MODE_FILE" >&2
+if write_guardrail_mode_file "$CONFIG_DIR" api "https://api.aport.io/with space" "$APORT_AGENT_ID" > "$TEST_DIR/unsafe-write.out" 2> "$TEST_DIR/unsafe-write.err"; then
+    echo "FAIL: hosted mode writer should reject unsafe values before writing" >&2
+    cat "$CONFIG_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+[ ! -e "$SENTINEL" ] || {
+    echo "FAIL: unsafe mode-file handling executed API key contents" >&2
+    cat "$CONFIG_DIR/aport/guardrail-mode.env" >&2
     exit 1
 }
-[ ! -e "$SENTINEL" ] || {
-    echo "FAIL: sourcing hosted mode file executed API key contents" >&2
-    cat "$MODE_FILE" >&2
+grep -q '^APORT_API_KEY=apk_runtime_test$' "$CONFIG_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: rejected hosted mode write should preserve previous valid file" >&2
+    cat "$CONFIG_DIR/aport/guardrail-mode.env" >&2
     exit 1
 }
 
