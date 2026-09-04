@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails",
-  "version": "1.0.30",
+  "version": "1.0.31",
   "description": "APort Repository Guard and pre-action authorization guardrails for GitHub, Claude Code, Cursor, OpenClaw, LangChain, CrewAI, DeerFlow, and n8n",
   "workspaces": [
     "packages/*",
@@ -20,7 +20,7 @@
     "sync-submodules": "git submodule update --init --recursive",
     "sync-submodules:latest": "git submodule update --init --remote --recursive",
     "changeset": "changeset",
-    "version": "CI=1 changeset version && node scripts/sync-version.mjs",
+    "version": "node scripts/normalize-changeset-bumps.mjs && CI=1 changeset version && node scripts/sync-version.mjs",
     "sync-version": "node scripts/sync-version.mjs",
     "prepush:check": "bash scripts/pre-push-check.sh",
     "build": "npm run build:core && npm run build --workspaces --if-present",
@@ -67,8 +67,8 @@
     "extensions/openclaw-aport/package.json",
     "extensions/openclaw-aport/tool-mapping.js",
     "external/",
+    "local-overrides/",
     "templates/",
-    "policies/",
     "skills/",
     "docs/*.md",
     "docs/assets/",
