@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-04
+
+### Added
+- **GitHub Repository Guard:** Added first-class CLI setup for repository protection with `npx @aporthq/aport-agent-guardrails github`, generating a GitHub Actions workflow that uses APort hosted/OIDC verification through the published Repository Guard action.
+- **Warn-mode rollout:** Added explicit `warn` enforcement mode across supported runtime guardrails so teams can collect deny decisions and tune passports before enabling fail-closed enforcement.
+- **Mode management:** Added `npx @aporthq/aport-agent-guardrails mode <framework>` to switch evaluation source or enforcement behavior while preserving existing passport identity and framework configuration.
+- **Framework drift watch:** Added a scheduled framework-drift checker and baseline so maintainers can detect upstream hook/plugin/tool-surface changes before they silently break integrations.
+
+### Changed
+- **Hosted-first setup:** Updated docs and setup flows to prioritize hosted passports for signed decisions, central audit, and remote suspend while preserving local/offline passport support.
+- **OpenClaw, Cursor, Claude Code, LangChain, CrewAI, DeerFlow, and n8n docs:** Refreshed framework guidance to match current setup, mode, and policy-mapping behavior.
+- **Release automation:** Added version-bump release dispatch so merging a version bump to `main` can create the release tag, publish npm/PyPI packages, and attach enterprise script bundles without a separate manual tag step.
+- **Policy contribution guidance:** Clarified that public policy packs are authored in `aporthq/aport-policies`; this repo consumes them through `external/aport-policies` and only adds guardrail wiring, mappings, local support, and docs.
+
+### Fixed
+- **Hook safety hardening:** Tightened malformed-input, oversized-input, idempotency, log-sanitization, OpenClaw config, and mode-file handling across runtime hooks and setup scripts.
+- **Packaging hygiene:** npm package contents now include `local-overrides/` and no longer list the nonexistent root `policies/` directory.
+
 ## [1.0.30] - 2026-08-21
 
 ### Added
