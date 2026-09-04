@@ -62,6 +62,10 @@ export default definePluginEntry({
           toolName === "exec" && !mapExecToPolicy ? null : mapToolToPolicy(toolName, params);
 
         if (!policyName) {
+          if (toolName === "exec" && !mapExecToPolicy) {
+            log("[APort] ALLOW: exec - (exec policy mapping disabled)");
+            return {};
+          }
           if (allowUnmappedTools) {
             log(`[APort] ALLOW: ${toolName} - (unmapped, no policy)`);
             return {};

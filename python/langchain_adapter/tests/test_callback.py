@@ -79,3 +79,21 @@ class TestAPortCallback:
         context = callback.evaluator.verify.call_args[0][2]
         assert context["tool"] == "run_command"
         assert context["params"] == {"command": "rm -rf /"}
+
+    @pytest.mark.asyncio
+    async def test_warn_mode_sanitizes_tool_name(self, capsys):
+        """Warn logs must not let dynamic tool names forge terminal or CI records."""
+        callback = APortCallback(config_path="/nonexistent", enforcement_mode="warn")
+        callback.evaluator = AsyncMock()
+        callback.evaluator.verify = AsyncMock(
+            return_value={
+                "allow": False,
+                "reasons": [{"code": "oap.command_not_allowed", "message": "Command not in allowlist"}],
+            }
+        )
+
+        await callback.on_tool_start({"name": "run_command\n::error::fake"}, None, inputs={})
+
+        captured = capsys.readouterr()
+        assert "run_command : :error: :fake" in captured.out
+        assert "\n::error::fake" not in captured.out
