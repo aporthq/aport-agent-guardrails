@@ -1,5 +1,16 @@
 # @aporthq/aport-agent-guardrails-claude-code
 
+## 1.1.0
+
+### Minor Changes
+
+- 3b01f93: Add GitHub Repository Guard as the first-class setup target, explicit warn-mode enforcement for gradual rollout, framework drift monitoring, and updated hosted/local guardrail docs.
+
+### Patch Changes
+
+- Updated dependencies [3b01f93]
+  - @aporthq/aport-agent-guardrails-core@1.1.0
+
 ## 1.0.30
 
 ### Patch Changes

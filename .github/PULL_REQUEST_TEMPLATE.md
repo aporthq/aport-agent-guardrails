@@ -6,7 +6,7 @@
 
 - [ ] Bug fix
 - [ ] New feature
-- [ ] Policy pack addition
+- [ ] Policy pack submodule/mapping update
 - [ ] Documentation update
 - [ ] Other: [specify]
 
@@ -24,6 +24,8 @@
 - [ ] Documentation updated
 - [ ] No new warnings generated
 - [ ] Tests added/updated
+- [ ] For new public policy packs: upstream `aporthq/aport-policies` PR exists or is merged; this PR only updates submodules, mappings, framework wiring, local support, or docs
+- [ ] For local-only policy experiments: policy lives under `local-overrides/policies/` and docs clearly state that it is not an upstream public policy pack
 
 ## Related Issues
 

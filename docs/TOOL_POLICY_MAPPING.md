@@ -60,6 +60,23 @@ Both copies must stay identical. The policy pack must exist under `external/apor
 
 Per-framework host tool names and hook behavior: [FRAMEWORK_TOOL_MAPPING_AUDIT.md](FRAMEWORK_TOOL_MAPPING_AUDIT.md).
 
+## Adding a new public policy pack
+
+Public policy packs are authored upstream in [`aporthq/aport-policies`](https://github.com/aporthq/aport-policies).
+This repository consumes that repo through the `external/aport-policies` submodule.
+
+Use this repo for follow-up integration work only:
+
+- Bump `external/aport-policies` after the upstream policy PR is merged.
+- Add tool mapping when a framework tool should invoke the policy automatically.
+- Add local/offline evaluator support only when the policy can be evaluated safely without hosted verifier state.
+- Add framework docs and tests for the integration behavior.
+
+For evidence policies, follow the same trust model as GitHub Repository Guard:
+collect structured evidence in the integration, bind it to a trusted source when possible
+(for example GitHub OIDC, CI metadata, file hashes, runner-observed exit codes, or signed
+APort decision IDs), and let the hosted verifier return the signed OAP decision.
+
 ## Reference
 
 - OAP spec: `external/aport-spec/`

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aport-agent-guardrails-langchain"
-version = "1.0.30"
+version = "1.1.0"
 description = "APort Agent Guardrail for LangChain/LangGraph — AsyncCallbackHandler for AI agent tool calls"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "aport-agent-guardrails>=1.0.30,<2",
+    "aport-agent-guardrails>=1.1.0,<2",
 ]
 
 [project.optional-dependencies]
