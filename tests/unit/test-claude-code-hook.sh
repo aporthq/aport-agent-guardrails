@@ -69,6 +69,37 @@ grep -q 'oap.input_too_large' "$OUT0B" || {
 }
 echo "  ✅ Oversized input: structured deny"
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+echo "  Test: oversized stdin in warn mode -> structured allow..."
+OUT0C="$TEST_DIR/claude-oversized-input-warn.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+    | APORT_HOOK_STDIN_MAX_BYTES=20 OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT0C" 2> /dev/null
+EXIT0C=$?
+set -e
+[[ "$EXIT0C" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured allow for oversized warn input, got $EXIT0C" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*allow' "$OUT0C" || {
+    echo "FAIL: expected structured allow payload for oversized warn input" >&2
+    cat "$OUT0C" >&2
+    exit 1
+}
+grep -q 'oap.input_too_large' "$OUT0C" || {
+    echo "FAIL: expected oversized input warn code" >&2
+    cat "$OUT0C" >&2
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Oversized input: warn mode allows with warning"
+
 # 1. Allow: Read with allowed path (local evaluator)
 echo "  Test: Read tool -> allow (allowed path)..."
 OUT1="$TEST_DIR/claude-allow-read.txt"

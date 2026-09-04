@@ -12,6 +12,38 @@ echo ""
 echo "  Unit — aport set-mode"
 echo ""
 
+HELP_HOME="$TEST_DIR/help-home"
+mkdir -p "$HELP_HOME"
+HOME="$HELP_HOME" "$MODE_HELPER" langchain --help > "$TEST_DIR/langchain-help.out"
+grep -q '^Usage:' "$TEST_DIR/langchain-help.out" || {
+    echo "FAIL: framework-scoped --help should show usage" >&2
+    cat "$TEST_DIR/langchain-help.out" >&2
+    exit 1
+}
+if [[ -e "$HELP_HOME/.aport" ]]; then
+    echo "FAIL: framework-scoped --help should not create config" >&2
+    find "$HELP_HOME/.aport" -maxdepth 3 -type f >&2
+    exit 1
+fi
+
+TYPO_DIR="$TEST_DIR/typo-langchain"
+mkdir -p "$TYPO_DIR"
+if APORT_LANGCHAIN_CONFIG_DIR="$TYPO_DIR" "$MODE_HELPER" langchain --mode=api --enforcment=warn > "$TEST_DIR/langchain-typo.out" 2>&1; then
+    echo "FAIL: set-mode should reject unknown options" >&2
+    cat "$TEST_DIR/langchain-typo.out" >&2
+    exit 1
+fi
+grep -q 'Unexpected argument' "$TEST_DIR/langchain-typo.out" || {
+    echo "FAIL: unknown option rejection should explain the unexpected argument" >&2
+    cat "$TEST_DIR/langchain-typo.out" >&2
+    exit 1
+}
+if [[ -f "$TYPO_DIR/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: unknown option should not write a mode file" >&2
+    cat "$TYPO_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
 CLAUDE_DIR="$TEST_DIR/.claude"
 mkdir -p "$CLAUDE_DIR/aport"
 cat > "$CLAUDE_DIR/aport/guardrail-mode.env" << 'EOF'

@@ -418,7 +418,7 @@ jobs:
           exit 1
 
   create-release:
-    needs: [publish-npm, publish-python]
+    needs: [ensure-release-tag, publish-npm, publish-python]
     runs-on: ubuntu-latest
     permissions:
       contents: write

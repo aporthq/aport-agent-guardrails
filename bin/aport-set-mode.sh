@@ -52,6 +52,15 @@ if [[ "$is_supported" != true ]]; then
 fi
 
 parse_guardrail_mode_args "$@"
+if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -gt 0 ]]; then
+    if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -eq 1 && ("${APORT_FRAMEWORK_ARGS[0]}" == "--help" || "${APORT_FRAMEWORK_ARGS[0]}" == "-h") ]]; then
+        usage
+        exit 0
+    fi
+    log_error "Unexpected argument for mode command: ${APORT_FRAMEWORK_ARGS[0]}"
+    echo "Run: aport-agent-guardrails mode $framework --help" >&2
+    exit 1
+fi
 
 has_explicit_config_dir_override() {
     case "$framework" in

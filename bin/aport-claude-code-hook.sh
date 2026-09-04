@@ -55,18 +55,32 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
     fi
 fi
 
-# Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
-INPUT="$(aport_read_stdin_with_timeout)"
+emit_claude_input_too_large() {
+    local decision="deny"
+    local notice
+    if aport_hook_is_warn_mode; then
+        decision="allow"
+        notice="$(aport_format_guardrail_notice warn hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
+    else
+        notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
+    fi
 
-if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
     if command -v jq > /dev/null 2>&1; then
-        jq -n --arg reason "APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large. Detail: Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes." \
-            --arg event "PreToolUse" \
-            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"deny",permissionDecisionReason:$reason}}'
+        jq -n --arg reason "$notice" --arg event "PreToolUse" --arg decision "$decision" \
+            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:$decision,permissionDecisionReason:$reason}}'
+    elif [ "$decision" = "allow" ]; then
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}}\n'
     else
         printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}}\n'
     fi
     exit 0
+}
+
+# Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
+INPUT="$(aport_read_stdin_with_timeout)"
+
+if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
+    emit_claude_input_too_large
 fi
 
 # No input means the host did not provide a tool-call payload. Fail closed.
