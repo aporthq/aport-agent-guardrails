@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: APort repository guard
-        uses: aporthq/policy-verify-action@v1.0.5
+        uses: aporthq/policy-verify-action@v1.0.6
         with:
           mode: hosted
           block-protected-paths: true
