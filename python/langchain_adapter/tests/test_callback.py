@@ -98,6 +98,7 @@ class TestAPortCallback:
         captured = capsys.readouterr()
         assert "run_command : :error: :fake" in captured.out
         assert "\n::error::fake" not in captured.out
+        assert "Review:" in captured.out
 
     @pytest.mark.asyncio
     async def test_compat_warn_mode_sanitizes_tool_name(self, capsys):
@@ -116,3 +117,4 @@ class TestAPortCallback:
         captured = capsys.readouterr()
         assert "run_command : :error: :fake" in captured.out
         assert "\n::error::fake" not in captured.out
+        assert "Review:" in captured.out

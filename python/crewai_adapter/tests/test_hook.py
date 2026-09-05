@@ -87,6 +87,7 @@ class TestAportGuardrailBeforeToolCall:
         assert "\n::stop-commands::" not in output
         assert "apk_testsecret" not in output
         assert "[REDACTED_APORT_KEY]" in output
+        assert "Review:" in output
 
     @patch("crewai_adapter.hook.Evaluator")
     def test_context_input_serialized(self, mock_evaluator_cls: MagicMock) -> None:

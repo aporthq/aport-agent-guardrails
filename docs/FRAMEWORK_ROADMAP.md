@@ -1,6 +1,6 @@
 # Supported surfaces roadmap
 
-Public developer view of supported repository and runtime surfaces. Details per framework: [docs/frameworks/](frameworks/). **What’s production-ready:** [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md).
+Public developer view of supported repository and runtime surfaces. Details per framework: [docs/frameworks/](frameworks/). Release gates and publishing steps live in [RELEASE.md](RELEASE.md).
 
 ## Supported surfaces
 

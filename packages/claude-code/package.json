@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails-claude-code",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "description": "APort guardrails for Claude Code — PreToolUse hook",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,7 +22,7 @@
   "author": "APort Technologies Inc.",
   "license": "Apache-2.0",
   "dependencies": {
-    "@aporthq/aport-agent-guardrails-core": ">=1.0.31"
+    "@aporthq/aport-agent-guardrails-core": ">=1.0.32"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

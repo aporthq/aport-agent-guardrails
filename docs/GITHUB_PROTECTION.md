@@ -94,8 +94,9 @@ For repository workflows, the passport should include only the capabilities that
 
 Common capabilities:
 
-- `repo.pr.create` for PR creation/update and push-style checks.
+- `repo.pr.create` for PR creation/update checks.
 - `repo.merge` for merge checks.
+- `repo.push` for direct push checks on protected branches. Free GitHub OIDC passports omit this by default, so ordinary direct pushes are denied unless the repository intentionally authorizes them.
 - `repo.release` only when directly invoking `code.release.publish.v1` for release publishing checks. Legacy local passports with `release` are still accepted as an alias.
 
 Common limits:

@@ -138,6 +138,11 @@ The provider and adapter read the standard APort config:
 - `enforcement_mode: enforce` to block by default, or `warn` for explicit report-only rollout
 - `audit_log` to enable or disable audit logging
 
+In compatibility mode, warn mode lets CrewAI continue and prints an APort warning
+with the tool, policy, reason code, reason detail, and the hosted passport or
+local passport file to review. In native provider mode, warn-mode decisions are
+returned as provider metadata for the host/runtime to surface.
+
 With the default bootstrap, you usually do not need to set `guardrail_script`
 manually because the local runtime is installed under the framework config
 directory.

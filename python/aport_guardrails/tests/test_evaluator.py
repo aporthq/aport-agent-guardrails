@@ -65,6 +65,34 @@ class TestCallApiSyncPolicyInBody:
         assert body["context"].get("agent_id") == "agent-1"
 
     @patch("aport_guardrails.core.evaluator.urlopen")
+    def test_runtime_metadata_is_sent_to_api(self, urlopen_mock):
+        resp = MagicMock()
+        resp.read.return_value = json.dumps({"allow": True, "reasons": []}).encode()
+        resp.__enter__ = MagicMock(return_value=resp)
+        resp.__exit__ = MagicMock(return_value=False)
+        urlopen_mock.return_value = resp
+
+        _call_api_sync(
+            "https://api.example.com",
+            "system.command.execute.v1",
+            {"tool": "exec.run"},
+            agent_id="agent-1",
+            runtime={
+                "enforcement_mode": "warn",
+                "enforced_by": "aport-agent-guardrails-python",
+                "harness": "langchain",
+            },
+        )
+
+        call_args = urlopen_mock.call_args[0][0]
+        body = json.loads(call_args.data.decode())
+        assert body["runtime"] == {
+            "enforcement_mode": "warn",
+            "enforced_by": "aport-agent-guardrails-python",
+            "harness": "langchain",
+        }
+
+    @patch("aport_guardrails.core.evaluator.urlopen")
     def test_preserves_full_decision_metadata(self, urlopen_mock):
         resp = MagicMock()
         resp.read.return_value = json.dumps({
