@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,7 @@ except Exception:  # pragma: no cover - keeps the package usable without LangCha
 
 from aport_guardrails.core.config import find_config_path, load_config
 from aport_guardrails.core import Evaluator, GuardrailViolation, build_tool_context, tool_to_pack_id
+from aport_guardrails.core.display import format_policy_warning
 
 
 def _normalize_enforcement_mode(value: Any) -> str:
@@ -59,30 +59,13 @@ def _tool_input(input_str: Any, inputs: Any) -> str | dict[str, Any]:
     return str(value)
 
 
-def _sanitize_display(value: Any) -> str:
-    text = str(value or "").replace("\n", " ").replace("\r", " ").replace("\t", " ").replace("::", ": :")
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
-    replacements = (
-        (r"(?:apk|aprt)_[A-Za-z0-9_-]+", "[REDACTED_APORT_KEY]"),
-        (r"github_pat_[A-Za-z0-9_]+", "[REDACTED_GITHUB_TOKEN]"),
-        (r"gh[pousr]_[A-Za-z0-9_]+", "[REDACTED_GITHUB_TOKEN]"),
-        (r"xox[baprs]-[A-Za-z0-9-]+", "[REDACTED_SLACK_TOKEN]"),
-        (r"AKIA[0-9A-Z]{16}", "[REDACTED_AWS_KEY]"),
-        (r"(Authorization:?\s*Bearer|Bearer)\s+[A-Za-z0-9._~+/-]+=*", r"\1 [REDACTED]"),
-        (r"(password|passwd|pwd|token|secret|api[_-]?key)=\S+", r"\1=[REDACTED]"),
-        (r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", "[REDACTED_PRIVATE_KEY]"),
-    )
-    for pattern, replacement in replacements:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE | re.DOTALL)
-    return text[:240]
-
-
 class APortCallback(AsyncCallbackHandler):
     """Callback that verifies tool execution with APort before allowing. Auto-loads config from .aport/config.yaml or ~/.aport/langchain/."""
 
     raise_error = True
 
     def __init__(self, config_path: str | None = None, enforcement_mode: str | None = None) -> None:
+        self.config_path = config_path
         self.evaluator = Evaluator(config_path, framework="langchain")
         self.enforcement_mode = _resolve_enforcement_mode(config_path, "langchain", enforcement_mode)
 
@@ -102,8 +85,14 @@ class APortCallback(AsyncCallbackHandler):
             code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
             if self.enforcement_mode == "warn":
                 print(
-                    f"[APort] warning: policy would have denied "
-                    f"{_sanitize_display(tool_name)}. Reason: {_sanitize_display(code)}."
+                    format_policy_warning(
+                        policy=pack_id,
+                        reason_code=code,
+                        reason_message=msg,
+                        tool_name=tool_name,
+                        framework="langchain",
+                        config_path=self.config_path,
+                    )
                 )
                 return
             raise GuardrailViolation(msg, code=code, reasons=reasons)

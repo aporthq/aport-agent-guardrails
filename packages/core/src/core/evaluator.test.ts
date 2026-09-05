@@ -121,4 +121,44 @@ describe('Evaluator', () => {
       else delete process.env.HOME;
     }
   });
+
+  it('sends runtime enforcement metadata only on API verification requests', async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedBody: Record<string, unknown> | null = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify({ decision: { allow: true, reasons: [] } }),
+      } as Response;
+    }) as typeof fetch;
+
+    try {
+      const configPath = path.join(tmpDir, 'config.yaml');
+      fs.writeFileSync(
+        configPath,
+        'mode: api\nframework: langchain\nagent_id: ap_1234567890abcdef1234567890abcdef\nenforcement_mode: warn\n',
+        'utf8'
+      );
+
+      const evaluator = new Evaluator(configPath, 'langchain');
+      await evaluator.verify(
+        { agent_id: 'ap_1234567890abcdef1234567890abcdef' },
+        { capability: 'system.command.execute.v1' },
+        { tool: 'exec.run', command: 'ls' }
+      );
+
+      const body = capturedBody as { runtime?: unknown } | null;
+      expect(body?.runtime).toEqual({
+        enforcement_mode: 'warn',
+        enforced_by: '@aporthq/aport-agent-guardrails',
+        harness: 'langchain',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

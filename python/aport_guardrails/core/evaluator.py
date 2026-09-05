@@ -388,6 +388,34 @@ def _is_full_policy_pack(p: Any) -> bool:
     return bool(p.get("id") and p.get("requires_capabilities") is not None)
 
 
+def _normalize_runtime_string(value: Any, fallback: str) -> str:
+    normalized = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    normalized = "".join(" " if ord(ch) < 32 or ord(ch) == 127 else ch for ch in normalized)
+    normalized = " ".join(normalized.split())
+    return (normalized or fallback)[:80]
+
+
+def _normalize_runtime_enforcement(value: Any) -> str:
+    raw = str(value or "enforce").strip().lower().replace("_", "-")
+    if raw in {"warn", "report-only", "audit-only", "observe", "observation"}:
+        return "warn"
+    return "enforce"
+
+
+def _runtime_metadata(config: dict[str, Any], fallback_harness: str) -> dict[str, str]:
+    return {
+        "enforcement_mode": _normalize_runtime_enforcement(
+            config.get("enforcement_mode")
+            or config.get("enforcementMode")
+            or os.environ.get("APORT_ENFORCEMENT_MODE")
+            or os.environ.get("APORT_ENFORCEMENT")
+            or os.environ.get("APORT_GUARDRAIL_ENFORCEMENT")
+        ),
+        "enforced_by": "aport-agent-guardrails-python",
+        "harness": _normalize_runtime_string(config.get("framework"), fallback_harness),
+    }
+
+
 def _call_api_sync(
     api_url: str,
     pack_id: str,
@@ -398,6 +426,7 @@ def _call_api_sync(
     policy_pack: dict[str, Any] | None = None,
     api_key: str | None = None,
     verify_ssl: bool = True,
+    runtime: dict[str, str] | None = None,
 ) -> Decision:
     """
     Call APort API: POST /api/verify/policy/{pack_id}.
@@ -428,6 +457,8 @@ def _call_api_sync(
         body["passport"] = passport
     if policy_pack and _is_full_policy_pack(policy_pack):
         body["policy"] = policy_pack
+    if runtime:
+        body["runtime"] = runtime
     try:
         req = Request(url, data=json.dumps(body).encode(), method="POST")
         req.add_header("Content-Type", "application/json")
@@ -551,6 +582,7 @@ class Evaluator:
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
             api_key = config.get("api_key") or os.environ.get("APORT_API_KEY")
             agent_id = config.get("agent_id") or passport.get("agent_id")
+            runtime = _runtime_metadata(config, self._framework)
             # SECURITY: Check if SSL verification should be disabled (dev/test only)
             verify_ssl = config.get("verify_ssl", True)
             if os.environ.get("APORT_VERIFY_SSL") == "0":
@@ -574,6 +606,7 @@ class Evaluator:
                     policy_pack=policy_pack,
                     api_key=api_key,
                     verify_ssl=verify_ssl,
+                    runtime=runtime,
                 )
                 self._audit_log(config, tool_name, pack_id, decision, ctx)
                 return decision
@@ -587,6 +620,7 @@ class Evaluator:
                     policy_pack=policy_pack,
                     api_key=api_key,
                     verify_ssl=verify_ssl,
+                    runtime=runtime,
                 )
                 self._audit_log(config, tool_name, pack_id, decision, ctx)
                 return decision
@@ -647,6 +681,7 @@ class Evaluator:
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
             api_key = config.get("api_key") or os.environ.get("APORT_API_KEY")
             agent_id = config.get("agent_id") or passport.get("agent_id")
+            runtime = _runtime_metadata(config, self._framework)
             # SECURITY: Check if SSL verification should be disabled (dev/test only)
             verify_ssl = config.get("verify_ssl", True)
             if os.environ.get("APORT_VERIFY_SSL") == "0":
@@ -662,13 +697,13 @@ class Evaluator:
                     passport_body = None
             if agent_id:
                 decision = _call_api_sync(
-                    api_url, pack_id, ctx, agent_id=agent_id, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl
+                    api_url, pack_id, ctx, agent_id=agent_id, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl, runtime=runtime
                 )
                 self._audit_log(config, tool_name, pack_id, decision, ctx)
                 return decision
             if passport_body:
                 decision = _call_api_sync(
-                    api_url, pack_id, ctx, passport=passport_body, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl
+                    api_url, pack_id, ctx, passport=passport_body, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl, runtime=runtime
                 )
                 self._audit_log(config, tool_name, pack_id, decision, ctx)
                 return decision

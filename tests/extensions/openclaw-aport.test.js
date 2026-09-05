@@ -787,6 +787,11 @@ describe("plugin hook contract", () => {
       assert.strictEqual(seenBody.context.path, "README.md");
       assert.strictEqual(seenSignal, abortController.signal);
       assert.match(seenBody.context.idempotency_key, /^openclaw_[a-f0-9]+$/);
+      assert.deepStrictEqual(seenBody.runtime, {
+        enforcement_mode: "enforce",
+        enforced_by: "@aporthq/openclaw-aport",
+        harness: "openclaw",
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

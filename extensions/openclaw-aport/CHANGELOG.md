@@ -1,5 +1,11 @@
 # Changelog - APort OpenClaw Plugin
 
+## 1.0.32
+
+### Patch Changes
+
+- Report hosted runtime enforcement metadata to APort while keeping local/offline evaluation unchanged.
+
 ## 1.0.31
 
 ### Patch Changes

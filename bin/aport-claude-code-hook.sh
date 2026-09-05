@@ -57,22 +57,16 @@ fi
 
 emit_claude_input_too_large() {
     local decision="deny"
-    local notice
+    local notice user_warning
     if aport_hook_is_warn_mode; then
         decision="allow"
         notice="$(aport_format_guardrail_notice warn hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
+        user_warning="$(aport_hook_format_user_warning hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
     else
         notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
     fi
 
-    if command -v jq > /dev/null 2>&1; then
-        jq -n --arg reason "$notice" --arg event "PreToolUse" --arg decision "$decision" \
-            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:$decision,permissionDecisionReason:$reason}}'
-    elif [ "$decision" = "allow" ]; then
-        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}}\n'
-    else
-        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}}\n'
-    fi
+    aport_hook_build_response "$decision" "$notice" "$user_warning" "claude-code"
     exit 0
 }
 
@@ -128,20 +122,17 @@ safe_jq() {
     echo "$result"
 }
 
-# Deny helper: outputs Claude Code hookSpecificOutput JSON and exits 0.
+# Deny helper: outputs hookSpecificOutput JSON and exits 0.
 deny() {
     local reason="$1"
-    jq -n --arg reason "$reason" \
-        --arg event "PreToolUse" \
-        '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"deny",permissionDecisionReason:$reason}}'
+    aport_hook_build_response "deny" "$reason" "" "claude-code"
     exit 0
 }
 
 warn_allow() {
     local reason="$1"
-    jq -n --arg reason "$reason" \
-        --arg event "PreToolUse" \
-        '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"allow",permissionDecisionReason:$reason}}'
+    local user_warning="${2:-}"
+    aport_hook_build_response "allow" "$reason" "$user_warning" "claude-code"
     exit 0
 }
 
@@ -149,10 +140,11 @@ deny_or_warn() {
     local policy="$1"
     local code="${2:-oap.denied}"
     local message="${3:-}"
-    local notice
+    local notice user_warning
     if aport_hook_is_warn_mode; then
         notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
-        warn_allow "$notice"
+        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message")"
+        warn_allow "$notice" "$user_warning"
     fi
     notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
     deny "$notice"

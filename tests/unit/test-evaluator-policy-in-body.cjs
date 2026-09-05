@@ -41,5 +41,9 @@ const { evaluatePolicy } = require("../../src/evaluator.js");
     console.error("FAIL: expected body.policy to be the policy pack, got", capturedBody && capturedBody.policy);
     process.exit(1);
   }
+  if (capturedBody.runtime?.enforcement_mode !== "enforce" || capturedBody.runtime?.harness !== "guardrails-shell") {
+    console.error("FAIL: expected runtime enforcement metadata, got", capturedBody && capturedBody.runtime);
+    process.exit(1);
+  }
   console.log("OK: policyInBody sends IN_BODY and body.policy");
 })();
