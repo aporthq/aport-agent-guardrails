@@ -49,7 +49,7 @@ Use `sudo -E` so the whole script runs with administrator permissions and receiv
 If `sudo -E` is restricted on the device, pass the variables through `sudo env`:
 
 ```bash
-curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=1.0.29" | \
+curl -fsSL "https://api.aport.io/enterprise/scripts/deploy" | \
   sudo env \
     APORT_API_KEY="$APORT_API_KEY" \
     APORT_TEMPLATE_ID="$APORT_TEMPLATE_ID" \

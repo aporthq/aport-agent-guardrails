@@ -39,6 +39,20 @@ export interface Decision {
   reasons?: Array<{ code?: string; message?: string }>;
 }
 
+type RuntimeEnforcementMode = 'enforce' | 'warn';
+
+interface RuntimeMetadata {
+  enforcement_mode: RuntimeEnforcementMode;
+  enforced_by: string;
+  harness: string;
+}
+
+export interface EvaluatorRuntimeOptions {
+  enforcementMode?: unknown;
+  enforcement_mode?: unknown;
+  harness?: unknown;
+}
+
 export interface VerifyRequest {
   passport: Passport;
   policy: PolicyPack;
@@ -157,6 +171,57 @@ function isFullPolicyPack(p: PolicyPack | undefined): boolean {
   return Boolean(p.id && p.requires_capabilities !== undefined);
 }
 
+function normalizeRuntimeString(value: unknown, fallback: string): string {
+  const normalized =
+    typeof value === 'string'
+      ? value
+          .replace(/[\u0000-\u001f\u007f]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+      : '';
+  return (normalized || fallback).slice(0, 80);
+}
+
+function resolveRuntimeEnforcementMode(
+  config: Config,
+  override?: unknown
+): RuntimeEnforcementMode {
+  const raw = String(
+    override ??
+      config.enforcement_mode ??
+      config.enforcementMode ??
+      process.env.APORT_ENFORCEMENT_MODE ??
+      process.env.APORT_ENFORCEMENT ??
+      process.env.APORT_GUARDRAIL_ENFORCEMENT ??
+      'enforce'
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-');
+
+  return ['warn', 'report-only', 'audit-only', 'observe', 'observation'].includes(raw)
+    ? 'warn'
+    : 'enforce';
+}
+
+function buildRuntimeMetadata(
+  config: Config,
+  fallbackHarness: string,
+  runtimeOptions: EvaluatorRuntimeOptions = {}
+): RuntimeMetadata {
+  return {
+    enforcement_mode: resolveRuntimeEnforcementMode(
+      config,
+      runtimeOptions.enforcementMode ?? runtimeOptions.enforcement_mode
+    ),
+    enforced_by: '@aporthq/aport-agent-guardrails',
+    harness: normalizeRuntimeString(
+      runtimeOptions.harness ?? config.framework,
+      fallbackHarness
+    ),
+  };
+}
+
 async function callApi(
   apiUrl: string,
   packId: string,
@@ -168,6 +233,7 @@ async function callApi(
     apiKey?: string;
     verifySsl?: boolean;
     failOpenOnApiError?: boolean;
+    runtime?: RuntimeMetadata;
   }
 ): Promise<Decision> {
   const base = apiUrl.replace(/\/$/, '');
@@ -180,6 +246,7 @@ async function callApi(
   const body: Record<string, unknown> = { context: bodyContext };
   if (options.passport) body.passport = options.passport;
   if (options.policyPack && isFullPolicyPack(options.policyPack)) body.policy = options.policyPack;
+  if (options.runtime) body.runtime = options.runtime;
   if (!options.agentId && !options.passport) {
     return { allow: false, reasons: [{ code: 'oap.api_error', message: 'Either agent_id or passport required' }] };
   }
@@ -229,11 +296,17 @@ async function callApi(
 export class Evaluator {
   private configPath: string | null;
   private framework: string;
+  private runtimeOptions: EvaluatorRuntimeOptions;
   private cachedConfig: Config | null = null;
 
-  constructor(configPath?: string | null, framework: string = 'langchain') {
+  constructor(
+    configPath?: string | null,
+    framework: string = 'langchain',
+    runtimeOptions: EvaluatorRuntimeOptions = {}
+  ) {
     this.configPath = configPath ?? null;
     this.framework = framework;
+    this.runtimeOptions = runtimeOptions;
   }
 
   /** Resolve the effective config path used for this evaluator (for audit log path resolution). */
@@ -311,8 +384,13 @@ export class Evaluator {
         }
       }
       const failOpenOnApiError = Boolean(config.fail_open_on_api_error ?? process.env.APORT_FAIL_OPEN_ON_API_ERROR === '1');
+      const runtime = buildRuntimeMetadata(
+        config,
+        this.framework,
+        this.runtimeOptions
+      );
       if (agentId) {
-        const decision = await callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey, verifySsl: verifySslOverride, failOpenOnApiError });
+        const decision = await callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey, verifySsl: verifySslOverride, failOpenOnApiError, runtime });
         this.auditLog(config, toolName, packId, decision, ctx);
         return decision;
       }
@@ -323,6 +401,7 @@ export class Evaluator {
           apiKey,
           verifySsl: verifySslOverride,
           failOpenOnApiError,
+          runtime,
         });
         this.auditLog(config, toolName, packId, decision, ctx);
         return decision;
@@ -376,6 +455,11 @@ export class Evaluator {
         }
       }
       if (agentId || passportBody) {
+        const runtime = buildRuntimeMetadata(
+          config,
+          this.framework,
+          this.runtimeOptions
+        );
         const pathId = isFullPolicyPack(policy) ? IN_BODY_PACK_ID : packId;
         const body: Record<string, unknown> = {
           context: {
@@ -386,6 +470,7 @@ export class Evaluator {
         };
         if (passportBody) body.passport = passportBody;
         if (isFullPolicyPack(policy)) body.policy = policy;
+        body.runtime = runtime;
         const url = `${apiUrl.replace(/\/$/, '')}/api/verify/policy/${pathId}`;
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (apiKey) headers.Authorization = `Bearer ${apiKey}`;

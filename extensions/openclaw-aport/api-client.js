@@ -1,11 +1,13 @@
-export async function verifyViaApi({ apiUrl, apiKey, policyName, context, passport, agentId, signal }) {
+export async function verifyViaApi({ apiUrl, apiKey, policyName, context, passport, agentId, signal, runtime }) {
   const baseUrl = String(apiUrl || "https://api.aport.io").replace(/\/$/, "");
   const headers = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-  const body = agentId
-    ? JSON.stringify({ context: { agent_id: agentId, ...context } })
-    : JSON.stringify({ passport, context });
+  const payload = agentId
+    ? { context: { agent_id: agentId, ...context } }
+    : { passport, context };
+  if (runtime) payload.runtime = runtime;
+  const body = JSON.stringify(payload);
 
   const response = await fetch(`${baseUrl}/api/verify/policy/${policyName}`, {
     method: "POST",

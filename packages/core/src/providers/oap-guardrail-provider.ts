@@ -70,7 +70,10 @@ export class OAPGuardrailProvider {
         loadedConfig.enforcementMode ??
         loadedConfig.enforcement_mode,
     );
-    this.evaluator = new Evaluator(configPath, framework);
+    this.evaluator = new Evaluator(configPath, framework, {
+      enforcementMode: this.enforcementMode,
+      harness: framework,
+    });
   }
 
   /**

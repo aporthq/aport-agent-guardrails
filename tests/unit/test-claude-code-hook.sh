@@ -95,10 +95,44 @@ grep -q 'oap.input_too_large' "$OUT0C" || {
     cat "$OUT0C" >&2
     exit 1
 }
+grep -q 'systemMessage' "$OUT0C" || {
+    echo "FAIL: warn mode should include Claude Code systemMessage for user-visible warning" >&2
+    cat "$OUT0C" >&2
+    exit 1
+}
+grep -q 'Review:' "$OUT0C" || {
+    echo "FAIL: warn mode should include remediation/review reference" >&2
+    cat "$OUT0C" >&2
+    exit 1
+}
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
 echo "  ✅ Oversized input: warn mode allows with warning"
+
+# shellcheck source=bin/lib/hook-runtime.sh
+source "$REPO_ROOT/bin/lib/hook-runtime.sh"
+JQ_BIN="$(command -v jq)"
+NO_JQ_PATH="$TEST_DIR/no-jq-path"
+mkdir -p "$NO_JQ_PATH"
+FALLBACK_JSON="$(
+    PATH="$NO_JQ_PATH"
+    hash -r
+    aport_hook_build_response_claude_code \
+        allow \
+        'APort warning: quoted "reason" with backslash \ content' \
+        $'Warn "quoted" text\nReview: https://aport.io/passports?details=ap_test'
+)"
+printf '%s' "$FALLBACK_JSON" | "$JQ_BIN" -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("Warn \"quoted\" text"))
+  and (.hookSpecificOutput.permissionDecisionReason | contains("quoted \"reason\""))
+' > /dev/null || {
+    echo "FAIL: Claude Code no-jq fallback should emit valid escaped JSON" >&2
+    printf '%s\n' "$FALLBACK_JSON" >&2
+    exit 1
+}
+echo "  ✅ no-jq Claude Code response fallback: valid escaped JSON"
 
 # 1. Allow: Read with allowed path (local evaluator)
 echo "  Test: Read tool -> allow (allowed path)..."

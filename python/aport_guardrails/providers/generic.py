@@ -48,6 +48,8 @@ class OAPGuardrailProvider:
         self._evaluator = Evaluator(
             resolved_config_path,
             framework=framework,
+            enforcement_mode=self._enforcement_mode,
+            harness=framework,
         )
 
     def _build_context(self, request: Any) -> dict:

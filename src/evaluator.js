@@ -17,6 +17,45 @@
 const fs = require("fs");
 const path = require("path");
 
+function normalizeRuntimeString(value, fallback) {
+  const normalized = String(value || "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (normalized || fallback).slice(0, 80);
+}
+
+function normalizeEnforcementMode(value) {
+  const raw = String(value || "enforce").trim().toLowerCase().replace(/_/g, "-");
+  return ["warn", "report-only", "audit-only", "observe", "observation"].includes(raw)
+    ? "warn"
+    : "enforce";
+}
+
+function buildRuntimeMetadata(options = {}) {
+  return {
+    enforcement_mode: normalizeEnforcementMode(
+      options.enforcementMode ||
+        options.enforcement_mode ||
+        process.env.APORT_ENFORCEMENT_MODE ||
+        process.env.APORT_ENFORCEMENT ||
+        process.env.APORT_GUARDRAIL_ENFORCEMENT
+    ),
+    enforced_by: normalizeRuntimeString(
+      options.enforcedBy || options.enforced_by,
+      "@aporthq/aport-agent-guardrails"
+    ),
+    harness: normalizeRuntimeString(
+      options.harness ||
+        process.env.APORT_HOOK_FRAMEWORK ||
+        process.env.APORT_HARNESS ||
+        process.env.APORT_FRAMEWORK,
+      "guardrails-shell"
+    ),
+  };
+}
+
 /**
  * Evaluate a policy using the APort API.
  *
@@ -83,6 +122,7 @@ async function evaluatePolicy(policyPack, passport, context, options = {}) {
   if (policyInBody) {
     bodyObj.policy = policyPack;
   }
+  bodyObj.runtime = buildRuntimeMetadata(options);
   const body = JSON.stringify(bodyObj);
 
   try {

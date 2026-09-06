@@ -352,8 +352,8 @@ We're planning a security audit by a reputable firm (Trail of Bits, NCC Group, o
 **With APort:**
 - ✅ Every tool call is authorized BEFORE it runs
 - ✅ Malicious actions are blocked deterministically
-- ✅ Cryptographically signed audit logs
-- ✅ Compliance-ready (SOC 2, GDPR, HIPAA)
+- ✅ Hosted/API decisions are cryptographically signed
+- ✅ Decision records support SOC 2, GDPR, HIPAA, and similar evidence workflows
 
 **APort is the enforcement layer. Nothing runs without authorization.**
 
