@@ -77,6 +77,11 @@ npx @aporthq/aport-agent-guardrails mode cursor --enforcement=enforce
 The `mode` command preserves the existing hosted passport, setup key, API URL,
 and local passport path. It only changes mode/enforcement settings.
 
+Warn-mode visibility depends on the host. Claude Code shows an APort `systemMessage`
+warning. Cursor returns warning fields as best-effort context but may not display
+allow warnings in the UI, so check `bin/aport-status.sh` or the audit log for the
+recorded report-only decision.
+
 ## 4. Enterprise device rollout
 
 For IT-managed fleets, use the bundled deploy/enforce/uninstall scripts:

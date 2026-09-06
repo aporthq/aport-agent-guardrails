@@ -59,6 +59,10 @@ Default enforcement is fail-closed. For rollout/report-only mode:
 APortCallback(enforcement_mode="warn")
 ```
 
+Warn mode lets the tool continue and prints an APort warning with the tool,
+policy, reason code, reason detail, and the hosted passport or local passport
+file to review.
+
 **Node:** Add `APortGuardrailCallback` to your chain/agent callbacks. Config is read from `~/.aport/langchain/` or `.aport/config.yaml`.
 
 ```ts

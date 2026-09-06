@@ -43,6 +43,7 @@ aport_hook_prepare_framework_paths() {
 
     selected_config_dir="${selected_config_dir:-$default_config_dir}"
     selected_config_dir="$(aport_hook_expand_path "$selected_config_dir")"
+    export APORT_HOOK_FRAMEWORK="$framework"
     export APORT_CONFIG_DIR="$selected_config_dir"
     export OPENCLAW_CONFIG_DIR="$selected_config_dir"
 

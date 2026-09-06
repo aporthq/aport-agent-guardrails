@@ -111,6 +111,48 @@ describe('APortGuardrailCallback', () => {
         'tool-call-1'
       )
     ).resolves.toBeUndefined();
+    expect(Evaluator).toHaveBeenCalledWith(null, 'langchain', {
+      enforcementMode: 'warn',
+      harness: 'langchain',
+    });
+  });
+
+  it('uses APORT_GUARDRAIL_ENFORCEMENT for warn mode when no direct override is set', async () => {
+    const originalEnforcementMode = process.env.APORT_ENFORCEMENT_MODE;
+    const originalEnforcement = process.env.APORT_ENFORCEMENT;
+    const originalGuardrailEnforcement = process.env.APORT_GUARDRAIL_ENFORCEMENT;
+    delete process.env.APORT_ENFORCEMENT_MODE;
+    delete process.env.APORT_ENFORCEMENT;
+    process.env.APORT_GUARDRAIL_ENFORCEMENT = 'warn';
+
+    (Evaluator as jest.Mock).mockImplementation(() => ({
+      verify: jest.fn().mockResolvedValue({
+        allow: false,
+        reasons: [{ code: 'oap.command_not_allowed', message: 'Tool not allowed by policy' }],
+      }),
+    }));
+
+    try {
+      const callback = new APortGuardrailCallback();
+      await expect(
+        callback.handleToolStart(
+          mockTool as any,
+          '{"command":"rm -rf /"}',
+          'run-1'
+        )
+      ).resolves.toBeUndefined();
+      expect(Evaluator).toHaveBeenCalledWith(null, 'langchain', {
+        enforcementMode: 'warn',
+        harness: 'langchain',
+      });
+    } finally {
+      if (originalEnforcementMode === undefined) delete process.env.APORT_ENFORCEMENT_MODE;
+      else process.env.APORT_ENFORCEMENT_MODE = originalEnforcementMode;
+      if (originalEnforcement === undefined) delete process.env.APORT_ENFORCEMENT;
+      else process.env.APORT_ENFORCEMENT = originalEnforcement;
+      if (originalGuardrailEnforcement === undefined) delete process.env.APORT_GUARDRAIL_ENFORCEMENT;
+      else process.env.APORT_GUARDRAIL_ENFORCEMENT = originalGuardrailEnforcement;
+    }
   });
 });
 

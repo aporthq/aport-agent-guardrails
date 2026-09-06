@@ -27,7 +27,7 @@ For Cursor, you almost always use **Guardrails (CLI)** once to install the hook;
 - **Cursor CLI coverage:** Cursor CLI hook coverage has changed over time and may lag the IDE. APort installs the supported hook entries and uses fail-closed `deny` for enforcement, but direct coverage depends on the Cursor version and which hook events that version emits.
 - **Claude Code:** Uses `~/.claude/settings.json` with a **different** output format (`hookSpecificOutput.permissionDecision`). Use the **dedicated Claude Code integration** instead of this Cursor hook — see [claude-code.md](./claude-code.md).
 
-Our script accepts Cursor payloads and a small set of legacy tool payloads (e.g. `command`, or `tool`/`input`), maps to the matching APort policy, calls the guardrail evaluator, and returns Cursor-compatible JSON with `permission`, `agent_message`, and `user_message`.
+Our script accepts Cursor payloads and a small set of legacy tool payloads (e.g. `command`, or `tool`/`input`), maps to the matching APort policy, calls the guardrail evaluator, and returns Cursor-compatible JSON with `permission`, `agent_message`, and `user_message` where the host consumes those fields.
 
 **Hook script path:** The hook script (`aport-cursor-hook.sh`) resolves `bin/aport-guardrail-bash.sh` relative to its own directory (script dir → parent = package root). When you install via **npx**, the installer writes the path to the script inside the npx cache (e.g. `…/node_modules/@aporthq/aport-agent-guardrails/bin/aport-cursor-hook.sh`), so the guardrail script is found at `…/bin/aport-guardrail-bash.sh`. If you copy the hook script elsewhere, ensure `bin/aport-guardrail-bash.sh` exists at the same relative location or set `APORT_GUARDRAIL_SCRIPT` (or equivalent) so the hook can find the evaluator.
 
@@ -46,6 +46,8 @@ Default enforcement is `enforce` (fail-closed). To roll out in report-only mode,
 ```bash
 npx @aporthq/aport-agent-guardrails cursor --enforcement=warn
 ```
+
+In warn mode, APort still evaluates and records the original deny decision, then returns `permission: "allow"` so Cursor can continue. Cursor's hook UI is most reliable at surfacing messages on deny; allow warnings are returned in the JSON as best-effort context, but the audit log and `bin/aport-status.sh` are the source of truth for report-only decisions.
 
 To change enforcement later without creating a new passport or reinstalling hooks:
 

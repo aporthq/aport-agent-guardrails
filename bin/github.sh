@@ -391,6 +391,7 @@ else
     echo "  - Optional: run again with --policy to add a starter .aport/policy.yaml."
 fi
 echo "  - Commit the generated files and open or update a pull request."
+echo "  - Review the APort job summary in GitHub Actions after the first run."
 echo "  - The workflow runs in mode: $MODE and uses GitHub OIDC in auto/hosted mode; no broad APort API key is required."
 echo "  - Push detection watches: $PUSH_BRANCHES"
 if [[ -n "$PROTECTED_PATHS" ]]; then
@@ -401,7 +402,11 @@ if [[ -n "$BLOCK_PROTECTED_PATHS" ]]; then
 fi
 if [[ "$MODE" == "local-json" ]]; then
     echo "  - Local JSON passport path: $PASSPORT_PATH"
+elif [[ "$MODE" == "auto" ]]; then
+    echo "  - When ready to block risky changes, switch to mode: hosted and add branch protection for the APort check."
 fi
+echo "  - Docs: https://aport.io/quickstart/#github"
+echo "  - Team/Enterprise rollout: https://aport.io/pricing"
 echo ""
 
 if [[ -z "$workflow_written" && (-z "$WRITE_POLICY" || -z "$policy_written") ]]; then

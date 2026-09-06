@@ -61,6 +61,11 @@ jq -e '.permission == "deny" and .allowed == false and (.reason | contains("oap.
     cat "$OUT0B" >&2
     exit 1
 }
+if jq -e 'has("hookSpecificOutput")' "$OUT0B" > /dev/null; then
+    echo "FAIL: Cursor hook must not emit Claude hookSpecificOutput schema" >&2
+    cat "$OUT0B" >&2
+    exit 1
+fi
 echo "  ✅ oversized stdin: fail-closed deny"
 
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
@@ -83,6 +88,11 @@ jq -e '.permission == "allow" and .allowed == true and (.reason | contains("oap.
     cat "$OUT0C" >&2
     exit 1
 }
+if jq -e 'has("hookSpecificOutput")' "$OUT0C" > /dev/null; then
+    echo "FAIL: Cursor warn response must not emit Claude hookSpecificOutput schema" >&2
+    cat "$OUT0C" >&2
+    exit 1
+fi
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
@@ -92,6 +102,46 @@ echo "  ✅ oversized stdin: warn mode allows with warning"
 # Use octal escapes to keep this source file ASCII-stable.
 # shellcheck source=bin/lib/hook-runtime.sh
 source "$REPO_ROOT/bin/lib/hook-runtime.sh"
+JQ_BIN="$(command -v jq)"
+JQ_JSON="$(
+    aport_hook_build_response_cursor \
+        deny \
+        'APort denied: command not allowed' \
+        ''
+)"
+printf '%s' "$JQ_JSON" | "$JQ_BIN" -e '
+  .permission == "deny"
+  and .allowed == false
+  and .agentMessage == "APort denied: command not allowed"
+  and .agent_message == .agentMessage
+  and .user_message == .agentMessage
+' > /dev/null || {
+    echo "FAIL: Cursor response should preserve camel-case and snake-case message fields" >&2
+    printf '%s\n' "$JQ_JSON" >&2
+    exit 1
+}
+NO_JQ_PATH="$TEST_DIR/no-jq-path"
+mkdir -p "$NO_JQ_PATH"
+FALLBACK_JSON="$(
+    PATH="$NO_JQ_PATH"
+    hash -r
+    aport_hook_build_response_cursor \
+        allow \
+        'APort warning: quoted "reason" with backslash \ content' \
+        $'Warn "quoted" text\nReview: https://aport.io/passports?details=ap_test'
+)"
+printf '%s' "$FALLBACK_JSON" | "$JQ_BIN" -e '
+  .permission == "allow"
+  and .allowed == true
+  and .agentMessage == .user_message
+  and (.user_message | contains("Warn \"quoted\" text"))
+  and (.reason | contains("quoted \"reason\""))
+' > /dev/null || {
+    echo "FAIL: Cursor no-jq fallback should emit valid escaped JSON" >&2
+    printf '%s\n' "$FALLBACK_JSON" >&2
+    exit 1
+}
+echo "  ✅ no-jq Cursor response fallback: valid escaped JSON"
 MULTIBYTE_RESULT="$(
     APORT_HOOK_STDIN_MAX_BYTES=4 APORT_HOOK_STDIN_CHUNK_BYTES=8 \
         aport_read_stdin_with_timeout < <(printf '\360\237\230\200\360\237\230\200')

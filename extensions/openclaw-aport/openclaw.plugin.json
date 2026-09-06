@@ -2,7 +2,7 @@
   "id": "openclaw-aport",
   "name": "APort Guardrails",
   "description": "Deterministic pre-action authorization via APort policy enforcement. Registers before_tool_call to block disallowed tools.",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "activation": {
     "onStartup": true,
     "onCapabilities": [

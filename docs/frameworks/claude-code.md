@@ -9,7 +9,7 @@ Claude Code's **PreToolUse** hook runs as a separate process before each tool ex
 ## How it works
 
 - **Settings file:** Claude Code uses `~/.claude/settings.json` (user-level) or `.claude/settings.json` (project-level). This is **not** `~/.cursor/hooks.json` — different location and JSON structure.
-- **PreToolUse hook:** The hook receives JSON on stdin with `tool_name` and `tool_input`, runs the APort guardrail, and outputs Claude Code's exact structured deny format on stdout when blocking: `hookSpecificOutput.permissionDecision: "deny"`. Claude Code reads structured hook JSON from stdout on exit 0; exit 2 is only for stderr-based blocking.
+- **PreToolUse hook:** The hook receives JSON on stdin with `tool_name` and `tool_input`, runs the APort guardrail, and outputs Claude Code's exact structured format on stdout. Enforce mode blocks with `hookSpecificOutput.permissionDecision: "deny"`. Warn/report-only mode returns `permissionDecision: "allow"` plus a `systemMessage` warning so the action can continue while the user sees that APort would have blocked it. Claude Code reads structured hook JSON from stdout on exit 0; exit 2 is only for stderr-based blocking.
 - **Hook script:** `bin/aport-claude-code-hook.sh` — maps all Claude Code tool names (Bash, Read, Write, Edit, MultiEdit, Glob, LS, Grep, WebSearch, WebFetch, Browser, TodoRead, TodoWrite, Task, MCP tools) to APort policies and calls the core evaluator.
 
 ---
@@ -62,6 +62,8 @@ Default enforcement is `enforce` (fail-closed). To roll out without blocking dev
 ```bash
 npx @aporthq/aport-agent-guardrails claude-code --enforcement=warn
 ```
+
+In warn mode, Claude Code receives an allow decision plus a visible APort warning that includes the policy, reason code, and the hosted passport or local passport-file reference to update.
 
 To change enforcement later without creating a new passport or reinstalling the hook:
 
