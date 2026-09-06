@@ -63,6 +63,29 @@ class TestAportGuardrailBeforeToolCall:
         assert result is None
 
     @patch("crewai_adapter.hook.Evaluator")
+    def test_guardrail_enforcement_env_sets_warn_runtime_metadata(
+        self,
+        mock_evaluator_cls: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """APORT_GUARDRAIL_ENFORCEMENT should drive both CrewAI behavior and hosted metadata."""
+        hook._crewai_evaluator = None
+        hook._crewai_enforcement_mode = None
+        monkeypatch.delenv("APORT_ENFORCEMENT", raising=False)
+        monkeypatch.delenv("APORT_ENFORCEMENT_MODE", raising=False)
+        monkeypatch.setenv("APORT_GUARDRAIL_ENFORCEMENT", "warn")
+        mock_evaluator_cls.return_value.verify_sync.return_value = {
+            "allow": False,
+            "reasons": [{"code": "oap.command_not_allowed", "message": "Command not in allowlist"}],
+        }
+
+        result = aport_guardrail_before_tool_call(_fake_context(tool_input={"command": "rm -rf /"}))
+
+        assert result is None
+        assert mock_evaluator_cls.call_args.kwargs["enforcement_mode"] == "warn"
+        assert mock_evaluator_cls.call_args.kwargs["harness"] == "crewai"
+
+    @patch("crewai_adapter.hook.Evaluator")
     def test_warn_mode_sanitizes_display_output(
         self,
         mock_evaluator_cls: MagicMock,

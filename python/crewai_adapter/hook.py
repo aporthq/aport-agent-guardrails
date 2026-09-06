@@ -14,7 +14,12 @@ _crewai_enforcement_mode: str | None = None
 def _get_crewai_evaluator() -> Evaluator:
     global _crewai_evaluator
     if _crewai_evaluator is None:
-        _crewai_evaluator = Evaluator(config_path=find_config_path("crewai"), framework="crewai")
+        _crewai_evaluator = Evaluator(
+            config_path=find_config_path("crewai"),
+            framework="crewai",
+            enforcement_mode=_get_enforcement_mode(),
+            harness="crewai",
+        )
     return _crewai_evaluator
 
 
@@ -34,6 +39,7 @@ def _get_enforcement_mode() -> str:
         or config.get("enforcementMode")
         or os.environ.get("APORT_ENFORCEMENT_MODE")
         or os.environ.get("APORT_ENFORCEMENT")
+        or os.environ.get("APORT_GUARDRAIL_ENFORCEMENT")
     )
     return _crewai_enforcement_mode
 

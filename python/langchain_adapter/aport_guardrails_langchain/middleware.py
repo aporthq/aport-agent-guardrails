@@ -32,6 +32,7 @@ def _resolve_enforcement_mode(config_path: str | None, framework: str, explicit:
         or config.get("enforcementMode")
         or os.environ.get("APORT_ENFORCEMENT_MODE")
         or os.environ.get("APORT_ENFORCEMENT")
+        or os.environ.get("APORT_GUARDRAIL_ENFORCEMENT")
     )
 
 
