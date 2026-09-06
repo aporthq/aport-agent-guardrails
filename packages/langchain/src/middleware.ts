@@ -99,11 +99,12 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
       const code = decision.reasons?.[0]?.code ?? "oap.denied";
       const safeMessage = sanitizeDisplayText(msg);
       const safeCode = sanitizeDisplayText(code);
+      const safeToolName = sanitizeDisplayText(toolName);
       if (this.enforcementMode === "warn") {
-        console.warn(`[APort] warning: policy would have denied ${toolName}. Reason: ${safeCode}.`);
+        console.warn(`[APort] warning: policy would have denied ${safeToolName}. Reason: ${safeCode}.`);
         return;
       }
-      console.warn(`[APort] denied ${toolName}. Reason: ${safeCode}. ${safeMessage}`);
+      console.warn(`[APort] denied ${safeToolName}. Reason: ${safeCode}. ${safeMessage}`);
       throw new GuardrailViolationError(msg, decision.reasons);
     }
   }
@@ -121,7 +122,8 @@ function resolveEnforcementMode(
     (config.enforcement_mode as string | undefined) ??
     (config.enforcementMode as string | undefined) ??
     process.env.APORT_ENFORCEMENT_MODE ??
-    process.env.APORT_ENFORCEMENT;
+    process.env.APORT_ENFORCEMENT ??
+    process.env.APORT_GUARDRAIL_ENFORCEMENT;
   const normalized = String(raw || "enforce").toLowerCase().replace(/_/g, "-");
   return ["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)
     ? "warn"

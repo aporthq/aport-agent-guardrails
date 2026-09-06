@@ -84,6 +84,27 @@ class TestAPortCallback:
         assert context["params"] == {"command": "rm -rf /"}
 
     @pytest.mark.asyncio
+    async def test_guardrail_enforcement_env_sets_warn_runtime_metadata(self, monkeypatch):
+        """APORT_GUARDRAIL_ENFORCEMENT should drive both LangChain behavior and hosted metadata."""
+        monkeypatch.delenv("APORT_ENFORCEMENT", raising=False)
+        monkeypatch.delenv("APORT_ENFORCEMENT_MODE", raising=False)
+        monkeypatch.setenv("APORT_GUARDRAIL_ENFORCEMENT", "warn")
+        callback = APortCallback(config_path="/nonexistent")
+        assert callback.evaluator._runtime_enforcement_mode == "warn"
+        assert callback.evaluator._runtime_harness == "langchain"
+        callback.evaluator = AsyncMock()
+        callback.evaluator.verify = AsyncMock(
+            return_value={
+                "allow": False,
+                "reasons": [{"code": "oap.command_not_allowed", "message": "Command not in allowlist"}],
+            }
+        )
+
+        await callback.on_tool_start({"name": "run_command"}, None, inputs={"command": "rm -rf /"})
+
+        callback.evaluator.verify.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_warn_mode_sanitizes_tool_name(self, capsys):
         """Warn logs must not let dynamic tool names forge terminal or CI records."""
         callback = APortCallback(config_path="/nonexistent", enforcement_mode="warn")
