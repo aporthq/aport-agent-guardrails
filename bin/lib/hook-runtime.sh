@@ -213,3 +213,156 @@ aport_append_local_session_decision() {
     fi
     rm -f "$tmp" 2> /dev/null || true
 }
+
+aport_hook_detect_framework() {
+    local config_dir="${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+    local detected
+
+    if [ -n "${APORT_HOOK_FRAMEWORK:-}" ]; then
+        printf '%s' "$APORT_HOOK_FRAMEWORK"
+        return 0
+    fi
+
+    if command -v aport_hook_known_config_owner > /dev/null 2>&1; then
+        detected="$(aport_hook_known_config_owner "$config_dir")"
+    else
+        detected=""
+    fi
+    if [ -n "$detected" ]; then
+        printf '%s' "$detected"
+        return 0
+    fi
+
+    # Fallback: check common environment variables
+    if [ -n "${CURSOR_IDE:-}" ] || [ -n "${CURSOR_USER_DATA_DIR:-}" ]; then
+        printf 'cursor'
+    elif [ -n "${CLAUDE_CODE:-}" ] || [ "$config_dir" = "$HOME/.claude" ]; then
+        printf 'claude-code'
+    else
+        printf 'unknown'
+    fi
+}
+
+aport_hook_format_user_warning() {
+    local policy="$1"
+    local reason_code="${2:-oap.denied}"
+    local reason_message="${3:-}"
+    local reference
+
+    reason_code="$(aport_sanitize_display_text "$reason_code")"
+    reason_message="$(aport_sanitize_display_text "$reason_message")"
+    reference="$(aport_sanitize_display_text "$(aport_hook_policy_reference)")"
+
+    if [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
+        printf '⚠️  APort Warning: This action would normally be blocked.\nPolicy: %s | Reason: %s\nDetail: %s\nReview: %s' "$policy" "$reason_code" "$reason_message" "$reference"
+    else
+        printf '⚠️  APort Warning: This action would normally be blocked.\nPolicy: %s | Reason: %s\nReview: %s' "$policy" "$reason_code" "$reference"
+    fi
+}
+
+aport_hook_json_escape() {
+    local value="${1:-}"
+
+    if command -v tr > /dev/null 2>&1; then
+        value="$(printf '%s' "$value" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
+    fi
+
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\r'/\\r}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\t'/\\t}"
+    printf '%s' "$value"
+}
+
+aport_hook_build_response_claude_code() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local escaped_reason escaped_warning
+
+    if ! command -v jq > /dev/null 2>&1; then
+        escaped_reason="$(aport_hook_json_escape "$reason")"
+        escaped_warning="$(aport_hook_json_escape "$user_warning")"
+        if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+            printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"%s"}}\n' "$escaped_warning" "$escaped_reason"
+        elif [ "$decision" = "allow" ]; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"%s"}}\n' "$escaped_reason"
+        else
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$escaped_reason"
+        fi
+        return 0
+    fi
+
+    if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+        jq -n --arg reason "$reason" --arg warning "$user_warning" --arg event "PreToolUse" \
+            '{systemMessage:$warning,hookSpecificOutput:{hookEventName:$event,permissionDecision:"allow",permissionDecisionReason:$reason}}'
+    elif [ "$decision" = "allow" ]; then
+        jq -n --arg reason "$reason" --arg event "PreToolUse" \
+            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"allow",permissionDecisionReason:$reason}}'
+    else
+        jq -n --arg reason "$reason" --arg event "PreToolUse" \
+            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"deny",permissionDecisionReason:$reason}}'
+    fi
+}
+
+aport_hook_build_response_cursor() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local escaped_reason escaped_warning
+
+    # Cursor docs define warning text on deny responses; allow-response warning
+    # visibility varies by host surface. Keep these fields as best-effort context
+    # while audit logs remain the source of truth for report-only decisions.
+
+    if ! command -v jq > /dev/null 2>&1; then
+        escaped_reason="$(aport_hook_json_escape "$reason")"
+        escaped_warning="$(aport_hook_json_escape "$user_warning")"
+        if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+            # Best effort: some Cursor surfaces may not display allow warnings.
+            printf '{"permission":"allow","allowed":true,"agentMessage":"%s","agent_message":"%s","user_message":"%s","reason":"%s"}\n' "$escaped_warning" "$escaped_warning" "$escaped_warning" "$escaped_reason"
+        elif [ "$decision" = "allow" ]; then
+            printf '{"permission":"allow","allowed":true,"reason":"%s"}\n' "$escaped_reason"
+        else
+            printf '{"permission":"deny","allowed":false,"agentMessage":"%s","agent_message":"%s","user_message":"%s","reason":"%s"}\n' "$escaped_reason" "$escaped_reason" "$escaped_reason" "$escaped_reason"
+        fi
+        return 0
+    fi
+
+    if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+        # Best effort: some Cursor surfaces may not display allow warnings.
+        jq -n -c --arg reason "$reason" --arg warning "$user_warning" \
+            '{permission:"allow",allowed:true,agentMessage:$warning,agent_message:$warning,user_message:$warning,reason:$reason}'
+    elif [ "$decision" = "allow" ]; then
+        jq -n -c --arg reason "$reason" \
+            '{permission:"allow",allowed:true,reason:$reason}'
+    else
+        jq -n -c --arg reason "$reason" \
+            '{permission:"deny",allowed:false,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
+    fi
+}
+
+aport_hook_build_response() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local framework="${4:-}"
+
+    if [ -z "$framework" ]; then
+        framework="$(aport_hook_detect_framework)"
+    fi
+
+    case "$framework" in
+        claude-code)
+            aport_hook_build_response_claude_code "$decision" "$reason" "$user_warning"
+            ;;
+        cursor)
+            aport_hook_build_response_cursor "$decision" "$reason" "$user_warning"
+            ;;
+        *)
+            printf 'APort hook runtime error: unsupported hook response framework: %s\n' "$framework" >&2
+            return 64
+            ;;
+    esac
+}

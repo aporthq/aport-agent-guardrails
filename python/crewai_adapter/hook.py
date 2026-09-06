@@ -1,11 +1,11 @@
 """CrewAI before_tool_call hook: verify tool execution with APort."""
 
 import os
-import re
 from typing import Any
 
 from aport_guardrails.core import Evaluator, build_tool_context, tool_to_pack_id
 from aport_guardrails.core.config import find_config_path, load_config
+from aport_guardrails.core.display import format_policy_warning
 
 _crewai_evaluator: Evaluator | None = None
 _crewai_enforcement_mode: str | None = None
@@ -14,7 +14,12 @@ _crewai_enforcement_mode: str | None = None
 def _get_crewai_evaluator() -> Evaluator:
     global _crewai_evaluator
     if _crewai_evaluator is None:
-        _crewai_evaluator = Evaluator(config_path=find_config_path("crewai"), framework="crewai")
+        _crewai_evaluator = Evaluator(
+            config_path=find_config_path("crewai"),
+            framework="crewai",
+            enforcement_mode=_get_enforcement_mode(),
+            harness="crewai",
+        )
     return _crewai_evaluator
 
 
@@ -34,22 +39,9 @@ def _get_enforcement_mode() -> str:
         or config.get("enforcementMode")
         or os.environ.get("APORT_ENFORCEMENT_MODE")
         or os.environ.get("APORT_ENFORCEMENT")
+        or os.environ.get("APORT_GUARDRAIL_ENFORCEMENT")
     )
     return _crewai_enforcement_mode
-
-
-def _sanitize_display(value: Any) -> str:
-    text = str(value or "")
-    text = re.sub(r"[\r\n\t]+", " ", text)
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
-    text = re.sub(r"(?:apk|aprt)_[A-Za-z0-9_-]+", "[REDACTED_APORT_KEY]", text)
-    text = re.sub(r"github_pat_[A-Za-z0-9_]+", "[REDACTED_GITHUB_TOKEN]", text)
-    text = re.sub(r"gh[pousr]_[A-Za-z0-9_]+", "[REDACTED_GITHUB_TOKEN]", text)
-    text = re.sub(r"xox[baprs]-[A-Za-z0-9-]+", "[REDACTED_SLACK_TOKEN]", text)
-    text = re.sub(r"AKIA[0-9A-Z]{16}", "[REDACTED_AWS_KEY]", text)
-    text = re.sub(r"(Authorization:?\s*Bearer|Bearer)\s+[A-Za-z0-9._~+/-]+=*", r"\1 [REDACTED]", text, flags=re.IGNORECASE)
-    text = re.sub(r"(password|passwd|pwd|token|secret|api[_-]?key)=\S+", r"\1=[REDACTED]", text, flags=re.IGNORECASE)
-    return text[:240]
 
 
 def aport_guardrail_before_tool_call(context: Any) -> bool | None:
@@ -69,9 +61,16 @@ def aport_guardrail_before_tool_call(context: Any) -> bool | None:
     if not decision.get("allow", False):
         if _get_enforcement_mode() == "warn":
             reasons = decision.get("reasons") or [{}]
-            code = _sanitize_display(reasons[0].get("code", "oap.denied") if reasons else "oap.denied")
-            tool_name = _sanitize_display(context.tool_name)
-            print(f"[APort] warning: policy would have denied {tool_name}. Reason: {code}.")
+            reason = reasons[0] if reasons else {}
+            print(
+                format_policy_warning(
+                    policy=pack_id,
+                    reason_code=reason.get("code", "oap.denied"),
+                    reason_message=reason.get("message", ""),
+                    tool_name=context.tool_name,
+                    framework="crewai",
+                )
+            )
             return None
         return False
     return None

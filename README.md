@@ -224,7 +224,7 @@ This runs setup and writes config for your framework. Choose hosted setup for pa
 
 **Guardrail mode (local vs API)** — On the **Node** installer (`npx @aporthq/aport-agent-guardrails …` / `bin/agent-guardrails`), every framework accepts the same flags: `--mode=api` (with optional `--api-url`, default `https://api.aport.io`) or `--mode=local`, and an optional hosted `ap_<hex>` argument (API mode, no local passport). That flow writes `…/aport/guardrail-mode.env` where the hooks/generic installers need it. The **Python** `aport setup` CLI does not parse those flags yet; use the Node command above for API/local mode during setup, or set mode in your framework `config.yaml` per the framework doc.
 
-**Enforcement mode (block vs warn)** — Default is `enforce`: APort fails closed and policy denials block the tool call. Use `--enforcement=warn` only when intentionally rolling out in report-only/audit mode. Warn mode still evaluates policy and records the original deny decision, but lets the framework action continue so teams can tune passports without interrupting development.
+**Enforcement mode (block vs warn)** — Default is `enforce`: APort fails closed and policy denials block the tool call. Use `--enforcement=warn` only when intentionally rolling out in report-only/audit mode. Warn mode still evaluates policy and records the original deny decision, but lets the framework action continue so teams can tune passports without interrupting development. Host visibility differs: Claude Code shows a `systemMessage` warning; Cursor returns best-effort warning fields but may not display allow warnings in the UI, so use the audit log/status output as the source of truth. See APort's [OAP Decisions vs Harness Enforcement](https://github.com/aporthq/agent-passport/blob/main/docs/DECISION-VS-ENFORCEMENT.md) guidance for how to reconcile signed `allow: false` decisions with local warn/report-only rollout.
 
 Change enforcement later without creating a new passport or reinstalling hooks:
 
@@ -533,13 +533,13 @@ Use the framework-specific doc for where config and passport live and for any ex
 
 | Doc | Description |
 |-----|-------------|
-| [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md) | One-command OpenClaw setup |
-| [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md) | Use passport from aport.io — `npx ... openclaw <agent_id>` or choose hosted in wizard |
-| [Verification methods (local vs API)](docs/VERIFICATION_METHODS.md) | Deep dive: bash vs API evaluator |
 | [Quick Start Guide](docs/QUICKSTART.md) | Passport wizard, copy-paste option |
-| [OpenClaw Local Integration](docs/OPENCLAW_LOCAL_INTEGRATION.md) | API, Python example |
-| [Tool / Policy Mapping](docs/TOOL_POLICY_MAPPING.md) | Tool names → policy packs |
 | [GitHub Protection](docs/GITHUB_PROTECTION.md) | Protect PR/push workflows with hosted OAP verification and explicit release checks |
+| [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md) | Use passport from aport.io with any supported framework: `npx ... <framework> <agent_id>` or choose hosted in wizard |
+| [Verification methods (local vs API)](docs/VERIFICATION_METHODS.md) | Deep dive: bash vs API evaluator |
+| [Tool / Policy Mapping](docs/TOOL_POLICY_MAPPING.md) | Tool names → policy packs |
+| [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md) | One-command OpenClaw setup |
+| [OpenClaw Local Integration](docs/OPENCLAW_LOCAL_INTEGRATION.md) | API, Python example |
 | [Repo Layout](docs/REPO_LAYOUT.md) | For contributors: package layout (`bin/`, `src/`, `extensions/`) |
 | [Upgrade Guide](docs/UPGRADE.md) | Migrating between versions (e.g. 0.1.0 → 1.0.0) |
 | **Frameworks** | Per-framework setup and how guardrails run |

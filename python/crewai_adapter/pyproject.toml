@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aport-agent-guardrails-crewai"
-version = "1.0.31"
+version = "1.0.32"
 description = "APort Agent Guardrail for CrewAI — before_tool_call hook for AI agent and multi-agent crews"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -12,7 +12,7 @@ authors = [{ name = "APort Technologies Inc." }]
 keywords = ["aport", "agent guardrail", "LLM guardrail", "crewai", "guardrails", "multi-agent", "AI agent"]
 requires-python = ">=3.10"
 dependencies = [
-    "aport-agent-guardrails>=1.0.31,<2",
+    "aport-agent-guardrails>=1.0.32,<2",
     "crewai>=0.80",
 ]
 

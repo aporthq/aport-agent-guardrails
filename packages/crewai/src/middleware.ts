@@ -19,9 +19,19 @@ export interface BeforeToolCallContext {
 let _crewaiEvaluator: Evaluator | null = null;
 let _crewaiEnforcementMode: "enforce" | "warn" | null = null;
 
+type RuntimeAwareEvaluatorConstructor = new (
+  configPath?: string | null,
+  framework?: string,
+  runtimeOptions?: { enforcementMode?: string; harness?: string }
+) => Evaluator;
+
 function getCrewaiEvaluator(): Evaluator {
   if (!_crewaiEvaluator) {
-    _crewaiEvaluator = new Evaluator(findConfigPath("crewai"), "crewai");
+    const RuntimeAwareEvaluator = Evaluator as unknown as RuntimeAwareEvaluatorConstructor;
+    _crewaiEvaluator = new RuntimeAwareEvaluator(findConfigPath("crewai"), "crewai", {
+      enforcementMode: getCrewaiEnforcementMode(),
+      harness: "crewai",
+    });
   }
   return _crewaiEvaluator;
 }
@@ -34,7 +44,8 @@ function getCrewaiEnforcementMode(): "enforce" | "warn" {
     (config.enforcement_mode as string | undefined) ??
     (config.enforcementMode as string | undefined) ??
     process.env.APORT_ENFORCEMENT_MODE ??
-    process.env.APORT_ENFORCEMENT;
+    process.env.APORT_ENFORCEMENT ??
+    process.env.APORT_GUARDRAIL_ENFORCEMENT;
   const normalized = String(raw || "enforce").toLowerCase().replace(/_/g, "-");
   _crewaiEnforcementMode = ["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)
     ? "warn"
@@ -88,11 +99,12 @@ export function beforeToolCall(context: BeforeToolCallContext): false | null {
   if (!decision.allow) {
     const msg = sanitizeDisplayText(decision.reasons?.[0]?.message ?? "APort policy denied");
     const code = sanitizeDisplayText(decision.reasons?.[0]?.code ?? "oap.denied");
+    const toolName = sanitizeDisplayText(context.tool_name);
     if (getCrewaiEnforcementMode() === "warn") {
-      console.warn(`[APort] warning: policy would have denied ${context.tool_name}. Reason: ${code}.`);
+      console.warn(`[APort] warning: policy would have denied ${toolName}. Reason: ${code}.`);
       return null;
     }
-    console.warn(`[APort] denied ${context.tool_name}. Reason: ${code}. ${msg}`);
+    console.warn(`[APort] denied ${toolName}. Reason: ${code}. ${msg}`);
     return false;
   }
   return null;

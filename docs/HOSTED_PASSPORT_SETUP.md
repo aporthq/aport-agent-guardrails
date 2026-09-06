@@ -43,7 +43,7 @@ When prompted for passport setup, choose option `1`:
 2. `Use existing hosted passport ID` — paste an existing `agent_id`.
 3. `Create local passport file` — offline/local JSON passport.
 
-The installer creates a passport, creates a narrow setup key, and configures the plugin to use hosted verification.
+The installer creates a passport, creates a narrow setup key, and configures the framework hook/plugin to use hosted verification.
 
 Non-interactive hosted setup uses the same dispatcher:
 
@@ -72,39 +72,43 @@ npx @aporthq/aport-agent-guardrails
 
 When prompted for passport, create a hosted passport or paste an existing `agent_id`. The config directory defaults to the selected framework's APort directory. API mode is required for hosted passports.
 
-The OpenClaw-specific examples below show plugin configuration details. Claude Code and Cursor use their own framework hook files, but the hosted-passport model is the same: the hook stores `agent_id`, sends action context to APort Verify, and receives an allow/deny decision.
+**Step 3: Restart or run the target framework**
 
-**Step 3: Start OpenClaw**
+- **Claude Code:** restart Claude Code so `~/.claude/settings.json` is loaded.
+- **Cursor:** reload the Cursor window or restart Cursor so `.cursor/hooks.json` is loaded.
+- **OpenClaw:** start or restart the gateway:
 
-```bash
-openclaw gateway start --config ~/.openclaw/config.yaml
-```
+  ```bash
+  openclaw gateway start --config ~/.openclaw/config.yaml
+  ```
 
-**Done!** The plugin will fetch your passport from APort API on every tool call.
+- **LangChain / CrewAI:** install the Python adapter and register the callback/hook from the framework doc.
+
+**Done.** The installed hook/plugin sends action context to APort Verify and receives an allow/deny decision using the hosted `agent_id`.
 
 ---
 
 ## How It Works (Hosted Passport)
 
 ```
-User → OpenClaw: "Create a file"
+User → Framework: "Create a file"
          ↓
-    OpenClaw: Tool call → before_tool_call hook
+ Framework: Tool call → hook/callback/plugin
          ↓
- APort Plugin: Reads config → sees agent_id (no local passport file)
+ APort Guardrail: Reads config → sees agent_id (no local passport file)
          ↓
- APort Plugin: POST to api.aport.io/api/verify/policy/system.command.execute.v1
-                Body: { "context": { "agent_id": "ap_abc123...", "command": "touch test.txt" } }
+ APort Guardrail: POST to api.aport.io/api/verify/policy/system.command.execute.v1
+                  Body: { "context": { "agent_id": "ap_abc123...", "command": "touch test.txt" } }
          ↓
     APort API: Fetches passport from registry by agent_id
          ↓
     APort API: Evaluates policy → Returns ALLOW/DENY
          ↓
- APort Plugin: ✅ ALLOW → Tool runs
-              ❌ DENY → Tool blocked
+ APort Guardrail: ✅ ALLOW → Tool runs
+                 ❌ DENY → Tool blocked
 ```
 
-**Key Point:** Your passport stays in APort's registry. The plugin sends `agent_id` + context, API fetches passport, evaluates policy, returns decision. **No passport file stored locally.**
+**Key Point:** Your passport stays in APort's registry. The guardrail sends `agent_id` + context, API fetches passport, evaluates policy, returns decision. **No passport file stored locally.**
 
 ---
 
@@ -367,6 +371,8 @@ A: With `failClosed: true` (default), all tool calls are blocked. Set `failClose
 
 **Q: How do I roll out without blocking developers?**
 A: Keep `failClosed: true`, but set `enforcementMode: warn` or run `npx @aporthq/aport-agent-guardrails mode <framework> --enforcement=warn`. This records the original deny decision while allowing the framework action to continue. Switch back to `--enforcement=enforce` when the passport is tuned.
+
+Claude Code surfaces warn-mode decisions with a visible `systemMessage`. Cursor returns warning fields as best-effort context but may not display allow warnings in the UI; use the audit log or `bin/aport-status.sh` to inspect report-only decisions.
 
 **Q: Can I create multiple hosted passports?**
 A: Yes! Free tier: 1 passport. Beta/Pro: Unlimited. Each passport has unique `agent_id`.

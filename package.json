@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "description": "APort Repository Guard and pre-action authorization guardrails for GitHub, Claude Code, Cursor, OpenClaw, LangChain, CrewAI, DeerFlow, and n8n",
   "workspaces": [
     "packages/*",

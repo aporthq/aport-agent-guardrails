@@ -1,5 +1,12 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.32
+
+### Patch Changes
+
+- Make report-only guardrail warnings safer and more actionable across framework hooks.
+- Report hosted runtime enforcement metadata to APort so signed deny decisions can be reconciled with framework-level warn mode in the dashboard.
+
 ## 1.0.31
 
 ### Patch Changes
