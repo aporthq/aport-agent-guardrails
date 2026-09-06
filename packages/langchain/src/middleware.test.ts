@@ -111,6 +111,10 @@ describe('APortGuardrailCallback', () => {
         'tool-call-1'
       )
     ).resolves.toBeUndefined();
+    expect(Evaluator).toHaveBeenCalledWith(null, 'langchain', {
+      enforcementMode: 'warn',
+      harness: 'langchain',
+    });
   });
 });
 

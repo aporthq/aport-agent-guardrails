@@ -47,6 +47,12 @@ interface RuntimeMetadata {
   harness: string;
 }
 
+export interface EvaluatorRuntimeOptions {
+  enforcementMode?: unknown;
+  enforcement_mode?: unknown;
+  harness?: unknown;
+}
+
 export interface VerifyRequest {
   passport: Passport;
   policy: PolicyPack;
@@ -176,9 +182,13 @@ function normalizeRuntimeString(value: unknown, fallback: string): string {
   return (normalized || fallback).slice(0, 80);
 }
 
-function resolveRuntimeEnforcementMode(config: Config): RuntimeEnforcementMode {
+function resolveRuntimeEnforcementMode(
+  config: Config,
+  override?: unknown
+): RuntimeEnforcementMode {
   const raw = String(
-    config.enforcement_mode ??
+    override ??
+      config.enforcement_mode ??
       config.enforcementMode ??
       process.env.APORT_ENFORCEMENT_MODE ??
       process.env.APORT_ENFORCEMENT ??
@@ -194,11 +204,21 @@ function resolveRuntimeEnforcementMode(config: Config): RuntimeEnforcementMode {
     : 'enforce';
 }
 
-function buildRuntimeMetadata(config: Config, fallbackHarness: string): RuntimeMetadata {
+function buildRuntimeMetadata(
+  config: Config,
+  fallbackHarness: string,
+  runtimeOptions: EvaluatorRuntimeOptions = {}
+): RuntimeMetadata {
   return {
-    enforcement_mode: resolveRuntimeEnforcementMode(config),
+    enforcement_mode: resolveRuntimeEnforcementMode(
+      config,
+      runtimeOptions.enforcementMode ?? runtimeOptions.enforcement_mode
+    ),
     enforced_by: '@aporthq/aport-agent-guardrails',
-    harness: normalizeRuntimeString(config.framework, fallbackHarness),
+    harness: normalizeRuntimeString(
+      runtimeOptions.harness ?? config.framework,
+      fallbackHarness
+    ),
   };
 }
 
@@ -276,11 +296,17 @@ async function callApi(
 export class Evaluator {
   private configPath: string | null;
   private framework: string;
+  private runtimeOptions: EvaluatorRuntimeOptions;
   private cachedConfig: Config | null = null;
 
-  constructor(configPath?: string | null, framework: string = 'langchain') {
+  constructor(
+    configPath?: string | null,
+    framework: string = 'langchain',
+    runtimeOptions: EvaluatorRuntimeOptions = {}
+  ) {
     this.configPath = configPath ?? null;
     this.framework = framework;
+    this.runtimeOptions = runtimeOptions;
   }
 
   /** Resolve the effective config path used for this evaluator (for audit log path resolution). */
@@ -358,7 +384,11 @@ export class Evaluator {
         }
       }
       const failOpenOnApiError = Boolean(config.fail_open_on_api_error ?? process.env.APORT_FAIL_OPEN_ON_API_ERROR === '1');
-      const runtime = buildRuntimeMetadata(config, this.framework);
+      const runtime = buildRuntimeMetadata(
+        config,
+        this.framework,
+        this.runtimeOptions
+      );
       if (agentId) {
         const decision = await callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey, verifySsl: verifySslOverride, failOpenOnApiError, runtime });
         this.auditLog(config, toolName, packId, decision, ctx);
@@ -425,7 +455,11 @@ export class Evaluator {
         }
       }
       if (agentId || passportBody) {
-        const runtime = buildRuntimeMetadata(config, this.framework);
+        const runtime = buildRuntimeMetadata(
+          config,
+          this.framework,
+          this.runtimeOptions
+        );
         const pathId = isFullPolicyPack(policy) ? IN_BODY_PACK_ID : packId;
         const body: Record<string, unknown> = {
           context: {

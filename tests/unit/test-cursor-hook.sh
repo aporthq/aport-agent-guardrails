@@ -103,6 +103,23 @@ echo "  ✅ oversized stdin: warn mode allows with warning"
 # shellcheck source=bin/lib/hook-runtime.sh
 source "$REPO_ROOT/bin/lib/hook-runtime.sh"
 JQ_BIN="$(command -v jq)"
+JQ_JSON="$(
+    aport_hook_build_response_cursor \
+        deny \
+        'APort denied: command not allowed' \
+        ''
+)"
+printf '%s' "$JQ_JSON" | "$JQ_BIN" -e '
+  .permission == "deny"
+  and .allowed == false
+  and .agentMessage == "APort denied: command not allowed"
+  and .agent_message == .agentMessage
+  and .user_message == .agentMessage
+' > /dev/null || {
+    echo "FAIL: Cursor response should preserve camel-case and snake-case message fields" >&2
+    printf '%s\n' "$JQ_JSON" >&2
+    exit 1
+}
 NO_JQ_PATH="$TEST_DIR/no-jq-path"
 mkdir -p "$NO_JQ_PATH"
 FALLBACK_JSON="$(
@@ -116,6 +133,7 @@ FALLBACK_JSON="$(
 printf '%s' "$FALLBACK_JSON" | "$JQ_BIN" -e '
   .permission == "allow"
   and .allowed == true
+  and .agentMessage == .user_message
   and (.user_message | contains("Warn \"quoted\" text"))
   and (.reason | contains("quoted \"reason\""))
 ' > /dev/null || {

@@ -60,6 +60,18 @@ class TestToResult:
 class TestOAPGuardrailProvider:
     @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)
     @patch("aport_guardrails.providers.generic.Evaluator")
+    def test_constructor_passes_enforcement_override_to_evaluator(self, mock_evaluator_cls, mock_find):
+        OAPGuardrailProvider(framework="deerflow", enforcement_mode="warn")
+
+        mock_evaluator_cls.assert_called_once_with(
+            None,
+            framework="deerflow",
+            enforcement_mode="warn",
+            harness="deerflow",
+        )
+
+    @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)
+    @patch("aport_guardrails.providers.generic.Evaluator")
     def test_evaluate_calls_verify_sync(self, mock_evaluator_cls, mock_find):
         mock_evaluator = MagicMock()
         mock_evaluator.verify_sync.return_value = {"allow": True, "reasons": [{"code": "oap.allowed", "message": ""}]}

@@ -321,11 +321,11 @@ aport_hook_build_response_cursor() {
         escaped_warning="$(aport_hook_json_escape "$user_warning")"
         if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
             # Best effort: some Cursor surfaces may not display allow warnings.
-            printf '{"permission":"allow","allowed":true,"agent_message":"%s","user_message":"%s","reason":"%s"}\n' "$escaped_warning" "$escaped_warning" "$escaped_reason"
+            printf '{"permission":"allow","allowed":true,"agentMessage":"%s","agent_message":"%s","user_message":"%s","reason":"%s"}\n' "$escaped_warning" "$escaped_warning" "$escaped_warning" "$escaped_reason"
         elif [ "$decision" = "allow" ]; then
             printf '{"permission":"allow","allowed":true,"reason":"%s"}\n' "$escaped_reason"
         else
-            printf '{"permission":"deny","allowed":false,"agent_message":"%s","user_message":"%s","reason":"%s"}\n' "$escaped_reason" "$escaped_reason" "$escaped_reason"
+            printf '{"permission":"deny","allowed":false,"agentMessage":"%s","agent_message":"%s","user_message":"%s","reason":"%s"}\n' "$escaped_reason" "$escaped_reason" "$escaped_reason" "$escaped_reason"
         fi
         return 0
     fi
@@ -333,13 +333,13 @@ aport_hook_build_response_cursor() {
     if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
         # Best effort: some Cursor surfaces may not display allow warnings.
         jq -n -c --arg reason "$reason" --arg warning "$user_warning" \
-            '{permission:"allow",allowed:true,agent_message:$warning,user_message:$warning,reason:$reason}'
+            '{permission:"allow",allowed:true,agentMessage:$warning,agent_message:$warning,user_message:$warning,reason:$reason}'
     elif [ "$decision" = "allow" ]; then
         jq -n -c --arg reason "$reason" \
             '{permission:"allow",allowed:true,reason:$reason}'
     else
         jq -n -c --arg reason "$reason" \
-            '{permission:"deny",allowed:false,agent_message:$reason,user_message:$reason,reason:$reason}'
+            '{permission:"deny",allowed:false,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
     fi
 }
 

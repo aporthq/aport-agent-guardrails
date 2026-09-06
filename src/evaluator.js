@@ -47,7 +47,10 @@ function buildRuntimeMetadata(options = {}) {
       "@aporthq/aport-agent-guardrails"
     ),
     harness: normalizeRuntimeString(
-      options.harness || process.env.APORT_HARNESS || process.env.APORT_FRAMEWORK,
+      options.harness ||
+        process.env.APORT_HOOK_FRAMEWORK ||
+        process.env.APORT_HARNESS ||
+        process.env.APORT_FRAMEWORK,
       "guardrails-shell"
     ),
   };
