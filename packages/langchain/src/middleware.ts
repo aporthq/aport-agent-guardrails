@@ -30,6 +30,12 @@ export interface APortGuardrailCallbackOptions {
   enforcementMode?: "enforce" | "warn";
 }
 
+type RuntimeAwareEvaluatorConstructor = new (
+  configPath?: string | null,
+  framework?: string,
+  runtimeOptions?: { enforcementMode?: string; harness?: string }
+) => Evaluator;
+
 /**
  * Callback handler that runs APort policy verification before each tool runs.
  * Register with LangChain/LangGraph so tool execution is blocked when policy denies.
@@ -48,12 +54,16 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
       typeof options === "object" && options && "framework" in options
         ? options.framework ?? "langchain"
         : "langchain";
-    this.evaluator = new Evaluator(configPath, framework);
     this.enforcementMode = resolveEnforcementMode(
       typeof options === "object" && options ? options.enforcementMode : undefined,
       configPath,
       framework
     );
+    const RuntimeAwareEvaluator = Evaluator as unknown as RuntimeAwareEvaluatorConstructor;
+    this.evaluator = new RuntimeAwareEvaluator(configPath, framework, {
+      enforcementMode: this.enforcementMode,
+      harness: framework,
+    });
   }
 
   async handleToolStart(
@@ -89,11 +99,12 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
       const code = decision.reasons?.[0]?.code ?? "oap.denied";
       const safeMessage = sanitizeDisplayText(msg);
       const safeCode = sanitizeDisplayText(code);
+      const safeToolName = sanitizeDisplayText(toolName);
       if (this.enforcementMode === "warn") {
-        console.warn(`[APort] warning: policy would have denied ${toolName}. Reason: ${safeCode}.`);
+        console.warn(`[APort] warning: policy would have denied ${safeToolName}. Reason: ${safeCode}.`);
         return;
       }
-      console.warn(`[APort] denied ${toolName}. Reason: ${safeCode}. ${safeMessage}`);
+      console.warn(`[APort] denied ${safeToolName}. Reason: ${safeCode}. ${safeMessage}`);
       throw new GuardrailViolationError(msg, decision.reasons);
     }
   }
@@ -111,7 +122,8 @@ function resolveEnforcementMode(
     (config.enforcement_mode as string | undefined) ??
     (config.enforcementMode as string | undefined) ??
     process.env.APORT_ENFORCEMENT_MODE ??
-    process.env.APORT_ENFORCEMENT;
+    process.env.APORT_ENFORCEMENT ??
+    process.env.APORT_GUARDRAIL_ENFORCEMENT;
   const normalized = String(raw || "enforce").toLowerCase().replace(/_/g, "-");
   return ["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)
     ? "warn"

@@ -58,25 +58,18 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
 fi
 
 emit_cursor_input_too_large() {
-    local notice
+    local decision="deny"
+    local notice user_warning
     if aport_hook_is_warn_mode; then
+        decision="allow"
         notice="$(aport_format_guardrail_notice warn hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-        if command -v jq > /dev/null 2>&1; then
-            jq -n -c --arg reason "$notice" \
-                '{permission:"allow",allowed:true,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
-        else
-            printf '{"permission":"allow","allowed":true,"agentMessage":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","agent_message":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","user_message":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","reason":"APort warning: policy would have denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}\n'
-        fi
+        user_warning="$(aport_hook_format_user_warning hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
+        aport_hook_build_response "$decision" "$notice" "$user_warning" "cursor"
         exit 0
     fi
 
     notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-    if command -v jq > /dev/null 2>&1; then
-        jq -n -c --arg reason "$notice" \
-            '{permission:"deny",allowed:false,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
-    else
-        printf '{"permission":"deny","allowed":false,"agentMessage":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","agent_message":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","user_message":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large.","reason":"APort denied this tool call. Policy: hook.input. Reason: oap.input_too_large."}\n'
-    fi
+    aport_hook_build_response "$decision" "$notice" "" "cursor"
     exit 2
 }
 
@@ -99,18 +92,17 @@ if ! command -v jq &> /dev/null; then
     exit 2
 fi
 
-# Deny helper: outputs Cursor-format JSON and exits 2
+# Deny helper: outputs hook response JSON and exits 2
 deny() {
     local reason="$1"
-    jq -n -c --arg reason "$reason" \
-        '{permission:"deny",allowed:false,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
+    aport_hook_build_response "deny" "$reason" "" "cursor"
     exit 2
 }
 
 warn_allow() {
     local reason="$1"
-    jq -n -c --arg reason "$reason" \
-        '{permission:"allow",allowed:true,agentMessage:$reason,agent_message:$reason,user_message:$reason,reason:$reason}'
+    local user_warning="${2:-}"
+    aport_hook_build_response "allow" "$reason" "$user_warning" "cursor"
     exit 0
 }
 
@@ -118,10 +110,11 @@ deny_or_warn() {
     local policy="$1"
     local code="${2:-oap.denied}"
     local message="${3:-}"
-    local notice
+    local notice user_warning
     if aport_hook_is_warn_mode; then
         notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
-        warn_allow "$notice"
+        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message")"
+        warn_allow "$notice" "$user_warning"
     fi
     notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
     deny "$notice"

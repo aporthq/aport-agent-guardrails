@@ -127,6 +127,7 @@ export default definePluginEntry({
                 passport: agentId ? null : JSON.parse(await readFile(passportFile, "utf8")),
                 agentId,
                 signal: hookContext?.abortSignal,
+                runtime: buildRuntimeMetadata(enforcement),
               })
             : evaluateLocalDecision({
                 policyName: effectivePolicyName,
@@ -346,6 +347,14 @@ function normalizeEnforcementMode(value) {
   const normalized = String(value || "enforce").toLowerCase().replace(/_/g, "-");
   if (["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)) return "warn";
   return "enforce";
+}
+
+function buildRuntimeMetadata(enforcement) {
+  return {
+    enforcement_mode: enforcement === "warn" ? "warn" : "enforce",
+    enforced_by: "@aporthq/openclaw-aport",
+    harness: "openclaw",
+  };
 }
 
 function sanitizeDisplayText(value) {

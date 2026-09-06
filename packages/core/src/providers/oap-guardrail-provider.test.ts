@@ -74,4 +74,52 @@ describe("OAPGuardrailProvider", () => {
       originalAllow: false,
     });
   });
+
+  it("reports explicit warn mode to hosted runtime metadata", async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedBody: Record<string, unknown> | null = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () =>
+          JSON.stringify({
+            decision: {
+              allow: false,
+              reasons: [{ code: "oap.denied", message: "blocked" }],
+            },
+          }),
+      } as Response;
+    }) as typeof fetch;
+
+    try {
+      const provider = new OAPGuardrailProvider({
+        framework: "generic",
+        enforcementMode: "warn",
+      });
+      (provider as any).evaluator.cachedConfig = {
+        mode: "api",
+        agent_id: "ap_1234567890abcdef1234567890abcdef",
+        enforcement_mode: "enforce",
+      };
+
+      const decision = await provider.evaluate(makeRequest("bash", { command: "sudo ls" }));
+
+      expect(decision.allow).toBe(true);
+      expect(decision.metadata).toMatchObject({
+        enforcementMode: "warn",
+        originalAllow: false,
+      });
+      const body = capturedBody as { runtime?: unknown } | null;
+      expect(body?.runtime).toMatchObject({
+        enforcement_mode: "warn",
+        harness: "generic",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
