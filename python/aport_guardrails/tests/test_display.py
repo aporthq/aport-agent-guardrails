@@ -1,5 +1,6 @@
 """Tests for safe, actionable display helpers."""
 
+import aport_guardrails.core.display as display
 from aport_guardrails.core.display import format_policy_warning, policy_reference, sanitize_display
 
 
@@ -19,6 +20,18 @@ def test_policy_reference_prefers_hosted_agent_id(monkeypatch):
     assert (
         policy_reference(framework="langchain")
         == "Review or update the hosted passport: https://aport.io/passports?details=ap_1234567890abcdef1234567890abcdef"
+    )
+
+
+def test_policy_reference_prefers_config_agent_id_over_stale_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("APORT_AGENT_ID", "ap_stale_global")
+    monkeypatch.setattr(display, "load_config", lambda _path: {"agent_id": "ap_configured_agent"})
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("agent_id: ap_configured_agent\n")
+
+    assert (
+        policy_reference(config_path=str(config_path))
+        == "Review or update the hosted passport: https://aport.io/passports?details=ap_configured_agent"
     )
 
 

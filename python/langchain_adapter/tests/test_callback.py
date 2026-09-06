@@ -66,6 +66,8 @@ class TestAPortCallback:
     async def test_warn_mode_does_not_raise(self):
         """Explicit warn mode lets LangChain continue while preserving the deny decision."""
         callback = APortCallback(config_path="/nonexistent", enforcement_mode="warn")
+        assert callback.evaluator._runtime_enforcement_mode == "warn"
+        assert callback.evaluator._runtime_harness == "langchain"
         callback.evaluator = AsyncMock()
         callback.evaluator.verify = AsyncMock(
             return_value={
@@ -104,6 +106,8 @@ class TestAPortCallback:
     async def test_compat_warn_mode_sanitizes_tool_name(self, capsys):
         """The compatibility import path must sanitize warn logs too."""
         callback = CompatAPortCallback(config_path="/nonexistent", enforcement_mode="warn")
+        assert callback.evaluator._runtime_enforcement_mode == "warn"
+        assert callback.evaluator._runtime_harness == "langchain"
         callback.evaluator = AsyncMock()
         callback.evaluator.verify = AsyncMock(
             return_value={

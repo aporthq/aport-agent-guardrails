@@ -161,6 +161,36 @@ class TestEvaluatorVerifyPolicyInBody:
         assert kwargs.get("policy_pack") == full_policy
         assert kwargs.get("agent_id") == "agent-1"
 
+    @pytest.mark.asyncio
+    @patch("aport_guardrails.core.evaluator._call_api_sync")
+    async def test_verify_reports_runtime_override_to_api(self, call_api_mock):
+        call_api_mock.return_value = {"allow": False, "reasons": [{"code": "oap.denied"}]}
+
+        evaluator = Evaluator(
+            framework="langchain",
+            enforcement_mode="warn",
+            harness="langchain",
+        )
+        evaluator._config = {
+            "mode": "api",
+            "api_url": "https://api.example.com",
+            "agent_id": "agent-1",
+            "enforcement_mode": "enforce",
+        }
+
+        await evaluator.verify(
+            passport={"agent_id": "agent-1"},
+            policy={"capability": "system.command.execute.v1"},
+            context={"tool": "run"},
+        )
+
+        call_api_mock.assert_called_once()
+        assert call_api_mock.call_args.kwargs["runtime"] == {
+            "enforcement_mode": "warn",
+            "enforced_by": "aport-agent-guardrails-python",
+            "harness": "langchain",
+        }
+
 
 class TestGuardrailScriptResolution:
     def test_prefers_framework_runtime_installed_under_config_dir(self, tmp_path: Path):

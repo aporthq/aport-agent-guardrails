@@ -402,17 +402,24 @@ def _normalize_runtime_enforcement(value: Any) -> str:
     return "enforce"
 
 
-def _runtime_metadata(config: dict[str, Any], fallback_harness: str) -> dict[str, str]:
+def _runtime_metadata(
+    config: dict[str, Any],
+    fallback_harness: str,
+    *,
+    enforcement_mode: Any = None,
+    harness: Any = None,
+) -> dict[str, str]:
     return {
         "enforcement_mode": _normalize_runtime_enforcement(
-            config.get("enforcement_mode")
+            enforcement_mode
+            or config.get("enforcement_mode")
             or config.get("enforcementMode")
             or os.environ.get("APORT_ENFORCEMENT_MODE")
             or os.environ.get("APORT_ENFORCEMENT")
             or os.environ.get("APORT_GUARDRAIL_ENFORCEMENT")
         ),
         "enforced_by": "aport-agent-guardrails-python",
-        "harness": _normalize_runtime_string(config.get("framework"), fallback_harness),
+        "harness": _normalize_runtime_string(harness or config.get("framework"), fallback_harness),
     }
 
 
@@ -493,9 +500,13 @@ class Evaluator:
         config_path: str | Path | None = None,
         *,
         framework: str = "langchain",
+        enforcement_mode: Any = None,
+        harness: Any = None,
     ) -> None:
         self.config_path = Path(config_path) if config_path else None
         self._framework = framework
+        self._runtime_enforcement_mode = enforcement_mode
+        self._runtime_harness = harness
         self._config: dict[str, Any] | None = None
 
     def _load_config(self) -> dict[str, Any]:
@@ -582,7 +593,12 @@ class Evaluator:
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
             api_key = config.get("api_key") or os.environ.get("APORT_API_KEY")
             agent_id = config.get("agent_id") or passport.get("agent_id")
-            runtime = _runtime_metadata(config, self._framework)
+            runtime = _runtime_metadata(
+                config,
+                self._framework,
+                enforcement_mode=self._runtime_enforcement_mode,
+                harness=self._runtime_harness,
+            )
             # SECURITY: Check if SSL verification should be disabled (dev/test only)
             verify_ssl = config.get("verify_ssl", True)
             if os.environ.get("APORT_VERIFY_SSL") == "0":
@@ -681,7 +697,12 @@ class Evaluator:
             api_url = config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io")
             api_key = config.get("api_key") or os.environ.get("APORT_API_KEY")
             agent_id = config.get("agent_id") or passport.get("agent_id")
-            runtime = _runtime_metadata(config, self._framework)
+            runtime = _runtime_metadata(
+                config,
+                self._framework,
+                enforcement_mode=self._runtime_enforcement_mode,
+                harness=self._runtime_harness,
+            )
             # SECURITY: Check if SSL verification should be disabled (dev/test only)
             verify_ssl = config.get("verify_ssl", True)
             if os.environ.get("APORT_VERIFY_SSL") == "0":

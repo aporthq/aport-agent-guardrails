@@ -43,17 +43,22 @@ def policy_reference(*, framework: str | None = None, config_path: str | None = 
     if resolved_path:
         config = load_config(resolved_path)
 
-    agent_id = (
-        os.environ.get("APORT_AGENT_ID")
-        or str(config.get("agent_id") or config.get("agentId") or config.get("hosted_agent_id") or "")
+    agent_id = str(
+        config.get("agent_id")
+        or config.get("agentId")
+        or config.get("hosted_agent_id")
+        or os.environ.get("APORT_AGENT_ID")
+        or ""
     )
     if agent_id:
         return f"Review or update the hosted passport: {app_url}/passports?details={agent_id}"
 
-    passport_path = (
-        os.environ.get("APORT_PASSPORT_FILE")
+    passport_path = str(
+        config.get("passport_path")
+        or config.get("passportFile")
+        or os.environ.get("APORT_PASSPORT_FILE")
         or os.environ.get("PASSPORT_FILE")
-        or str(config.get("passport_path") or config.get("passportFile") or "")
+        or ""
     )
     if passport_path:
         return f"Review or update the local passport file: {passport_path}"

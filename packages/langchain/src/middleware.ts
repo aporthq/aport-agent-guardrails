@@ -30,6 +30,12 @@ export interface APortGuardrailCallbackOptions {
   enforcementMode?: "enforce" | "warn";
 }
 
+type RuntimeAwareEvaluatorConstructor = new (
+  configPath?: string | null,
+  framework?: string,
+  runtimeOptions?: { enforcementMode?: string; harness?: string }
+) => Evaluator;
+
 /**
  * Callback handler that runs APort policy verification before each tool runs.
  * Register with LangChain/LangGraph so tool execution is blocked when policy denies.
@@ -48,12 +54,16 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
       typeof options === "object" && options && "framework" in options
         ? options.framework ?? "langchain"
         : "langchain";
-    this.evaluator = new Evaluator(configPath, framework);
     this.enforcementMode = resolveEnforcementMode(
       typeof options === "object" && options ? options.enforcementMode : undefined,
       configPath,
       framework
     );
+    const RuntimeAwareEvaluator = Evaluator as unknown as RuntimeAwareEvaluatorConstructor;
+    this.evaluator = new RuntimeAwareEvaluator(configPath, framework, {
+      enforcementMode: this.enforcementMode,
+      harness: framework,
+    });
   }
 
   async handleToolStart(

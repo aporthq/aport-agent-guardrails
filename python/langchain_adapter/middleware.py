@@ -66,8 +66,13 @@ class APortCallback(AsyncCallbackHandler):
 
     def __init__(self, config_path: str | None = None, enforcement_mode: str | None = None) -> None:
         self.config_path = config_path
-        self.evaluator = Evaluator(config_path, framework="langchain")
         self.enforcement_mode = _resolve_enforcement_mode(config_path, "langchain", enforcement_mode)
+        self.evaluator = Evaluator(
+            config_path,
+            framework="langchain",
+            enforcement_mode=self.enforcement_mode,
+            harness="langchain",
+        )
 
     async def on_tool_start(self, serialized: Any, input_str: Any = None, **kwargs: object) -> None:
         tool_name = _tool_name(serialized)
