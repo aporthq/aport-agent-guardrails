@@ -238,6 +238,8 @@ aport_hook_detect_framework() {
         printf 'cursor'
     elif [ -n "${CLAUDE_CODE:-}" ] || [ "$config_dir" = "$HOME/.claude" ]; then
         printf 'claude-code'
+    elif [ "$config_dir" = "$HOME/.aport/goose" ]; then
+        printf 'goose'
     else
         printf 'unknown'
     fi
@@ -343,6 +345,102 @@ aport_hook_build_response_cursor() {
     fi
 }
 
+aport_hook_build_response_goose() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local escaped_reason
+
+    if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+        reason="$user_warning"
+    fi
+
+    if [ "$decision" = "allow" ] && [ -z "$reason" ]; then
+        return 0
+    fi
+
+    if ! command -v jq > /dev/null 2>&1; then
+        escaped_reason="$(aport_hook_json_escape "$reason")"
+        if [ "$decision" = "allow" ]; then
+            printf '{"decision":"allow","reason":"%s"}\n' "$escaped_reason"
+        else
+            printf '{"decision":"block","reason":"%s"}\n' "$escaped_reason"
+        fi
+        return 0
+    fi
+
+    if [ "$decision" = "allow" ]; then
+        jq -n -c --arg reason "$reason" '{decision:"allow",reason:$reason}'
+    else
+        jq -n -c --arg reason "$reason" '{decision:"block",reason:$reason}'
+    fi
+}
+
+aport_hook_build_response_codex() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local event="${APORT_CODEX_HOOK_EVENT_NAME:-PreToolUse}"
+    local escaped_reason escaped_warning escaped_event
+
+    if ! command -v jq > /dev/null 2>&1; then
+        escaped_reason="$(aport_hook_json_escape "$reason")"
+        escaped_warning="$(aport_hook_json_escape "$user_warning")"
+        escaped_event="$(aport_hook_json_escape "$event")"
+        if [ "$event" = "PermissionRequest" ] && [ "$decision" = "deny" ]; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"%s"}}}\n' "$escaped_reason"
+        elif [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+            printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$escaped_warning" "$escaped_event" "$escaped_reason"
+        elif [ "$decision" = "allow" ]; then
+            printf '{}\n'
+        else
+            printf '{"hookSpecificOutput":{"hookEventName":"%s","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$escaped_event" "$escaped_reason"
+        fi
+        return 0
+    fi
+
+    if [ "$event" = "PermissionRequest" ] && [ "$decision" = "deny" ]; then
+        jq -n --arg reason "$reason" \
+            '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"deny",message:$reason}}}'
+    elif [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+        jq -n --arg event "$event" --arg reason "$reason" --arg warning "$user_warning" \
+            '{systemMessage:$warning,hookSpecificOutput:{hookEventName:$event,additionalContext:$reason}}'
+    elif [ "$decision" = "allow" ]; then
+        jq -n '{}'
+    else
+        jq -n --arg event "$event" --arg reason "$reason" \
+            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"deny",permissionDecisionReason:$reason}}'
+    fi
+}
+
+aport_hook_build_response_gemini_cli() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local escaped_reason escaped_warning
+
+    if ! command -v jq > /dev/null 2>&1; then
+        escaped_reason="$(aport_hook_json_escape "$reason")"
+        escaped_warning="$(aport_hook_json_escape "$user_warning")"
+        if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+            printf '{"decision":"allow","systemMessage":"%s"}\n' "$escaped_warning"
+        elif [ "$decision" = "allow" ]; then
+            printf '{"decision":"allow"}\n'
+        else
+            printf '{"decision":"deny","reason":"%s"}\n' "$escaped_reason"
+        fi
+        return 0
+    fi
+
+    if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+        jq -n -c --arg warning "$user_warning" '{decision:"allow",systemMessage:$warning}'
+    elif [ "$decision" = "allow" ]; then
+        jq -n -c '{decision:"allow"}'
+    else
+        jq -n -c --arg reason "$reason" '{decision:"deny",reason:$reason}'
+    fi
+}
+
 aport_hook_build_response() {
     local decision="$1"
     local reason="$2"
@@ -359,6 +457,15 @@ aport_hook_build_response() {
             ;;
         cursor)
             aport_hook_build_response_cursor "$decision" "$reason" "$user_warning"
+            ;;
+        goose)
+            aport_hook_build_response_goose "$decision" "$reason" "$user_warning"
+            ;;
+        codex)
+            aport_hook_build_response_codex "$decision" "$reason" "$user_warning"
+            ;;
+        gemini-cli | gemini)
+            aport_hook_build_response_gemini_cli "$decision" "$reason" "$user_warning"
             ;;
         *)
             printf 'APort hook runtime error: unsupported hook response framework: %s\n' "$framework" >&2

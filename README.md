@@ -24,7 +24,7 @@
 
 ---
 
-Deterministic pre-action authorization for AI agents. Guardrails run before tool execution, so prompt injection cannot bypass policy checks.
+Deterministic pre-action authorization for AI agents. Guardrails run before supported tool execution, so prompt injection cannot bypass host-emitted policy checks.
 
 ### CTF Evidence
 
@@ -72,9 +72,9 @@ npx @aporthq/aport-agent-guardrails
 ```
 
 - In a git repository with no detected runtime framework, pressing Enter starts GitHub Repository Guard setup.
-- For runtime hooks, choose your framework: `cursor`, `claude-code`, `openclaw`, `langchain`, `crewai`, `deerflow`, `n8n`
+- For runtime hooks, choose a released target: `cursor`, `claude-code`, `openclaw`, `langchain`, `crewai`, `deerflow`; a released beta command-hook target: `codex`, `gemini`, `goose`; or a setup-only target: `n8n`
 - GitHub repository guard: `npx @aporthq/aport-agent-guardrails github`
-- Claude Code direct: `npx @aporthq/aport-agent-guardrails claude-code`
+- Claude Code direct: `npx @aporthq/aport-agent-guardrails claude` or `claude-code` for Anthropic's `claude` CLI
 - Curl install URL for runtime hooks: `curl -fsSL https://aport.io/install.sh | bash -s -- claude-code`
 - Existing hosted passport: `npx @aporthq/aport-agent-guardrails <framework> <agent_id>`
 - Change enforcement without recreating a passport: `npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=warn`
@@ -107,7 +107,7 @@ npx --yes @aporthq/aport-agent-guardrails claude-code --non-interactive
 
 - **Deterministic enforcement:** runtime hook, not prompt instructions
 - **Fail-closed defaults:** verification failures block risky actions
-- **Explicit rollout mode:** `--enforcement=warn` records real deny decisions while allowing framework actions during policy tuning
+- **Explicit rollout mode:** `--enforcement=warn` records completed deny decisions while allowing framework actions during policy tuning; malformed hook input, missing dependencies, and invalid config still fail closed
 - **Auditable decisions:** each allow/deny is logged with context
 - **Open standard artifacts:** Open Agent Passport ([OAP](https://github.com/aporthq/aport-spec)) v1.0 passport and decision formats
 - **Research-backed outcomes:** in a live adversarial testbed, permissive-policy success was 74.6% vs 0% under restrictive OAP policy (879 top-tier attempts)
@@ -143,21 +143,27 @@ The security concern is that agent tools and skills can execute sensitive action
 
 **Runtime guardrails:** APort adapters and providers are available per framework; the same passport and policies apply. **Node users:** `npx @aporthq/aport-agent-guardrails` (then choose framework) or `npx @aporthq/aport-agent-guardrails <framework>`. **Python users (LangChain/CrewAI/DeerFlow):** run the same CLI for the wizard and config, then install the Python package shown in the framework doc.
 
-**Two ways to use APort:** (1) **Guardrails (CLI/setup)** — run the installer to create your passport and config; (2) **Core (library)** — use the `OAPGuardrailProvider` ([docs/PROVIDER.md](docs/PROVIDER.md)) in your app so each tool call is verified. One provider per language (Python + TypeScript), works with any framework. Framework docs: [OpenClaw](docs/frameworks/openclaw.md), [Cursor](docs/frameworks/cursor.md), [Claude Code](docs/frameworks/claude-code.md), [LangChain](docs/frameworks/langchain.md), [CrewAI](docs/frameworks/crewai.md), [DeerFlow](docs/frameworks/deerflow.md), [n8n](docs/frameworks/n8n.md).
+**Two ways to use APort:** (1) **Guardrails (CLI/setup)** — run the installer to create your passport and config; (2) **Core (library)** — use the `OAPGuardrailProvider` ([docs/PROVIDER.md](docs/PROVIDER.md)) in your app so each tool call is verified. One provider per language (Python + TypeScript), works with any framework. Framework docs: [GitHub](docs/GITHUB_PROTECTION.md), [Claude Code](docs/frameworks/claude-code.md), [Cursor](docs/frameworks/cursor.md), [Codex](docs/frameworks/codex.md), [Gemini CLI](docs/frameworks/gemini-cli.md), [Goose](docs/frameworks/goose.md), [OpenClaw](docs/frameworks/openclaw.md), [LangChain](docs/frameworks/langchain.md), [CrewAI](docs/frameworks/crewai.md), [DeerFlow](docs/frameworks/deerflow.md), [n8n](docs/frameworks/n8n.md).
 
-**CLI-supported frameworks:** `openclaw`, `langchain`, `crewai`, `cursor`, `claude-code`, `deerflow`, `n8n`. OpenClaw/Cursor/Claude Code include runtime-specific integration scripts; DeerFlow/LangChain/CrewAI use framework docs plus generic setup output from the CLI. For repository protection, run `npx @aporthq/aport-agent-guardrails github` to generate the GitHub Actions workflow. For IT-managed device rollout, see [Enterprise device deployment](docs/ENTERPRISE_DEVICE_DEPLOYMENT.md).
+**CLI-supported targets today:** `github`, `cursor`, `claude`/`claude-code`, `openclaw`, `langchain`, `crewai`, `deerflow`, setup-only `n8n`, plus beta command-hook targets `codex`, `gemini`, and `goose`. `opencode` is intentionally gated until an installed-version plugin smoke test validates the current plugin API. For IT-managed device rollout, see [Enterprise device deployment](docs/ENTERPRISE_DEVICE_DEPLOYMENT.md).
 
-| Surface | Doc | Integration | Install |
-|-----------|-----|--------------|--------|
-| **GitHub Repository Guard** | [docs/GITHUB_PROTECTION.md](docs/GITHUB_PROTECTION.md) | GitHub Action with OIDC-backed hosted OAP passport issue/reuse and repository evidence | `npx @aporthq/aport-agent-guardrails github` |
-| **Claude Code** | [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md) | PreToolUse hook → writes `~/.claude/settings.json` (Claude Code format; not Cursor). | `npx @aporthq/aport-agent-guardrails claude-code` |
-| **Cursor** | [docs/frameworks/cursor.md](docs/frameworks/cursor.md) | `beforeShellExecution` / `preToolUse` hooks → writes `~/.cursor/hooks.json`. **Runtime enforcement is the bash hook;** the Node package `@aporthq/aport-agent-guardrails-cursor` is a helper only (Evaluator, `getHookPath()`). | `npx @aporthq/aport-agent-guardrails cursor` |
-| **OpenClaw** | [docs/frameworks/openclaw.md](docs/frameworks/openclaw.md) | **Plugin:** `before_tool_call` via `openclaw-aport` | `npx @aporthq/aport-agent-guardrails openclaw` |
-| **LangChain / LangGraph** | [docs/frameworks/langchain.md](docs/frameworks/langchain.md) | **Python:** `APortCallback` (`on_tool_start`) | `npx @aporthq/aport-agent-guardrails langchain` then `pip install aport-agent-guardrails-langchain` + `aport-langchain setup` |
-| **CrewAI** | [docs/frameworks/crewai.md](docs/frameworks/crewai.md) | **Python:** released hook adapter by default; native `GuardrailProvider` mode for CrewAI builds with native provider support | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
-| **DeerFlow** | [docs/frameworks/deerflow.md](docs/frameworks/deerflow.md) | **Python:** generic OAP provider wiring in DeerFlow config | `npx @aporthq/aport-agent-guardrails deerflow` then follow printed `uv`/config steps |
-| **n8n** | [docs/frameworks/n8n.md](docs/frameworks/n8n.md) | *Coming soon* — custom node and runtime in progress | — |
-| **VoltAgent** | [VoltAgent PR #1171](https://github.com/VoltAgent/voltagent/pull/1171) | *In progress* — pluggable `GuardrailProvider` interface landing upstream in `@voltagent/core` | — |
+| Surface | CLI / alias | Doc | Integration | Install |
+|-----------|-------------|-----|--------------|--------|
+| **GitHub Repository Guard** | `github` | [docs/GITHUB_PROTECTION.md](docs/GITHUB_PROTECTION.md) | GitHub Action with OIDC-backed hosted OAP passport issue/reuse and repository evidence | `npx @aporthq/aport-agent-guardrails github` |
+| **Claude Code** | `claude` / `claude-code` | [docs/frameworks/claude-code.md](docs/frameworks/claude-code.md) | PreToolUse hook → writes `~/.claude/settings.json` (Claude Code format; not Cursor). | `npx @aporthq/aport-agent-guardrails claude` |
+| **Cursor** | `cursor` | [docs/frameworks/cursor.md](docs/frameworks/cursor.md) | `beforeShellExecution` / `preToolUse` hooks → writes `~/.cursor/hooks.json`. **Runtime enforcement is the bash hook;** the Node package `@aporthq/aport-agent-guardrails-cursor` is a helper only (Evaluator, `getHookPath()`). | `npx @aporthq/aport-agent-guardrails cursor` |
+| **OpenClaw** | `openclaw` | [docs/frameworks/openclaw.md](docs/frameworks/openclaw.md) | **Plugin:** `before_tool_call` via `openclaw-aport` | `npx @aporthq/aport-agent-guardrails openclaw` |
+| **LangChain / LangGraph** | `langchain` | [docs/frameworks/langchain.md](docs/frameworks/langchain.md) | **Python:** `APortCallback` (`on_tool_start`) | `npx @aporthq/aport-agent-guardrails langchain` then `pip install aport-agent-guardrails-langchain` + `aport-langchain setup` |
+| **CrewAI** | `crewai` | [docs/frameworks/crewai.md](docs/frameworks/crewai.md) | **Python:** released hook adapter by default; native `GuardrailProvider` mode for CrewAI builds with native provider support | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
+| **DeerFlow** | `deerflow` | [docs/frameworks/deerflow.md](docs/frameworks/deerflow.md) | **Python:** generic OAP provider wiring in DeerFlow config | `npx @aporthq/aport-agent-guardrails deerflow` then follow printed `uv`/config steps |
+| **n8n** | `n8n` | [docs/frameworks/n8n.md](docs/frameworks/n8n.md) | *Setup available; custom node coming soon* | `npx @aporthq/aport-agent-guardrails n8n` |
+| **Codex CLI** | `codex` | [docs/frameworks/codex.md](docs/frameworks/codex.md) | Beta command hook: repo-local `.codex/hooks.json` for `PreToolUse`; Bash, `apply_patch`, MCP, and local function tools. State stays in `~/.aport/codex`. | `npx @aporthq/aport-agent-guardrails codex` |
+| **Gemini CLI** | `gemini` / `gemini-cli` | [docs/frameworks/gemini-cli.md](docs/frameworks/gemini-cli.md) | Beta command hook: `.gemini/settings.json` `BeforeTool` hook for shell, file, web, and MCP tools. | `npx @aporthq/aport-agent-guardrails gemini` |
+| **Goose** | `goose` | [docs/frameworks/goose.md](docs/frameworks/goose.md) | Beta Goose Open Plugin: project-scoped `.agents/plugins/aport-guardrail` with blocking `PreToolUse`; secrets/state stay in `~/.aport/goose`. | `npx @aporthq/aport-agent-guardrails goose` |
+| **opencode** | `opencode` | [docs/frameworks/opencode.md](docs/frameworks/opencode.md) | Gated; current setup exits with an explanation until plugin API smoke tests pass. | — |
+| **VoltAgent** | planned | [VoltAgent PR #1171](https://github.com/VoltAgent/voltagent/pull/1171) | *In progress* — pluggable `GuardrailProvider` interface landing upstream in `@voltagent/core` | — |
+
+Beta command-hook harnesses use the tool names their creators use: `codex`, `gemini`, and `goose`. They ship through this package and share the same local/API evaluator as Claude Code and Cursor, but remain beta while APort continues validating native hook payloads and warning visibility across host versions. opencode stays gated until APort has an installed-version plugin smoke test.
 
 Install via `npx @aporthq/aport-agent-guardrails <framework>` (or choose when prompted). OpenClaw can also use the full installer flow. **For LangChain, CrewAI, and DeerFlow, the CLI writes config and installs the local runtime into the framework config directory; then install the Python package and wire the provider/callback shown in the framework doc.** **Python** packages are on PyPI; **Node** packages are on npm (same version as the CLI).
 
@@ -181,10 +187,11 @@ npx @aporthq/aport-agent-guardrails github
 npx @aporthq/aport-agent-guardrails github --mode hosted --branches main,staging
 ```
 
-**Node (Cursor, Claude Code, OpenClaw, or to create config for any framework):**
+**Node (GitHub first, then Cursor, Claude Code, OpenClaw, or config for another released framework):**
 ```bash
 npx @aporthq/aport-agent-guardrails
-# or: npx @aporthq/aport-agent-guardrails github | cursor | claude-code | openclaw | langchain | crewai | deerflow | n8n
+# or: npx @aporthq/aport-agent-guardrails github | cursor | claude | claude-code | codex | gemini | goose | openclaw | langchain | crewai | deerflow | n8n
+# n8n currently writes passport/config only; runtime node enforcement ships separately.
 # optional mode flags (all frameworks):
 #   --mode=api --api-url=https://api.aport.io
 #   --mode=local
@@ -201,8 +208,8 @@ npx @aporthq/aport-agent-guardrails reset claude-code --yes
 npx @aporthq/aport-agent-guardrails claude-code reset --yes
 ```
 
-Supported reset targets match the CLI-supported frameworks:
-`openclaw`, `cursor`, `claude-code`, `langchain`, `crewai`, `deerflow`, `n8n`.
+Supported reset targets match released and beta runtime targets:
+`cursor`, `claude`/`claude-code`, `codex`, `gemini`, `goose`, `openclaw`, `langchain`, `crewai`, `deerflow`, `n8n`.
 
 Reset removes APort-owned config and integration wiring for the selected framework.
 When possible, unrelated user hooks are preserved.
@@ -224,7 +231,7 @@ This runs setup and writes config for your framework. Choose hosted setup for pa
 
 **Guardrail mode (local vs API)** — On the **Node** installer (`npx @aporthq/aport-agent-guardrails …` / `bin/agent-guardrails`), every framework accepts the same flags: `--mode=api` (with optional `--api-url`, default `https://api.aport.io`) or `--mode=local`, and an optional hosted `ap_<hex>` argument (API mode, no local passport). That flow writes `…/aport/guardrail-mode.env` where the hooks/generic installers need it. The **Python** `aport setup` CLI does not parse those flags yet; use the Node command above for API/local mode during setup, or set mode in your framework `config.yaml` per the framework doc.
 
-**Enforcement mode (block vs warn)** — Default is `enforce`: APort fails closed and policy denials block the tool call. Use `--enforcement=warn` only when intentionally rolling out in report-only/audit mode. Warn mode still evaluates policy and records the original deny decision, but lets the framework action continue so teams can tune passports without interrupting development. Host visibility differs: Claude Code shows a `systemMessage` warning; Cursor returns best-effort warning fields but may not display allow warnings in the UI, so use the audit log/status output as the source of truth. See APort's [OAP Decisions vs Harness Enforcement](https://github.com/aporthq/agent-passport/blob/main/docs/DECISION-VS-ENFORCEMENT.md) guidance for how to reconcile signed `allow: false` decisions with local warn/report-only rollout.
+**Enforcement mode (block vs warn)** — Default is `enforce`: APort fails closed and policy denials block the tool call. Use `--enforcement=warn` only when intentionally rolling out in report-only/audit mode. Warn mode still evaluates policy and records the original deny decision, but lets the framework action continue so teams can tune passports without interrupting development. It does not downgrade malformed hook input, missing dependencies, invalid mode files, unmapped effectful tools, or evaluator integrity failures; those remain fail-closed because APort cannot prove what would have been authorized. Host visibility differs: Claude Code shows a `systemMessage` warning; Cursor returns best-effort warning fields but may not display allow warnings in the UI, so use the audit log/status output as the source of truth. See APort's [OAP Decisions vs Harness Enforcement](https://github.com/aporthq/agent-passport/blob/main/docs/DECISION-VS-ENFORCEMENT.md) guidance for how to reconcile signed `allow: false` decisions with local warn/report-only rollout.
 
 Change enforcement later without creating a new passport or reinstalling hooks:
 
@@ -236,7 +243,7 @@ npx @aporthq/aport-agent-guardrails mode langchain --mode=api --enforcement=warn
 
 **2. Hosted passport (optional)** — The installer can create a hosted passport during setup. If you already have an `agent_id` from [aport.io](https://aport.io), use it to skip passport creation: `npx @aporthq/aport-agent-guardrails <framework> <agent_id>`. See [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md).
 
-**3. Test that policy runs** — After setup, the guardrail runs automatically when your agent uses tools (Cursor hook, LangChain callback, OpenClaw plugin, etc.). To try allow/deny from the command line (any framework), use the installed `aport-guardrail` command (Node) or call the evaluator from Python; both use your existing passport from the framework config dir (e.g. `~/.cursor/aport/`, `~/.aport/langchain/aport/`).
+**3. Test that policy runs** — After setup, the guardrail runs automatically when your agent uses tools (Cursor hook, LangChain callback, OpenClaw plugin, etc.). To try allow/deny from the command line (any framework), use the installed `aport-guardrail` command (Node) or call the evaluator from Python; both use your existing passport from the APort framework state dir (e.g. `~/.cursor/aport/`, `~/.aport/langchain/aport/`, `~/.aport/codex/aport/`).
 
 **Node:**
 ```bash
@@ -252,26 +259,26 @@ aport-guardrail system.command.execute '{"command":"rm -rf /"}'  # DENY (blocked
 
 | What | Where |
 |------|--------|
-| **Passport & audit** | Stored in your **framework config dir** (e.g. `~/.cursor/aport/`, `~/.openclaw/aport/`, `~/.aport/langchain/aport/`). Same for all frameworks. |
+| **Passport & audit** | Stored in your **APort framework state dir** (e.g. `~/.cursor/aport/`, `~/.openclaw/aport/`, `~/.aport/langchain/aport/`, `~/.aport/codex/aport/`, `~/.aport/gemini-cli/aport/`, `~/.aport/goose/aport/`). |
 | **Audit log** | `config_dir/aport/audit.log` — one line per decision (timestamp, tool, allow/deny, policy, context). |
 | **Last decision** | `config_dir/aport/decision.json` (OAP v1.0 format). |
 
-Your framework doc (Cursor, OpenClaw, LangChain, CrewAI) describes where the config dir is and any framework-specific status commands.
+Your framework doc describes where hook config and APort state are stored for that harness.
 
-📖 **Per-framework:** [OpenClaw](docs/frameworks/openclaw.md) · [Cursor](docs/frameworks/cursor.md) · [Claude Code](docs/frameworks/claude-code.md) · [LangChain](docs/frameworks/langchain.md) · [CrewAI](docs/frameworks/crewai.md) · [DeerFlow](docs/frameworks/deerflow.md) · [n8n](docs/frameworks/n8n.md)  
+📖 **Per-framework:** [GitHub](docs/GITHUB_PROTECTION.md) · [Claude Code](docs/frameworks/claude-code.md) · [Cursor](docs/frameworks/cursor.md) · [Codex](docs/frameworks/codex.md) · [Gemini CLI](docs/frameworks/gemini-cli.md) · [Goose](docs/frameworks/goose.md) · [OpenClaw](docs/frameworks/openclaw.md) · [LangChain](docs/frameworks/langchain.md) · [CrewAI](docs/frameworks/crewai.md) · [DeerFlow](docs/frameworks/deerflow.md) · [n8n](docs/frameworks/n8n.md) · [opencode](docs/frameworks/opencode.md)
 🌐 **Hosted passport:** [Use agent_id from aport.io](docs/HOSTED_PASSPORT_SETUP.md)
 
 ---
 
-## 🔒 Enforcement Options
+## 🔒 Runtime Enforcement Options
 
-| | OpenClaw Plugin ✅ | AGENTS.md only ⚠️ |
-|---|-------------------|-------------------|
-| **Deterministic** | Yes | No |
-| **Bypass risk** | None | High |
-| **Recommended** | **Yes** | Only if plugin unavailable |
+| | Runtime hook / plugin ✅ | AGENTS.md only ⚠️ |
+|---|--------------------------|-------------------|
+| **Policy timing** | Before the tool call the host exposes | After the model decides to follow instructions |
+| **Bypass risk** | Lower, bounded by host/runtime hook coverage | High |
+| **Recommended** | **Yes** | Only as documentation or fallback |
 
-**Plugin (recommended):** Platform runs the guardrail before every tool; the model cannot skip it. This repo implements the public **plugin (before_tool_call)** integration for OpenClaw.
+**Runtime hook/plugin (recommended):** The host invokes APort before supported tool calls execute. This repo ships runtime integrations for Claude Code, Cursor, OpenClaw, LangChain, CrewAI, Codex CLI, Gemini CLI, Goose, DeerFlow setup, and n8n setup. Exact coverage depends on what each host exposes.
 **AGENTS.md:** Agent is *instructed* to call the guardrail; best-effort only.
 
 ---
@@ -401,7 +408,12 @@ User → "Delete all log files"
 
 ## 🏛️ Security model (three layers)
 
-APort enforces **identity → authorization → audit** before any tool runs. This repo implements the **plugin (Option 2)** integration: OpenClaw calls the APort extension in `before_tool_call`; the extension uses either local script or API to evaluate policy.
+APort enforces **identity → authorization → audit** before supported tools run.
+GitHub uses the Marketplace Action and OIDC; Claude Code, Cursor, Codex,
+Gemini CLI, and Goose use host command hooks; OpenClaw uses the
+`before_tool_call` plugin; LangChain/CrewAI use adapters. Each path uses the
+same passport and policy model, then either the local evaluator or hosted APort
+API evaluates the action.
 
 <div align="center">
 
@@ -512,7 +524,7 @@ See [GitHub protection](docs/GITHUB_PROTECTION.md) for the recommended setup and
 | `agent-guardrails` | Main entry — prompt for framework or pass one: `agent-guardrails openclaw \| cursor \| claude-code \| langchain \| crewai \| deerflow \| n8n`. Project target: `agent-guardrails github [--policy] [--force]`. Args after a framework are passed through (e.g. `agent-guardrails openclaw <agent_id>`). |
 | `agent-guardrails reset <framework> [--yes]` | Remove APort-owned config and hook/plugin wiring for one framework. Positional form also works: `agent-guardrails <framework> reset --yes`. |
 | `aport` | OpenClaw one-command setup (passport + plugin + wrappers). Optional: `aport <agent_id>` for hosted passport. |
-| `aport-guardrail` | Run guardrail check from the CLI (e.g. `aport-guardrail system.command.execute '{"command":"ls"}'`). Uses passport from your framework config dir. |
+| `aport-guardrail` | Run guardrail check from the CLI (e.g. `aport-guardrail system.command.execute '{"command":"ls"}'`). Uses passport from your APort framework state dir. |
 
 **Python:** After `pip install aport-agent-guardrails` you get `aport` (setup helper). For LangChain or CrewAI, install the framework package and setup:
 
@@ -543,9 +555,9 @@ Use the framework-specific doc for where config and passport live and for any ex
 | [Repo Layout](docs/REPO_LAYOUT.md) | For contributors: package layout (`bin/`, `src/`, `extensions/`) |
 | [Upgrade Guide](docs/UPGRADE.md) | Migrating between versions (e.g. 0.1.0 → 1.0.0) |
 | **Frameworks** | Per-framework setup and how guardrails run |
-| → [OpenClaw](docs/frameworks/openclaw.md) | `before_tool_call` plugin |
-| → [Cursor](docs/frameworks/cursor.md) | beforeShellExecution / preToolUse hooks, `~/.cursor/hooks.json` |
 | → [Claude Code](docs/frameworks/claude-code.md) | PreToolUse hook, `~/.claude/settings.json` |
+| → [Cursor](docs/frameworks/cursor.md) | beforeShellExecution / preToolUse hooks, `~/.cursor/hooks.json` |
+| → [OpenClaw](docs/frameworks/openclaw.md) | `before_tool_call` plugin |
 | → [LangChain / LangGraph](docs/frameworks/langchain.md) | `APortCallback` handler |
 | → [CrewAI](docs/frameworks/crewai.md) | Released hook adapter by default; native provider mode when available |
 | → [DeerFlow](docs/frameworks/deerflow.md) | Generic provider wiring via DeerFlow `config.yaml` |

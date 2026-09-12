@@ -7,6 +7,8 @@ LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/lib" && pwd)"
 source "$LIB/common.sh"
 # shellcheck source=./lib/config.sh
 source "$LIB/config.sh"
+# shellcheck source=./lib/framework-setup.sh
+source "$LIB/framework-setup.sh"
 
 APORT_HOOK_MARKER="__aport_hook"
 
@@ -19,10 +21,17 @@ if [[ -z "$framework" ]]; then
 fi
 
 yes_mode="${APORT_NONINTERACTIVE:-${CI:-}}"
+reset_scope="auto"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes | -y)
             yes_mode=1
+            ;;
+        --project)
+            reset_scope="project"
+            ;;
+        --global)
+            reset_scope="global"
             ;;
         *)
             log_error "Unknown reset option: $1"
@@ -33,7 +42,78 @@ while [[ $# -gt 0 ]]; do
 done
 
 framework="$(echo "$framework" | tr '[:upper:]' '[:lower:]')"
-config_dir="$(get_config_dir "$framework")"
+case "$framework" in
+    claude) framework="claude-code" ;;
+    gemini) framework="gemini-cli" ;;
+esac
+
+has_project_aport_codex_config() {
+    local dir="$PWD/.codex"
+    [[ -d "$dir/aport" ]] || [[ -f "$dir/hooks.json" ]] || return 1
+    [[ -f "$dir/aport/guardrail-mode.env" ]] && return 0
+    [[ -f "$dir/hooks.json" ]] && grep -Eq '__aport_hook|aport-codex-hook\.sh' "$dir/hooks.json" 2> /dev/null
+}
+
+has_project_aport_gemini_config() {
+    local dir="$PWD/.gemini"
+    [[ -d "$dir/aport" ]] || [[ -f "$dir/settings.json" ]] || return 1
+    [[ -f "$dir/aport/guardrail-mode.env" ]] && return 0
+    [[ -f "$dir/settings.json" ]] && grep -Eq '__aport_hook|aport-gemini-cli-hook\.sh' "$dir/settings.json" 2> /dev/null
+}
+
+resolve_reset_config_dir() {
+    if [[ -n "${APORT_CONFIG_DIR:-}" ]]; then
+        printf '%s' "${APORT_CONFIG_DIR/#\~/$HOME}"
+        return 0
+    fi
+
+    case "$framework" in
+        codex)
+            get_config_dir "$framework"
+            return 0
+            ;;
+        gemini-cli)
+            get_config_dir "$framework"
+            return 0
+            ;;
+    esac
+
+    get_config_dir "$framework"
+}
+
+resolve_codex_hook_config_dir() {
+    if [[ -n "${APORT_CODEX_HOOKS_DIR:-}" ]]; then
+        printf '%s' "${APORT_CODEX_HOOKS_DIR/#\~/$HOME}"
+    elif [[ "$reset_scope" = "project" ]]; then
+        printf '%s/.codex' "$PWD"
+    elif [[ "$reset_scope" = "global" ]]; then
+        printf '%s/.codex' "$HOME"
+    elif [[ -n "${APORT_CODEX_CONFIG_DIR:-}" && -f "${APORT_CODEX_CONFIG_DIR/#\~/$HOME}/hooks.json" ]]; then
+        printf '%s' "${APORT_CODEX_CONFIG_DIR/#\~/$HOME}"
+    elif has_project_aport_codex_config; then
+        printf '%s/.codex' "$PWD"
+    else
+        printf '%s/.codex' "$HOME"
+    fi
+}
+
+resolve_gemini_hook_config_dir() {
+    if [[ -n "${APORT_GEMINI_CLI_HOOKS_DIR:-}" ]]; then
+        printf '%s' "${APORT_GEMINI_CLI_HOOKS_DIR/#\~/$HOME}"
+    elif [[ "$reset_scope" = "project" ]]; then
+        printf '%s/.gemini' "$PWD"
+    elif [[ "$reset_scope" = "global" ]]; then
+        printf '%s/.gemini' "$HOME"
+    elif [[ -n "${APORT_GEMINI_CLI_CONFIG_DIR:-}" && -f "${APORT_GEMINI_CLI_CONFIG_DIR/#\~/$HOME}/settings.json" ]]; then
+        printf '%s' "${APORT_GEMINI_CLI_CONFIG_DIR/#\~/$HOME}"
+    elif has_project_aport_gemini_config; then
+        printf '%s/.gemini' "$PWD"
+    else
+        printf '%s/.gemini' "$HOME"
+    fi
+}
+
+config_dir="$(resolve_reset_config_dir)"
 config_dir="${config_dir/#\~/$HOME}"
 
 confirm_reset() {
@@ -62,13 +142,16 @@ confirm_reset() {
 backup_file() {
     local file="$1"
     if [[ -f "$file" ]]; then
-        cp "$file" "${file}.bak"
+        refuse_symlink_path "$file" || return 1
+        refuse_symlink_path "${file}.bak" || return 1
+        cp "$file" "${file}.bak" || return 1
     fi
 }
 
 remove_dir_if_exists() {
     local dir="$1"
     if [[ -d "$dir" ]]; then
+        refuse_symlink_path "$dir"
         rm -rf "$dir"
         echo "  ✅ Removed $dir"
     fi
@@ -77,6 +160,7 @@ remove_dir_if_exists() {
 remove_file_if_exists() {
     local file="$1"
     if [[ -f "$file" ]]; then
+        refuse_symlink_path "$file"
         rm -f "$file"
         echo "  ✅ Removed $file"
     fi
@@ -88,15 +172,15 @@ cleanup_claude_settings() {
         return 0
     fi
     if ! command -v jq &> /dev/null; then
-        log_warn "jq not found; leaving Claude settings intact at $settings_file"
-        return 0
+        log_error "jq not found; cannot safely remove Claude Code hook entries from $settings_file"
+        return 1
     fi
 
     local tmpfile
     tmpfile="$(mktemp "${settings_file}.XXXXXX")"
     if ! jq -e . "$settings_file" > /dev/null 2>&1; then
-        log_warn "Invalid Claude settings JSON; leaving file intact at $settings_file"
-        return 0
+        log_error "Invalid Claude settings JSON; cannot safely remove hook entries from $settings_file"
+        return 1
     fi
 
     if jq --arg marker "$APORT_HOOK_MARKER" '
@@ -123,12 +207,16 @@ cleanup_claude_settings() {
             | if ((.hooks // {}) | keys | length) == 0 then del(.hooks) else . end
         end
     ' "$settings_file" > "$tmpfile"; then
-        backup_file "$settings_file"
+        if ! backup_file "$settings_file"; then
+            rm -f "$tmpfile"
+            return 1
+        fi
         mv "$tmpfile" "$settings_file"
         echo "  ✅ Removed APort Claude Code hook entries from $settings_file"
     else
         rm -f "$tmpfile"
-        log_warn "Failed to clean Claude settings at $settings_file"
+        log_error "Failed to clean Claude settings at $settings_file"
+        return 1
     fi
 }
 
@@ -138,15 +226,15 @@ cleanup_cursor_hooks() {
         return 0
     fi
     if ! command -v jq &> /dev/null; then
-        log_warn "jq not found; leaving Cursor hooks intact at $hooks_file"
-        return 0
+        log_error "jq not found; cannot safely remove Cursor hook entries from $hooks_file"
+        return 1
     fi
 
     local tmpfile
     tmpfile="$(mktemp "${hooks_file}.XXXXXX")"
     if ! jq -e . "$hooks_file" > /dev/null 2>&1; then
-        log_warn "Invalid Cursor hooks JSON; leaving file intact at $hooks_file"
-        return 0
+        log_error "Invalid Cursor hooks JSON; cannot safely remove hook entries from $hooks_file"
+        return 1
     fi
 
     if jq --arg marker "$APORT_HOOK_MARKER" '
@@ -164,12 +252,16 @@ cleanup_cursor_hooks() {
         if ((.hooks.subagentStart // []) | length) == 0 then del(.hooks.subagentStart) else . end |
         if ((.hooks // {}) | keys | length) == 0 then del(.hooks) else . end
     ' "$hooks_file" > "$tmpfile"; then
-        backup_file "$hooks_file"
+        if ! backup_file "$hooks_file"; then
+            rm -f "$tmpfile"
+            return 1
+        fi
         mv "$tmpfile" "$hooks_file"
         echo "  ✅ Removed APort Cursor hook entries from $hooks_file"
     else
         rm -f "$tmpfile"
-        log_warn "Failed to clean Cursor hooks at $hooks_file"
+        log_error "Failed to clean Cursor hooks at $hooks_file"
+        return 1
     fi
 }
 
@@ -219,14 +311,193 @@ cleanup_n8n() {
 
 cleanup_claude() {
     local settings_file="$config_dir/settings.json"
-    remove_dir_if_exists "$config_dir/aport"
     cleanup_claude_settings "$settings_file"
+    remove_dir_if_exists "$config_dir/aport"
 }
 
 cleanup_cursor() {
     local hooks_file="$config_dir/hooks.json"
-    remove_dir_if_exists "$config_dir/aport"
     cleanup_cursor_hooks "$hooks_file"
+    remove_dir_if_exists "$config_dir/aport"
+}
+
+cleanup_codex_hooks() {
+    local hooks_file="${1:-$config_dir/hooks.json}"
+    [[ -f "$hooks_file" ]] || return 0
+    refuse_symlink_path "$hooks_file"
+    if ! command -v jq &> /dev/null; then
+        log_error "jq not found; cannot safely remove Codex hook entries from $hooks_file"
+        return 1
+    fi
+    if ! jq -e . "$hooks_file" > /dev/null 2>&1; then
+        log_error "Invalid Codex hooks JSON; cannot safely remove hook entries from $hooks_file"
+        return 1
+    fi
+
+    local tmpfile
+    tmpfile="$(mktemp "${hooks_file}.XXXXXX")"
+    if jq --arg marker "$APORT_HOOK_MARKER" '
+        def is_aport_codex_hook:
+            (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-codex-hook\\.sh($|[[:space:]])"));
+        def strip_groups:
+            (. // [])
+            | map(.hooks = ((.hooks // []) | map(select(is_aport_codex_hook | not))))
+            | map(select(((.hooks // []) | length) > 0));
+        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | strip_groups) |
+        .hooks.PostToolUse = ((.hooks.PostToolUse // []) | strip_groups) |
+        .hooks.PermissionRequest = ((.hooks.PermissionRequest // []) | strip_groups) |
+        if ((.hooks.PreToolUse // []) | length) == 0 then del(.hooks.PreToolUse) else . end |
+        if ((.hooks.PostToolUse // []) | length) == 0 then del(.hooks.PostToolUse) else . end |
+        if ((.hooks.PermissionRequest // []) | length) == 0 then del(.hooks.PermissionRequest) else . end |
+        if ((.hooks // {}) | keys | length) == 0 then del(.hooks) else . end
+    ' "$hooks_file" > "$tmpfile"; then
+        if ! backup_file "$hooks_file"; then
+            rm -f "$tmpfile"
+            return 1
+        fi
+        mv "$tmpfile" "$hooks_file"
+        echo "  ✅ Removed APort Codex hook entries from $hooks_file"
+    else
+        rm -f "$tmpfile"
+        log_error "Failed to clean Codex hooks at $hooks_file"
+        return 1
+    fi
+}
+
+cleanup_gemini_settings() {
+    local settings_file="${1:-$config_dir/settings.json}"
+    [[ -f "$settings_file" ]] || return 0
+    refuse_symlink_path "$settings_file"
+    if ! command -v jq &> /dev/null; then
+        log_error "jq not found; cannot safely remove Gemini CLI hook entries from $settings_file"
+        return 1
+    fi
+    if ! jq -e . "$settings_file" > /dev/null 2>&1; then
+        log_error "Invalid Gemini CLI settings JSON; cannot safely remove hook entries from $settings_file"
+        return 1
+    fi
+
+    local tmpfile
+    tmpfile="$(mktemp "${settings_file}.XXXXXX")"
+    if jq --arg marker "$APORT_HOOK_MARKER" '
+        def is_aport_gemini_hook:
+            (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-gemini-cli-hook\\.sh($|[[:space:]])"));
+        def strip_groups:
+            (. // [])
+            | map(.hooks = ((.hooks // []) | map(select(is_aport_gemini_hook | not))))
+            | map(select(((.hooks // []) | length) > 0));
+        .hooks.BeforeTool = ((.hooks.BeforeTool // []) | strip_groups) |
+        if ((.hooks.BeforeTool // []) | length) == 0 then del(.hooks.BeforeTool) else . end |
+        if ((.hooks // {}) | keys | length) == 0 then del(.hooks) else . end
+    ' "$settings_file" > "$tmpfile"; then
+        if ! backup_file "$settings_file"; then
+            rm -f "$tmpfile"
+            return 1
+        fi
+        mv "$tmpfile" "$settings_file"
+        echo "  ✅ Removed APort Gemini CLI hook entries from $settings_file"
+    else
+        rm -f "$tmpfile"
+        log_error "Failed to clean Gemini CLI settings at $settings_file"
+        return 1
+    fi
+}
+
+cleanup_goose() {
+    local project_plugin_dir="$PWD/.agents/plugins/aport-guardrail"
+    local global_plugin_dir="$HOME/.agents/plugins/aport-guardrail"
+    local custom_plugin_dir="${APORT_GOOSE_PLUGIN_DIR:-}"
+    custom_plugin_dir="${custom_plugin_dir/#\~/$HOME}"
+    local selected_scope="$reset_scope"
+
+    is_aport_goose_plugin() {
+        local plugin_dir="$1"
+        [[ -f "$plugin_dir/plugin.json" ]] || return 1
+        if command -v jq > /dev/null 2>&1; then
+            jq -e '.name == "aport-guardrail"' "$plugin_dir/plugin.json" > /dev/null 2>&1
+            return $?
+        fi
+        grep -Eq '"name"[[:space:]]*:[[:space:]]*"aport-guardrail"' "$plugin_dir/plugin.json" 2> /dev/null
+    }
+
+    remove_goose_plugin_if_aport() {
+        local plugin_dir="$1"
+        [[ -d "$plugin_dir" ]] || return 0
+        if is_aport_goose_plugin "$plugin_dir"; then
+            remove_dir_if_exists "$plugin_dir"
+        fi
+    }
+
+    goose_plugin_exists_after_cleanup() {
+        is_aport_goose_plugin "$project_plugin_dir" && return 0
+        is_aport_goose_plugin "$global_plugin_dir" && return 0
+        if [[ -n "$custom_plugin_dir" && "$custom_plugin_dir" != "$project_plugin_dir" && "$custom_plugin_dir" != "$global_plugin_dir" ]]; then
+            is_aport_goose_plugin "$custom_plugin_dir" && return 0
+        fi
+        return 1
+    }
+
+    cleanup_goose_state_if_unreferenced() {
+        if [[ "$selected_scope" = "project" || "$selected_scope" = "global" ]] || goose_plugin_exists_after_cleanup; then
+            echo "  ✅ Preserved shared APort Goose state at $config_dir/aport"
+        else
+            remove_dir_if_exists "$config_dir/aport"
+        fi
+    }
+
+    remove_selected_goose_plugin() {
+        local fallback_plugin_dir="$1"
+        if [[ -n "$custom_plugin_dir" ]]; then
+            remove_goose_plugin_if_aport "$custom_plugin_dir"
+        else
+            remove_goose_plugin_if_aport "$fallback_plugin_dir"
+        fi
+    }
+
+    if [[ "$selected_scope" = "auto" ]]; then
+        if [[ -n "$custom_plugin_dir" ]]; then
+            selected_scope="custom"
+        elif is_aport_goose_plugin "$project_plugin_dir"; then
+            selected_scope="project"
+        else
+            selected_scope="global"
+        fi
+    fi
+
+    case "$selected_scope" in
+        project)
+            remove_selected_goose_plugin "$project_plugin_dir"
+            cleanup_goose_state_if_unreferenced
+            ;;
+        global)
+            remove_selected_goose_plugin "$global_plugin_dir"
+            cleanup_goose_state_if_unreferenced
+            ;;
+        custom)
+            remove_goose_plugin_if_aport "$custom_plugin_dir"
+            cleanup_goose_state_if_unreferenced
+            ;;
+    esac
+}
+
+cleanup_command_hook_state() {
+    local framework_name="$1"
+    local hook_config_dir="$2"
+    local project_config_dir="$3"
+    local shared_state_dir="$4"
+
+    if [[ "$reset_scope" != "global" ]]; then
+        remove_dir_if_exists "$project_config_dir/aport"
+    fi
+    if [[ "$shared_state_dir" != "$project_config_dir" && ("$hook_config_dir" = "$project_config_dir" || "$reset_scope" = "project") ]]; then
+        echo "  ✅ Preserved shared APort $framework_name state at $shared_state_dir/aport"
+        return 0
+    fi
+    if [[ "$reset_scope" = "global" && "$shared_state_dir" != "$hook_config_dir" ]]; then
+        echo "  ✅ Preserved shared APort $framework_name state at $shared_state_dir/aport"
+        return 0
+    fi
+    remove_dir_if_exists "$shared_state_dir/aport"
 }
 
 cleanup_openclaw() {
@@ -257,6 +528,19 @@ case "$framework" in
         ;;
     cursor)
         cleanup_cursor
+        ;;
+    codex)
+        codex_hook_dir="$(resolve_codex_hook_config_dir)"
+        cleanup_codex_hooks "$codex_hook_dir/hooks.json"
+        cleanup_command_hook_state "Codex" "$codex_hook_dir" "$PWD/.codex" "$config_dir"
+        ;;
+    gemini-cli)
+        gemini_hook_dir="$(resolve_gemini_hook_config_dir)"
+        cleanup_gemini_settings "$gemini_hook_dir/settings.json"
+        cleanup_command_hook_state "Gemini CLI" "$gemini_hook_dir" "$PWD/.gemini" "$config_dir"
+        ;;
+    goose)
+        cleanup_goose
         ;;
     openclaw)
         cleanup_openclaw

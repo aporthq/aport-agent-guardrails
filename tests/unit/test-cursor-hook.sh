@@ -79,12 +79,12 @@ echo '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' \
         OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT0C" 2> /dev/null
 EXIT0C=$?
 set -e
-[[ "$EXIT0C" -eq 0 ]] || {
-    echo "FAIL: oversized stdin should allow in warn mode, got $EXIT0C (output: $(cat "$OUT0C"))" >&2
+[[ "$EXIT0C" -eq 2 ]] || {
+    echo "FAIL: oversized stdin should return Cursor deny JSON in warn mode, got $EXIT0C (output: $(cat "$OUT0C"))" >&2
     exit 1
 }
-jq -e '.permission == "allow" and .allowed == true and (.reason | contains("oap.input_too_large"))' "$OUT0C" > /dev/null || {
-    echo "FAIL: oversized stdin should return Cursor warn JSON with oap.input_too_large" >&2
+jq -e '.permission == "deny" and .allowed == false and (.reason | contains("oap.input_too_large"))' "$OUT0C" > /dev/null || {
+    echo "FAIL: oversized stdin should fail closed with oap.input_too_large even in warn mode" >&2
     cat "$OUT0C" >&2
     exit 1
 }
@@ -96,7 +96,7 @@ fi
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
-echo "  ✅ oversized stdin: warn mode allows with warning"
+echo "  ✅ oversized stdin: warn mode still fails closed"
 
 # Byte cap must count UTF-8 bytes, not shell characters. Two emoji are 8 bytes.
 # Use octal escapes to keep this source file ASCII-stable.
@@ -156,6 +156,7 @@ echo "  ✅ multibyte oversized stdin: byte cap enforced"
 run_hook() {
     local desc="$1" input="$2" expect_exit="$3" expect_field="$4"
     local out="$TEST_DIR/hook-out-$RANDOM.txt"
+    LAST_HOOK_OUTPUT="$out"
     set +e
     echo "$input" | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
         OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$out" 2> /dev/null
@@ -183,6 +184,9 @@ run_hook "beforeShellExecution: allow (ls)" \
 run_hook "beforeShellExecution: deny (rm -rf)" \
     '{"command":"rm -rf /tmp/x"}' 2 '"permission":"deny"'
 
+run_hook "beforeShellExecution: missing command fails closed" \
+    '{"cwd":"/tmp"}' 2 '"permission":"deny"'
+
 # --- preToolUse: Shell ---
 run_hook "preToolUse Shell: allow (ls)" \
     '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
@@ -192,6 +196,9 @@ run_hook "preToolUse run_terminal_cmd: allow (ls)" \
 
 run_hook "preToolUse Shell: deny (sudo)" \
     '{"tool_name":"Shell","tool_input":{"command":"sudo reboot"}}' 2 '"permission":"deny"'
+
+run_hook "preToolUse Shell: missing command fails closed" \
+    '{"tool_name":"Shell","tool_input":{"description":"missing command"}}' 2 '"permission":"deny"'
 
 # --- preToolUse: Read (evaluator: allow allowed path) ---
 run_hook "preToolUse Read: allow (allowed path)" \
@@ -206,12 +213,36 @@ run_hook "preToolUse Read: deny (.env sensitive path)" \
 run_hook "preToolUse present_file: deny (.env sensitive path)" \
     '{"tool_name":"present_file","tool_input":{"path":"/repo/.env.local"}}' 2 '"permission":"deny"'
 
-# --- preToolUse: Grep (allow without evaluator) ---
-run_hook "preToolUse Grep: allow (no evaluator)" \
-    '{"tool_name":"Grep","tool_input":{"pattern":"TODO"}}' 0 '"permission":"allow"'
+# --- preToolUse: Grep/search reads ---
+run_hook "preToolUse Grep: missing path fails closed" \
+    '{"tool_name":"Grep","tool_input":{"pattern":"TODO"}}' 2 '"permission":"deny"'
 
-run_hook "preToolUse grep_search: allow (no evaluator)" \
-    '{"tool_name":"grep_search","tool_input":{"pattern":"TODO"}}' 0 '"permission":"allow"'
+mkdir -p "$TEST_DIR/cursor-search-root"
+run_hook "preToolUse Grep: directory search fails closed" \
+    "{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"SECRET\",\"path\":\"$TEST_DIR/cursor-search-root\"}}" 2 '"permission":"deny"'
+grep -q 'oap.recursive_search_unsupported' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected recursive search deny for directory-scoped Grep" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+run_hook "preToolUse Grep: directory search still fails closed in warn mode" \
+    "{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"SECRET\",\"path\":\"$TEST_DIR/cursor-search-root\"}}" 2 '"permission":"deny"'
+grep -q 'oap.recursive_search_unsupported' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected recursive search deny for directory-scoped Grep in warn mode" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+
+run_hook "preToolUse grep_search: path is evaluated" \
+    '{"tool_name":"grep_search","tool_input":{"pattern":"TODO","dir_path":"/repo/.ssh"}}' 2 '"permission":"deny"'
 
 # --- preToolUse: Write ---
 run_hook "preToolUse Write: allow" \
@@ -232,8 +263,13 @@ run_hook "preToolUse Task: allow" \
 run_hook "preToolUse Agent: allow" \
     '{"tool_name":"Agent","tool_input":{"description":"explore repo"}}' 0 '"permission":"allow"'
 
-run_hook "preToolUse WebSearch: allow" \
-    '{"tool_name":"WebSearch","tool_input":{"query":"aport guardrails"}}' 0 '"permission":"allow"'
+run_hook "preToolUse WebSearch without URL/domain: deny" \
+    '{"tool_name":"WebSearch","tool_input":{"query":"aport guardrails"}}' 2 '"permission":"deny"'
+grep -q 'oap.missing_required_context' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected missing context deny for WebSearch without URL/domain" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
 
 run_hook "preToolUse Edit: allow" \
     '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
@@ -242,10 +278,58 @@ run_hook "preToolUse Edit: allow" \
 run_hook "preToolUse MCP:tool: allow" \
     '{"tool_name":"MCP:github_search","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
 
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_restricted_cursor_mcp",
+  "agent_id": "ap_restricted_cursor_mcp",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "mcp.tool.execute": {
+      "allowed_servers": ["github"],
+      "allowed_tools": ["issues.*"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "preToolUse MCP cannot spoof server through tool input" \
+    '{"tool_name":"mcp__evil__issues_list","tool_input":{"server":"github","tool":"issues.list","id":"x"}}' 2 '"permission":"deny"'
+grep -q 'oap.mcp_server_not_allowed' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected Cursor MCP spoof to deny on server allowlist" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
+run_hook "preToolUse ReadMcpResourceTool cannot spoof server through URI" \
+    '{"tool_name":"ReadMcpResourceTool","tool_input":{"server":"evil","tool":"resources.read","uri":"mcp://github/repo/README.md"}}' 2 '"permission":"deny"'
+grep -q 'oap.mcp_server_not_allowed' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected Cursor MCP resource spoof to deny on routing server" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
+run_hook "beforeMCPExecution trusts native server metadata" \
+    '{"hook_event_name":"beforeMCPExecution","tool_name":"issues.list","server":"github","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
+
+run_hook "legacy MCP event preserves top-level server metadata" \
+    '{"tool_name":"issues.list","server":"github","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "preToolUse ReadMcpResourceTool: preserve resource operation" \
     '{"tool_name":"ReadMcpResourceTool","mcp_server_name":"github","tool_input":{"tool":"github.resources.read","uri":"mcp://github/repo/README.md"}}' 0 '"permission":"allow"'
-tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '.context.tool == "github.resources.read" and .context.mcp_tool == "github.resources.read"' > /dev/null || {
+tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '
+    .context.tool == "github.resources.read"
+    and .context.mcp_tool == "github.resources.read"
+    and (.context.parameter_keys | index("uri"))
+    and (.context | has("tool_input") | not)
+    and (.context | has("parameters") | not)
+' > /dev/null || {
     echo "FAIL: ReadMcpResourceTool should evaluate the resource operation, not the wrapper tool name" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
@@ -256,12 +340,23 @@ run_hook "preToolUse unknown: deny (fail-closed)" \
     '{"tool_name":"SomethingNew","tool_input":{}}' 2 '"permission":"deny"'
 
 # --- beforeMCPExecution ---
-run_hook "beforeMCPExecution: allow" \
+run_hook "beforeMCPExecution: allow with legacy server field" \
     '{"tool_name":"github_search","tool_input":{"query":"test"},"server":"github","url":"http://localhost:3000"}' 0 '"permission":"allow"'
 
 # --- subagentStart ---
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "subagentStart: allow" \
-    '{"subagent_id":"abc-123","subagent_type":"worker","task":"run unit tests"}' 0 '"permission":"allow"'
+    '{"subagent_id":"abc-123","subagent_type":"worker","task":"secret_task_should_not_persist"}' 0 '"permission":"allow"'
+if grep -q 'secret_task_should_not_persist' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Cursor session decisions must not persist raw subagent prompts" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '.guardrail_tool == "session.create" and .context.description_length > 0 and .context.subagent_type == "worker"' > /dev/null || {
+    echo "FAIL: Cursor subagent context should include description length and subagent type only" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
 
 # --- Legacy Copilot-style ---
 run_hook "Copilot-style: allow (npm install)" \
@@ -279,8 +374,8 @@ cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
 EOF
-run_hook "Invalid JSON: warn mode allows with warning" \
-    '{"tool_name":"Shell","tool_input":' 0 '"permission":"allow"'
+run_hook "Invalid JSON: warn mode still denies" \
+    '{"tool_name":"Shell","tool_input":' 2 '"permission":"deny"'
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
@@ -300,11 +395,11 @@ APORT_ENFORCEMENT=warn
 APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
 APORT_API_KEY=apk_cursor_secret_should_redact
 EOF
-run_hook "Mode=api warn with unreachable API: allow with warning" \
-    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
+run_hook "Mode=api warn with unreachable API: deny" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 2 '"permission":"deny"'
 WARN_OUT="$(ls -t "$TEST_DIR"/hook-out-*.txt | head -n 1)"
-grep -q "APort warning" "$WARN_OUT" || {
-    echo "FAIL: warn mode should emit APort warning" >&2
+grep -q "oap.evaluation_error" "$WARN_OUT" || {
+    echo "FAIL: unreachable API should surface evaluation error" >&2
     cat "$WARN_OUT" >&2
     exit 1
 }

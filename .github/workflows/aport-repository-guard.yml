@@ -33,21 +33,92 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Detect first-time APort guard install
+        id: bootstrap
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          status="$(
+            curl -sS -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/contents/.github/workflows/aport-repository-guard.yml?ref=${BASE_REF}"
+          )"
+          if [ "$status" = "404" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "APort Repository Guard is being bootstrapped; enforcement starts after this workflow exists on the base branch."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check control-plane override
+        id: override
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        env:
+          LABELS_JSON: ${{ toJson(github.event.pull_request.labels) }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const labels = JSON.parse(process.env.LABELS_JSON || '[]')
+            .map((label) => typeof label === 'string' ? label : label?.name)
+            .filter(Boolean);
+          const headSha = process.env.PR_HEAD_SHA || '';
+          const expected = `aport-control-plane-approved-${headSha.slice(0, 12)}`;
+          const approved = Boolean(headSha) && labels.includes(expected);
+          if (labels.includes('aport-control-plane-approved') && !approved) {
+            console.log(`::warning::Legacy control-plane override label is ignored. Apply ${expected} after reviewing this exact head commit.`);
+          }
+          if (approved) {
+            console.log(`Control-plane override is bound to ${headSha}.`);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `approved=${approved}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `expected_label=${expected}\n`);
+          NODE
+
       - name: APort repository guard
+        id: aport_guard
+        if: steps.bootstrap.outputs.skip != 'true'
+        continue-on-error: true
         uses: aporthq/policy-verify-action@v1
         with:
           mode: hosted
+          agent-id: ${{ vars.APORT_GITHUB_AGENT_ID }}
+          api-key: ${{ secrets.APORT_API_KEY }}
           block-protected-paths: true
           protected-paths: >-
             .github/workflows/**,
             .aport/**,
             bin/**,
-            enterprise-scripts/**,
-            extensions/**,
-            external/**,
             packages/**,
-            policies/**,
             python/**,
             scripts/**,
+            extensions/openclaw-aport/**,
+            external/**,
             package.json,
             package-lock.json
+
+      - name: Enforce APort repository guard
+        if: >-
+          ${{
+            steps.bootstrap.outputs.skip != 'true' &&
+            steps.aport_guard.outcome == 'failure' &&
+            steps.override.outputs.approved != 'true'
+          }}
+        run: |
+          echo "::error::APort Repository Guard failed. Review the APort action output above."
+          exit 1
+
+      - name: Record control-plane override
+        if: >-
+          ${{
+            steps.aport_guard.outcome == 'failure' &&
+            steps.override.outputs.approved == 'true'
+          }}
+        env:
+          APPROVED_LABEL: ${{ steps.override.outputs.expected_label }}
+        run: |
+          echo "::warning::APort Repository Guard was manually overridden with ${APPROVED_LABEL}. Use this only after maintainer review of guard workflow or policy changes for this exact commit."

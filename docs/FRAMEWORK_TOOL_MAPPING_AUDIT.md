@@ -25,8 +25,28 @@ Canonical pack mapping for **generic** tool names: `packages/core/src/core/tool-
 | **LangChain / LangGraph** | `APortCallback` / `APortGuardrailCallback` | `tool_to_pack_id(tool.name)` only | Uses JSON `default` → `system.command.execute.v1` |
 | **CrewAI** | Python/TS hook middleware | `tool_to_pack_id(tool_name)` only | Same as LangChain |
 | **DeerFlow** | `OAPGuardrailProvider` | `tool_to_pack_id(tool_name)` only | Same as LangChain |
-| **n8n** | Not shipped | — | — |
+| **n8n** | Setup available / node coming soon | — | — |
+| **Codex CLI** | `bin/aport-codex-hook.sh` | Host name -> shared command adapter -> existing evaluator | **Fail-closed** |
+| **Gemini CLI** | `bin/aport-gemini-cli-hook.sh` | Host name -> shared command adapter -> existing evaluator | **Fail-closed** |
+| **Goose** | `bin/aport-goose-hook.sh` through Goose Open Plugin | Host name -> shared command adapter -> existing evaluator | **Fail-closed** in enforce mode; hook failures block via `on_failure: block` |
+| **opencode** | Gated | — | Setup exits until installed-version plugin smoke test passes |
 | **Generic CLI** | `aport-guardrail-bash.sh` | JSON only | Deny if no rule and no default |
+
+## Harness naming
+
+Use the creator's CLI name as the user-facing APort target where possible:
+
+| Creator CLI | APort target | Current doc status |
+|-------------|--------------|--------------------|
+| `claude` | `claude` / `claude-code` | Shipped |
+| `codex` | `codex` | Beta command-hook |
+| `gemini` | `gemini` / `gemini-cli` | Beta command-hook |
+| `goose` | `goose` | Beta Open Plugin command-hook |
+| `opencode` | `opencode` | Gated |
+
+Do not describe opencode as supported until the corresponding runtime can fail
+closed in a real installed-version smoke test. The generic provider can be used
+by custom code, but that is not the same as a released harness integration.
 
 ---
 
@@ -37,7 +57,8 @@ Canonical pack mapping for **generic** tool names: `packages/core/src/core/tool-
 | Host tool | Guardrail id | Policy pack | Capability |
 |-----------|--------------|-------------|------------|
 | `Bash`, `PowerShell`, `Monitor` | `bash` | `system.command.execute.v1` | `system.command.execute` |
-| `Read`, `Glob`, `Grep`, `LSP`, MCP list/read/wait tools, `TaskGet`/`TaskList`, `CronList`, … | *(allow, no evaluator)* | — | — |
+| `Read`, `Grep` and path-based read aliases | `read` | `data.file.read.v1` | `data.file.read` |
+| `Glob`, `LSP`, MCP list/wait tools, `TaskGet`/`TaskList`, `CronList`, … | *(allow, no evaluator)* | — | — |
 | `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `TodoWrite`, … | `write` | `data.file.write.v1` | `data.file.write` |
 | `WebSearch`, `WebFetch` | `websearch` | `web.fetch.v1` | `web.fetch` |
 | `Browser` | `browser` | `web.browser.v1` | `web.browser` |
@@ -53,7 +74,11 @@ Programmatic map: `packages/claude-code/src/claudeCodeTools.ts`.
 
 **Documented preToolUse tools** ([Cursor hooks](https://cursor.com/docs/agent/hooks)): `Shell`, `Read`, `Write`, `Grep`, `Delete`, `Task`, `WebSearch` (when emitted), `Agent`, `Edit`, MCP (`MCP:…` / `mcp:…`), plus `beforeShellExecution` / `subagentStart` events.
 
-Hook aligned with Claude Code (v1.0.27+): `WebSearch`, `WebFetch`, `Agent`, `Edit`, `ApplyPatch`, `browser`, `cron`, MCP variants. Read-family tools still skip the evaluator for latency.
+Hook aligned with Claude Code (v1.0.27+): `WebSearch`, `WebFetch`, `Agent`,
+`Edit`, `ApplyPatch`, `browser`, `cron`, MCP variants. Path-based reads and
+Grep/search payloads with a concrete path route through `data.file.read.v1`.
+Metadata-only search/list events without a single path are allowed without an
+evaluator call.
 
 **Caveats (upstream, not APort):**
 
@@ -79,6 +104,78 @@ Hook aligned with Claude Code (v1.0.27+): `WebSearch`, `WebFetch`, `Agent`, `Edi
 | `git.*` | `code.repository.merge.v1` | `repo.merge` / `repo.pr.create` |
 
 Plugin: `extensions/openclaw-aport/tool-mapping.js`. Unmapped tools are denied unless `allowUnmappedTools: true` is explicitly configured.
+
+---
+
+## Codex CLI
+
+Reviewed against official Codex hook docs: <https://learn.chatgpt.com/docs/hooks>.
+
+| Codex tool | Guardrail id | Policy pack |
+|------------|--------------|-------------|
+| `Bash`, shell/exec aliases | `bash` | `system.command.execute.v1` |
+| single-target `apply_patch`, `Write`, `Edit`, `MultiEdit`, delete/replace aliases | `write` | `data.file.write.v1` |
+| path-based `Read`, `read_file`, `view_image`, `Grep` | `read` | `data.file.read.v1` |
+| `WebFetch`, `WebSearch` | `websearch` | `web.fetch.v1` |
+| MCP tools and resource reads | `mcp.tool` | `mcp.tool.execute.v1` |
+| `Agent`, `Task`, subagent/send-message aliases | `session.create` | `agent.session.create.v1` |
+| `PostToolUse` | — | Silent allow; APort does not forward tool output |
+
+The wrapper supports `PermissionRequest` if manually wired, using Codex's
+permission-decision response shape, but setup installs only `PreToolUse` to
+avoid double-counting hosted decisions. Current Codex collaboration tool names
+such as `spawn_agent` and `collaboration.spawn_agent` map to
+`agent.session.create.v1`. Unknown effectful tools, shell calls without a
+command, and multi-target `apply_patch` payloads are denied in enforce mode.
+Metadata-only listing/glob tools may be allowed without an evaluator, but
+network-backed search is policy-checked. If a web/search payload has no concrete
+URL or domain, local enforce mode fails closed because domain policy cannot be
+evaluated safely.
+
+---
+
+## Gemini CLI
+
+Reviewed against Gemini CLI hook docs: <https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md>.
+
+| Gemini CLI tool | Guardrail id | Policy pack |
+|-----------------|--------------|-------------|
+| `run_shell_command` | `bash` | `system.command.execute.v1` |
+| `write_file`, `replace`, edit aliases | `write` | `data.file.write.v1` |
+| `read_file`, `list_directory`, single-target non-glob `read_many_files`, explicit path-based reads | `read` | `data.file.read.v1` |
+| `web_fetch`, `google_web_search` | `websearch` | `web.fetch.v1` |
+| MCP tools | `mcp.tool` | `mcp.tool.execute.v1` |
+
+Utility tools such as memory/todo/user-prompt helpers are allowed without an
+evaluator call. Populated `mcp_context` takes precedence over built-in name
+matching and routes to `mcp.tool.execute.v1`. Multi-target or glob-expanded
+`read_many_files` calls and recursive `grep_search` directory scans fail closed
+because the local evaluator authorizes one concrete read target at a time.
+Missing `tool_name`, missing shell command context, and unknown effectful tools
+are denied in enforce mode. Local web checks enforce configured
+`allowed_domains`, `blocked_domains`, and method limits when URL/domain context
+is available.
+
+---
+
+## Goose
+
+Reviewed against Goose hook docs: <https://goose-docs.ai/docs/guides/context-engineering/hooks/>.
+
+| Goose tool | Guardrail id | Policy pack |
+|------------|--------------|-------------|
+| `developer__shell`, shell/exec aliases | `bash` | `system.command.execute.v1` |
+| `developer__write`, edit aliases, mutating `developer__text_editor` commands | `write` | `data.file.write.v1` |
+| `developer__text_editor` `view`/`read`/`open` commands | `read` | `data.file.read.v1` |
+| `developer__tree`, read/read-image aliases | `read` | `data.file.read.v1` |
+| web fetch/browser-like aliases | `websearch` | `web.fetch.v1` |
+| MCP-style `server__tool` | `mcp.tool` | `mcp.tool.execute.v1` |
+
+The installer writes a Goose Open Plugin with `PreToolUse`. In enforce mode,
+`on_failure: block` prevents hook runtime failures from silently allowing tool
+execution. Missing `tool_name` and missing shell command context are treated as
+host-schema drift and fail closed. Local MCP calls enforce server/tool
+allowlists when Goose supplies that context.
 
 ---
 
@@ -126,7 +223,7 @@ There is **no** `cron.v1` policy; scheduled-task tools map to `agent.session.cre
 |-------|--------|
 | `packages/core` and `python/.../tool-pack-mapping.json` identical | Enforced in `tests/unit/test-tool-pack-mapping.sh` |
 | Bash `resolve_policy_id_from_tool_name` fail-closed on unknown | Yes — JSON `default` is **not** applied in bash (adapters still use default) |
-| Hooks fail-closed on unknown host tools | Claude Code + Cursor |
+| Hooks fail-closed on unknown host tools | Claude Code, Cursor, Codex, Gemini CLI, Goose |
 | `cronlist` → read, not session | Fixed (avoid bare `cron` prefix) |
 | OpenClaw `cronlist` before `cron*` match | Fixed (explicit tool names only) |
 | Published npm tarball includes mapping JSON | `python/aport_guardrails/core/tool-pack-mapping.json` in root `package.json` `files` |

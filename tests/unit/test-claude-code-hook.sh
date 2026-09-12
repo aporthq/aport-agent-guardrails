@@ -73,7 +73,7 @@ cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
 EOF
-echo "  Test: oversized stdin in warn mode -> structured allow..."
+echo "  Test: oversized stdin in warn mode -> structured deny..."
 OUT0C="$TEST_DIR/claude-oversized-input-warn.txt"
 set +e
 echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
@@ -82,11 +82,11 @@ echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
 EXIT0C=$?
 set -e
 [[ "$EXIT0C" -eq 0 ]] || {
-    echo "FAIL: expected exit 0 with structured allow for oversized warn input, got $EXIT0C" >&2
+    echo "FAIL: expected exit 0 with structured deny for oversized warn input, got $EXIT0C" >&2
     exit 1
 }
-grep -q 'permissionDecision.*allow' "$OUT0C" || {
-    echo "FAIL: expected structured allow payload for oversized warn input" >&2
+grep -q 'permissionDecision.*deny' "$OUT0C" || {
+    echo "FAIL: expected structured deny payload for oversized warn input" >&2
     cat "$OUT0C" >&2
     exit 1
 }
@@ -95,20 +95,15 @@ grep -q 'oap.input_too_large' "$OUT0C" || {
     cat "$OUT0C" >&2
     exit 1
 }
-grep -q 'systemMessage' "$OUT0C" || {
-    echo "FAIL: warn mode should include Claude Code systemMessage for user-visible warning" >&2
-    cat "$OUT0C" >&2
-    exit 1
-}
 grep -q 'Review:' "$OUT0C" || {
-    echo "FAIL: warn mode should include remediation/review reference" >&2
+    echo "FAIL: oversized input deny should include remediation/review reference" >&2
     cat "$OUT0C" >&2
     exit 1
 }
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
-echo "  ✅ Oversized input: warn mode allows with warning"
+echo "  ✅ Oversized input: warn mode still fails closed"
 
 # shellcheck source=bin/lib/hook-runtime.sh
 source "$REPO_ROOT/bin/lib/hook-runtime.sh"
@@ -230,6 +225,28 @@ grep -q 'permissionDecision.*deny' "$OUT3" || {
 }
 echo "  ✅ Deny: hookSpecificOutput.permissionDecision deny"
 
+echo "  Test: Bash missing command -> deny..."
+OUT3B="$TEST_DIR/claude-deny-empty-command.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"description":"missing command"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" "$HOOK_SCRIPT" > "$OUT3B" 2> /dev/null
+EXIT3B=$?
+set -e
+[[ "$EXIT3B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Bash missing command, got $EXIT3B" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT3B" || {
+    echo "FAIL: expected structured deny payload for Bash missing command" >&2
+    cat "$OUT3B" >&2
+    exit 1
+}
+grep -q 'oap.missing_command' "$OUT3B" || {
+    echo "FAIL: expected missing-command reason" >&2
+    cat "$OUT3B" >&2
+    exit 1
+}
+echo "  ✅ Bash missing command: structured deny"
+
 # 4. Deny: Unknown tool (fail-closed)
 echo "  Test: Unknown tool -> deny (fail-closed)..."
 OUT4="$TEST_DIR/claude-deny-unknown.txt"
@@ -259,6 +276,80 @@ EXIT6=$?
 }
 echo "  ✅ Glob: exit 0"
 
+echo "  Test: Grep without path -> deny..."
+OUT6B="$TEST_DIR/claude-deny-grep-no-path.txt"
+set +e
+echo '{"tool_name":"Grep","tool_input":{"pattern":"SECRET"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT6B" 2> /dev/null
+EXIT6B=$?
+set -e
+[[ "$EXIT6B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Grep without path, got $EXIT6B" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT6B" || {
+    echo "FAIL: expected structured deny payload for Grep without path" >&2
+    cat "$OUT6B" >&2
+    exit 1
+}
+grep -q 'oap.missing_file_path' "$OUT6B" || {
+    echo "FAIL: expected missing-file-path reason" >&2
+    cat "$OUT6B" >&2
+    exit 1
+}
+echo "  ✅ Grep without path: structured deny"
+
+echo "  Test: Grep directory target -> deny..."
+mkdir -p "$TEST_DIR/claude-search-root"
+OUT6C="$TEST_DIR/claude-deny-grep-directory.txt"
+set +e
+echo "{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"SECRET\",\"path\":\"$TEST_DIR/claude-search-root\"}}" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT6C" 2> /dev/null
+EXIT6C=$?
+set -e
+[[ "$EXIT6C" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Grep directory target, got $EXIT6C" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT6C" || {
+    echo "FAIL: expected structured deny payload for Grep directory target" >&2
+    cat "$OUT6C" >&2
+    exit 1
+}
+grep -q 'oap.recursive_search_unsupported' "$OUT6C" || {
+    echo "FAIL: expected recursive-search reason" >&2
+    cat "$OUT6C" >&2
+    exit 1
+}
+echo "  ✅ Grep directory target: structured deny"
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+echo "  Test: Grep directory target in warn mode -> deny..."
+OUT6D="$TEST_DIR/claude-deny-grep-directory-warn.txt"
+set +e
+echo "{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"SECRET\",\"path\":\"$TEST_DIR/claude-search-root\"}}" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT6D" 2> /dev/null
+EXIT6D=$?
+set -e
+[[ "$EXIT6D" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Grep directory target in warn mode, got $EXIT6D" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT6D" || {
+    echo "FAIL: expected structured deny payload for Grep directory target in warn mode" >&2
+    cat "$OUT6D" >&2
+    exit 1
+}
+grep -q 'oap.recursive_search_unsupported' "$OUT6D" || {
+    echo "FAIL: expected recursive-search reason in warn mode" >&2
+    cat "$OUT6D" >&2
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Grep directory target: warn mode still fails closed"
+
 # 7. Shell alias (Cursor/tool-wrapper style) -> allow
 echo "  Test: Shell alias -> allow..."
 OUT7="$TEST_DIR/claude-allow-shell-alias.txt"
@@ -279,7 +370,7 @@ APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
 APORT_API_KEY=apk_claude_secret_should_redact
 EOF
 OUT8W="$TEST_DIR/claude-api-mode-warn.txt"
-echo "  Test: API mode warn with unreachable endpoint -> allow..."
+echo "  Test: API mode warn with unreachable endpoint -> deny..."
 set +e
 echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT8W" 2> /dev/null
 EXIT8W=$?
@@ -288,13 +379,13 @@ set -e
     echo "FAIL: expected exit 0 in warn mode, got $EXIT8W" >&2
     exit 1
 }
-grep -q 'permissionDecision.*allow' "$OUT8W" || {
-    echo "FAIL: expected allow payload in warn mode" >&2
+grep -q 'permissionDecision.*deny' "$OUT8W" || {
+    echo "FAIL: expected deny payload in warn mode for unreachable API" >&2
     cat "$OUT8W" >&2
     exit 1
 }
-grep -q 'APort warning' "$OUT8W" || {
-    echo "FAIL: expected warn-mode message" >&2
+grep -q 'oap.evaluation_error' "$OUT8W" || {
+    echo "FAIL: expected evaluation error in unreachable API deny" >&2
     cat "$OUT8W" >&2
     exit 1
 }
@@ -308,7 +399,7 @@ if grep -q 'apk_claude_secret' "$OUT8W"; then
     cat "$OUT8W" >&2
     exit 1
 fi
-echo "  ✅ API mode warn allows with sanitized warning"
+echo "  ✅ API mode warn still denies evaluator failures"
 
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=api
@@ -344,14 +435,108 @@ echo "  ✅ local mode after switch allows"
 
 # 10. Agent tool -> session.create policy path (allow with fixture passport)
 echo "  Test: Agent tool -> allow..."
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 OUT10="$TEST_DIR/claude-allow-agent.txt"
-echo '{"tool_name":"Agent","tool_input":{"description":"explore codebase","prompt":"find auth flow"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
+echo '{"tool_name":"Agent","tool_input":{"description":"explore codebase","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
 EXIT10=$?
 [[ "$EXIT10" -eq 0 ]] || {
     echo "FAIL: expected exit 0 for Agent, got $EXIT10 (output: $(cat "$OUT10" 2> /dev/null))" >&2
     exit 1
 }
+if grep -q 'secret_prompt_should_not_persist\|explore codebase' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Claude session decisions must not persist raw agent prompts" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '.guardrail_tool == "session.create" and .context.description_length > 0 and .context.subagent_type == "reviewer"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Claude session context should include description length and subagent type only" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
 echo "  ✅ Agent: exit 0"
+
+# 10b. MCP resource reads should keep operation metadata without raw payload copies
+echo "  Test: ReadMcpResourceTool -> minimal MCP context..."
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+OUT10B="$TEST_DIR/claude-allow-read-mcp-resource.txt"
+echo '{"tool_name":"ReadMcpResourceTool","tool_input":{"server":"github","tool":"github.resources.read","uri":"mcp://github/repo/README.md","token":"secret_mcp_param_should_not_persist"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10B" 2> /dev/null
+EXIT10B=$?
+[[ "$EXIT10B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for ReadMcpResourceTool, got $EXIT10B (output: $(cat "$OUT10B" 2> /dev/null))" >&2
+    exit 1
+}
+if grep -q 'secret_mcp_param_should_not_persist' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Claude MCP decisions must not persist raw MCP parameter values" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '.guardrail_tool == "mcp.tool" and .context.tool == "github.resources.read" and (.context.parameter_keys | index("uri")) and (.context | has("parameters") | not)' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Claude MCP context should include resource operation metadata only" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ ReadMcpResourceTool: minimal MCP context"
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_restricted_claude_mcp",
+  "agent_id": "ap_restricted_claude_mcp",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "mcp.tool.execute": {
+      "allowed_servers": ["github"],
+      "allowed_tools": ["issues.*"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+
+echo "  Test: MCP tool cannot spoof server through tool input..."
+OUT10C="$TEST_DIR/claude-deny-mcp-server-spoof.txt"
+echo '{"tool_name":"mcp__evil__issues_list","tool_input":{"server":"github","tool":"issues.list","id":"x"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10C" 2> /dev/null
+EXIT10C=$?
+[[ "$EXIT10C" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for MCP spoof, got $EXIT10C (output: $(cat "$OUT10C" 2> /dev/null))" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT10C" || {
+    echo "FAIL: expected MCP spoof to produce structured deny" >&2
+    cat "$OUT10C" >&2
+    exit 1
+}
+grep -q 'oap.mcp_server_not_allowed' "$OUT10C" || {
+    echo "FAIL: expected MCP spoof to deny on server allowlist" >&2
+    cat "$OUT10C" >&2
+    exit 1
+}
+echo "  ✅ MCP spoofed server denied"
+
+echo "  Test: ReadMcpResourceTool cannot spoof server through URI..."
+OUT10D="$TEST_DIR/claude-deny-mcp-resource-server-spoof.txt"
+echo '{"tool_name":"ReadMcpResourceTool","tool_input":{"server":"evil","tool":"resources.read","uri":"mcp://github/repo/README.md"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10D" 2> /dev/null
+EXIT10D=$?
+[[ "$EXIT10D" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for MCP resource spoof, got $EXIT10D (output: $(cat "$OUT10D" 2> /dev/null))" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT10D" || {
+    echo "FAIL: expected MCP resource spoof to produce structured deny" >&2
+    cat "$OUT10D" >&2
+    exit 1
+}
+grep -q 'oap.mcp_server_not_allowed' "$OUT10D" || {
+    echo "FAIL: expected MCP resource spoof to deny on routing server" >&2
+    cat "$OUT10D" >&2
+    exit 1
+}
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+echo "  ✅ MCP resource URI spoof denied"
 
 # 11. Agent(Explore) specifier stripped -> allow
 echo "  Test: Agent(Explore) specifier -> allow..."
@@ -364,16 +549,26 @@ EXIT11=$?
 }
 echo "  ✅ Agent(Explore): exit 0"
 
-# 12. WebSearch -> allow
-echo "  Test: WebSearch -> allow..."
-OUT12="$TEST_DIR/claude-allow-websearch.txt"
+# 12. WebSearch without URL/domain -> deny
+echo "  Test: WebSearch without URL/domain -> deny..."
+OUT12="$TEST_DIR/claude-deny-websearch.txt"
 echo '{"tool_name":"WebSearch","tool_input":{"query":"claude code hooks"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT12" 2> /dev/null
 EXIT12=$?
 [[ "$EXIT12" -eq 0 ]] || {
-    echo "FAIL: expected exit 0 for WebSearch, got $EXIT12" >&2
+    echo "FAIL: expected exit 0 with structured deny for WebSearch, got $EXIT12" >&2
     exit 1
 }
-echo "  ✅ WebSearch: exit 0"
+grep -q 'permissionDecision.*deny' "$OUT12" || {
+    echo "FAIL: expected structured deny payload for WebSearch without URL/domain" >&2
+    cat "$OUT12" >&2
+    exit 1
+}
+grep -q 'oap.missing_required_context' "$OUT12" || {
+    echo "FAIL: expected missing context deny for WebSearch without URL/domain" >&2
+    cat "$OUT12" >&2
+    exit 1
+}
+echo "  ✅ WebSearch without URL/domain: structured deny"
 
 # 13. PowerShell -> allow (maps to bash policy)
 echo "  Test: PowerShell -> allow..."

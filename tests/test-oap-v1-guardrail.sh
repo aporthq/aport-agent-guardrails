@@ -56,6 +56,22 @@ fi
 assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
 assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.unknown_capability" "reasons[0].code"
 
+if "$GUARDRAIL" git.push '{"repository":"aporthq/repo","action":"repo.push","branch":"main","files_changed":["src/app.ts"]}' 2> /dev/null; then
+    echo "FAIL: repo.push should DENY without repo.push" >&2
+    exit 1
+fi
+assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
+assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.unknown_capability" "reasons[0].code"
+
+echo '{"passport_id":"repo-push-action","kind":"template","spec_version":"oap/1.0","owner_id":"u","owner_type":"user","assurance_level":"L2","status":"active","capabilities":[{"id":"repo.push"}],"limits":{"code.repository.merge":{"max_pr_size_kb":500,"allowed_repos":["aporthq/*"],"allowed_base_branches":["main"],"allowed_paths":["src/**"]}},"regions":["US"],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","version":"1.0.0"}' > "$OPENCLAW_PASSPORT_FILE"
+if ! "$GUARDRAIL" git.push '{"repository":"aporthq/repo","action":"repo.push","branch":"main","files_changed":["src/app.ts"]}'; then
+    echo "FAIL: repo.push should ALLOW with repo.push" >&2
+    exit 1
+fi
+assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "true" "decision.allow"
+
+echo '{"passport_id":"repo-action","kind":"template","spec_version":"oap/1.0","owner_id":"u","owner_type":"user","assurance_level":"L2","status":"active","capabilities":[{"id":"repo.pr.create"}],"limits":{"code.repository.merge":{"max_pr_size_kb":500,"allowed_repos":["aporthq/*"],"allowed_base_branches":["main"],"allowed_paths":["src/**"]}},"regions":["US"],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","version":"1.0.0"}' > "$OPENCLAW_PASSPORT_FILE"
+
 if "$GUARDRAIL" git.create_pr '{"repository":"aporthq/repo","action":"pr.update","branch":"feature/x","base_branch":"main","files_changed":["scripts/install.sh"]}' 2> /dev/null; then
     echo "FAIL: pr.update should DENY changed path outside allowed_paths" >&2
     exit 1

@@ -13,7 +13,7 @@ source "$LIB/config.sh"
 # shellcheck source=lib/guardrail-mode.sh
 source "$LIB/guardrail-mode.sh"
 
-SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code deerflow n8n)
+SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n)
 
 usage() {
     cat << 'EOF'
@@ -22,6 +22,8 @@ Usage:
 
 Examples:
   aport-agent-guardrails mode claude-code --enforcement=warn
+  aport-agent-guardrails mode codex --enforcement=warn
+  aport-agent-guardrails mode gemini --mode=api --api-url=https://api.aport.io
   aport-agent-guardrails mode cursor --enforcement=enforce
   aport-agent-guardrails mode langchain --mode=api --api-url=https://api.aport.io
 
@@ -37,6 +39,10 @@ if [[ -z "$framework" || "$framework" == "--help" || "$framework" == "-h" ]]; th
 fi
 shift
 framework="$(printf '%s' "$framework" | tr '[:upper:]' '[:lower:]')"
+case "$framework" in
+    claude) framework="claude-code" ;;
+    gemini) framework="gemini-cli" ;;
+esac
 
 is_supported=false
 for supported in "${SUPPORTED_FRAMEWORKS[@]}"; do
@@ -63,18 +69,20 @@ if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -gt 0 ]]; then
 fi
 
 has_explicit_config_dir_override() {
+    [[ -n "${APORT_CONFIG_DIR:-}" ]] && return 0
+
     case "$framework" in
         langchain)
-            [[ -n "${APORT_CONFIG_DIR:-${APORT_LANGCHAIN_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_LANGCHAIN_CONFIG_DIR:-}" ]]
             ;;
         crewai)
-            [[ -n "${APORT_CONFIG_DIR:-${APORT_CREWAI_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_CREWAI_CONFIG_DIR:-}" ]]
             ;;
         deerflow)
-            [[ -n "${APORT_CONFIG_DIR:-${APORT_DEERFLOW_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_DEERFLOW_CONFIG_DIR:-}" ]]
             ;;
         n8n)
-            [[ -n "${APORT_CONFIG_DIR:-${APORT_N8N_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_N8N_CONFIG_DIR:-}" ]]
             ;;
         *)
             return 1
@@ -83,7 +91,24 @@ has_explicit_config_dir_override() {
 }
 
 resolve_set_mode_config_dir() {
+    if [[ -n "${APORT_CONFIG_DIR:-}" ]]; then
+        printf '%s' "$APORT_CONFIG_DIR"
+        return 0
+    fi
+
     case "$framework" in
+        codex)
+            if [[ -z "${APORT_CODEX_CONFIG_DIR:-}" && -f "$PWD/.codex/aport/guardrail-mode.env" ]]; then
+                printf '%s/.codex' "$PWD"
+                return 0
+            fi
+            ;;
+        gemini-cli)
+            if [[ -z "${APORT_GEMINI_CLI_CONFIG_DIR:-}" && -f "$PWD/.gemini/aport/guardrail-mode.env" ]]; then
+                printf '%s/.gemini' "$PWD"
+                return 0
+            fi
+            ;;
         langchain | crewai | deerflow | n8n)
             if ! has_explicit_config_dir_override && [[ -f "$PWD/.aport/config.yaml" ]]; then
                 printf '%s/.aport' "$PWD"
