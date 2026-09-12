@@ -95,6 +95,9 @@ validate_passport_path() {
         "$HOME/.aport"
         "$HOME/.claude"
         "$HOME/.cursor"
+        "$HOME/.codex"
+        "$HOME/.gemini"
+        "$HOME/.config/opencode"
         "$HOME/.n8n"
         "/tmp/aport-"
     )
@@ -225,20 +228,28 @@ glob_to_regex() {
 }
 
 # Safe prefix matching (for allowed commands)
-# Returns 0 if string starts with prefix, 1 otherwise
+# Returns 0 if string starts with prefix at a shell-token boundary, 1 otherwise.
 safe_prefix_match() {
     local string="$1"
     local prefix="$2"
+    local remainder first
 
     # Handle wildcard case
     if [ "$prefix" = "*" ]; then
         return 0
     fi
 
-    # Use parameter expansion for safe prefix check
-    if [ "${string#"$prefix"}" != "$string" ]; then
-        return 0
-    fi
+    remainder="${string#"$prefix"}"
+    [ "$remainder" != "$string" ] || return 1
+    [ -z "$remainder" ] && return 0
+    case "$prefix" in
+        *[[:space:]]) return 0 ;;
+    esac
+
+    first="${remainder:0:1}"
+    case "$first" in
+        [[:space:]]) return 0 ;;
+    esac
 
     return 1
 }

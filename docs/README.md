@@ -18,10 +18,16 @@
 | [AGENTS.md.example](AGENTS.md.example) | Example AGENTS.md section for pre-action authorization |
 | [REPO_LAYOUT.md](REPO_LAYOUT.md) | What `bin/`, `src/`, `extensions/`, `external/` do |
 
-**Maintainer docs**:
+**Support status and maintainer docs**:
 
 | Doc | Purpose |
 |-----|---------|
 | [RELEASE.md](RELEASE.md) | Versioning, changelog, tagging, and publish process |
-| [FRAMEWORK_ROADMAP.md](FRAMEWORK_ROADMAP.md) | Supported repository/runtime surfaces and framework status |
+| [FRAMEWORK_ROADMAP.md](FRAMEWORK_ROADMAP.md) | Shipped repository/runtime surfaces, beta command-hook harnesses, and gated integrations |
 | [SECURITY_MODEL.md](SECURITY_MODEL.md) | Threat model, fail-closed behavior, and deployment guidance |
+
+Public setup docs should lead with GitHub Repository Guard, then shipped runtime
+targets: Cursor, Claude Code for the `claude` CLI, OpenClaw, LangChain, CrewAI,
+DeerFlow, and n8n setup. Codex, Gemini CLI, and Goose are beta command-hook
+harnesses backed by shared adapter tests and setup tests. opencode remains gated
+until an installed-version plugin smoke test verifies the current plugin API.

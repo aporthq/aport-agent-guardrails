@@ -94,7 +94,7 @@ resolve_aport_paths() {
             config_dir="$explicit_config"
         else
             config_dir=""
-            for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.aport/deerflow" "$HOME/.n8n"; do
+            for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.aport/codex" "$HOME/.aport/gemini-cli" "$HOME/.codex" "$HOME/.gemini" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.aport/deerflow" "$HOME/.aport/goose" "$HOME/.config/opencode" "$HOME/.n8n"; do
                 if [ -f "${candidate}/aport/passport.json" ]; then
                     config_dir="$candidate"
                     break

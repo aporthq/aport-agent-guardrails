@@ -85,6 +85,16 @@ if command -v jq &> /dev/null; then
     fi
     echo "  ✅ settings.json references APort Claude Code hook script"
 
+    if [[ "$HOOK_CMD" != *"$CLAUDE_DIR/aport/runtime/bin/aport-claude-code-hook.sh"* ]]; then
+        echo "FAIL: Claude Code hook should point to stable APort runtime, got: $HOOK_CMD" >&2
+        exit 1
+    fi
+    [[ -x "$CLAUDE_DIR/aport/runtime/bin/aport-claude-code-hook.sh" ]] || {
+        echo "FAIL: expected stable Claude Code runtime hook at $CLAUDE_DIR/aport/runtime/bin/aport-claude-code-hook.sh" >&2
+        exit 1
+    }
+    echo "  ✅ settings.json uses stable APort runtime hook"
+
     MARKER_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true and .timeout == 10)] | length' "$CLAUDE_DIR/settings.json")
     if [[ "$MARKER_COUNT" -ne 1 ]]; then
         echo "FAIL: expected exactly one marker-owned APort hook with timeout=10" >&2

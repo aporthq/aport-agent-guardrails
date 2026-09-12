@@ -29,7 +29,7 @@ hosted_agent_id=""
 parse_guardrail_mode_args "$@"
 FORWARD_ARGS=()
 if [[ -n "${APORT_FRAMEWORK_ARGS+x}" ]]; then
-    remaining_args=("${APORT_FRAMEWORK_ARGS[@]}")
+    remaining_args=(${APORT_FRAMEWORK_ARGS[@]+"${APORT_FRAMEWORK_ARGS[@]}"})
 else
     remaining_args=()
 fi

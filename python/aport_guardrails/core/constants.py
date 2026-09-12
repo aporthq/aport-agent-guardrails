@@ -111,6 +111,11 @@ DEFAULT_PASSPORT_PATHS = {
     "langchain": "~/.aport/langchain/passport.json",
     "crewai": "~/.aport/crewai/passport.json",
     "cursor": "~/.aport/cursor/passport.json",
+    "claude-code": "~/.claude/aport/passport.json",
+    "codex": "~/.aport/codex/aport/passport.json",
+    "gemini-cli": "~/.aport/gemini-cli/aport/passport.json",
+    "goose": "~/.aport/goose/aport/passport.json",
+    "opencode": "~/.config/opencode/aport/passport.json",
     "n8n": "~/.aport/n8n/passport.json",
 }
 
@@ -118,6 +123,11 @@ DEFAULT_PASSPORT_PATHS = {
 ALLOWED_PASSPORT_BASE_DIRS = [
     "~/.openclaw",
     "~/.aport",
+    "~/.claude",
+    "~/.cursor",
+    "~/.codex",
+    "~/.gemini",
+    "~/.config/opencode",
     "/tmp/aport-",  # Special handling: must start with aport-
 ]
 

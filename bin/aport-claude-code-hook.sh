@@ -45,6 +45,8 @@ aport_hook_prepare_framework_paths "claude-code" "${APORT_CLAUDE_CODE_CONFIG_DIR
 . "$ROOT_DIR/bin/lib/hook-read-policy.sh"
 # shellcheck source=bin/lib/hook-runtime.sh
 . "$ROOT_DIR/bin/lib/hook-runtime.sh"
+# shellcheck source=bin/lib/harness-context.sh
+. "$ROOT_DIR/bin/lib/harness-context.sh"
 load_guardrail_mode_for_hooks "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-$HOME/.claude}}"
 
 GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-bash.sh"
@@ -56,17 +58,10 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
 fi
 
 emit_claude_input_too_large() {
-    local decision="deny"
-    local notice user_warning
-    if aport_hook_is_warn_mode; then
-        decision="allow"
-        notice="$(aport_format_guardrail_notice warn hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-        user_warning="$(aport_hook_format_user_warning hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-    else
-        notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-    fi
+    local notice
+    notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
 
-    aport_hook_build_response "$decision" "$notice" "$user_warning" "claude-code"
+    aport_hook_build_response "deny" "$notice" "" "claude-code"
     exit 0
 }
 
@@ -140,8 +135,9 @@ deny_or_warn() {
     local policy="$1"
     local code="${2:-oap.denied}"
     local message="${3:-}"
+    local failure_class="${4:-hard}"
     local notice user_warning
-    if aport_hook_is_warn_mode; then
+    if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
         notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
         user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message")"
         warn_allow "$notice" "$user_warning"
@@ -159,14 +155,30 @@ case "$TOOL_NAME_NORM" in
         GUARDRAIL_TOOL="bash"
         CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{command: (.command // .script // "")}')"
         COMMAND_TEXT="$(printf '%s' "$CONTEXT_JSON" | jq -r '.command // ""' 2> /dev/null || true)"
+        if [ -z "$COMMAND_TEXT" ]; then
+            deny_or_warn "system.command.execute" "oap.missing_command" "Shell tool did not provide a command that APort can evaluate"
+        fi
         if aport_is_reentrant_guardrail_command "$COMMAND_TEXT" "$ROOT_DIR"; then
             exit 0
         fi
         ;;
-    read | readfile | semanticsearch)
-        if ! aport_hook_try_read_evaluation "$TOOL_NAME_NORM" "$TOOL_INPUT"; then
+    read | readfile | semanticsearch | grep)
+        set +e
+        trap - ERR
+        aport_hook_try_read_evaluation "$TOOL_NAME_NORM" "$TOOL_INPUT"
+        READ_STATUS=$?
+        set -e
+        trap '__aport_emit_crash_deny "$LINENO"' ERR
+        if [ "$READ_STATUS" -eq 2 ]; then
+            deny_or_warn "data.file.read" "$APORT_HOOK_READ_ERROR_CODE" "$APORT_HOOK_READ_ERROR_MESSAGE"
+        fi
+        if [ "$READ_STATUS" -ne 0 ]; then
+            if [ "$TOOL_NAME_NORM" = "grep" ]; then
+                deny_or_warn "data.file.read" "oap.missing_file_path" "Search tool did not provide a path that APort can evaluate"
+            fi
             exit 0
         fi
+        :
         ;;
     artifact | endconversation | sendfeedback)
         # Claude Code internal UX/feedback tools do not act on the user's system.
@@ -174,9 +186,9 @@ case "$TOOL_NAME_NORM" in
         ;;
     readmcpresourcetool)
         GUARDRAIL_TOOL="mcp.tool"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{server: (.server // .mcp_server // .mcp_server_name // ""), mcp_server: (.server // .mcp_server // .mcp_server_name // ""), tool: (.tool // .mcp_tool // .name // "resources.read"), mcp_tool: (.tool // .mcp_tool // .name // "resources.read"), uri: (.uri // .resource_uri // ""), parameters: .}')"
+        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
         ;;
-    glob | ls | grep | lsp | todoread | toolsearch | askuserquestion | listmcpresourcestool | waitformcpservers)
+    glob | ls | lsp | todoread | toolsearch | askuserquestion | listmcpresourcestool | waitformcpservers)
         # Search/list/read tools without a single file_path: allow without evaluator
         exit 0
         ;;
@@ -202,19 +214,19 @@ case "$TOOL_NAME_NORM" in
         ;;
     agent | task | taskcreate | taskupdate | taskstop | skill | enterworktree | exitworktree | subagent | subagentstart | sendmessage | teamcreate | teamdelete | remotetrigger)
         GUARDRAIL_TOOL="session.create"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .prompt // .task // .message // ""), subagent_type: (.subagent_type // .agent_type // "")}')"
+        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "claude-code")"
         ;;
     croncreate | crondelete)
         GUARDRAIL_TOOL="session.create"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .schedule // "")}')"
+        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "claude-code")"
         ;;
     mcp__* | mcp:* | callmcptool)
         GUARDRAIL_TOOL="mcp.tool"
-        CONTEXT_JSON="$TOOL_INPUT"
+        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
         ;;
     workflow)
         GUARDRAIL_TOOL="session.create"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{description: (.description // .name // .workflow // "")}')"
+        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "claude-code")"
         ;;
     unknown | *)
         # Unknown tool: fail-closed (deny)
@@ -269,7 +281,9 @@ fi
 # stderr from the guardrail, then a generic message. Never silent.
 REASON=""
 REASON_CODE=""
+HAS_DECISION_FILE=0
 if [ -n "$HOOK_DECISION_FILE" ] && [ -f "$HOOK_DECISION_FILE" ] && command -v jq &> /dev/null; then
+    HAS_DECISION_FILE=1
     R="$(jq -r '.reasons[0].message // empty' "$HOOK_DECISION_FILE" 2> /dev/null)"
     [ -n "$R" ] && REASON="$R"
     C="$(aport_hook_reason_code "$HOOK_DECISION_FILE")"
@@ -284,4 +298,14 @@ if [ -z "$REASON" ]; then
 fi
 aport_append_local_session_decision "$HOOK_DECISION_FILE" "claude-code" "$INPUT" "$TOOL_NAME" "$GUARDRAIL_TOOL" "$CONTEXT_JSON"
 cleanup_decision
-deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON"
+if [ "$HAS_DECISION_FILE" -ne 1 ]; then
+    deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "oap.evaluator_failed" "$REASON" "hard"
+fi
+case "${REASON_CODE:-oap.denied}" in
+    oap.evaluator_crash | oap.evaluation_error | oap.evaluator_failed | oap.missing_dependency | oap.passport_not_found | oap.passport_invalid | oap.passport_suspended | oap.passport_version_mismatch | oap.invalid_tool_name | oap.context_too_large)
+        deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "hard"
+        ;;
+    *)
+        deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "policy"
+        ;;
+esac

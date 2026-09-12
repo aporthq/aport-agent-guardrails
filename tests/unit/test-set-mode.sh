@@ -208,6 +208,60 @@ if grep -q "project-api.aport.io" "$PROJECT_HOME/.aport/langchain/config.yaml"; 
     exit 1
 fi
 
+CODEX_OVERRIDE_DIR="$TEST_DIR/codex-override"
+CODEX_OVERRIDE_HOME="$TEST_DIR/codex-override-home"
+mkdir -p "$CODEX_OVERRIDE_DIR/aport" "$CODEX_OVERRIDE_HOME"
+cat > "$CODEX_OVERRIDE_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT=enforce
+APORT_API_URL=https://api.aport.io
+APORT_AGENT_ID=ap_codex_override_existing
+APORT_API_KEY=apk_codex_override_key
+EOF
+HOME="$CODEX_OVERRIDE_HOME" APORT_CONFIG_DIR="$CODEX_OVERRIDE_DIR" "$MODE_HELPER" codex --enforcement=warn > "$TEST_DIR/codex-override.out"
+grep -q '^APORT_ENFORCEMENT=warn$' "$CODEX_OVERRIDE_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: codex set-mode should honor APORT_CONFIG_DIR override" >&2
+    cat "$CODEX_OVERRIDE_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+grep -q "Config dir:  $CODEX_OVERRIDE_DIR" "$TEST_DIR/codex-override.out" || {
+    echo "FAIL: codex set-mode output should identify APORT_CONFIG_DIR" >&2
+    cat "$TEST_DIR/codex-override.out" >&2
+    exit 1
+}
+if [[ -e "$CODEX_OVERRIDE_HOME/.aport/codex/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: codex set-mode should not write inactive home state when APORT_CONFIG_DIR is set" >&2
+    cat "$CODEX_OVERRIDE_HOME/.aport/codex/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
+GEMINI_OVERRIDE_DIR="$TEST_DIR/gemini-override"
+GEMINI_OVERRIDE_HOME="$TEST_DIR/gemini-override-home"
+mkdir -p "$GEMINI_OVERRIDE_DIR/aport" "$GEMINI_OVERRIDE_HOME"
+cat > "$GEMINI_OVERRIDE_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT=enforce
+APORT_API_URL=https://api.aport.io
+APORT_AGENT_ID=ap_gemini_override_existing
+APORT_API_KEY=apk_gemini_override_key
+EOF
+HOME="$GEMINI_OVERRIDE_HOME" APORT_CONFIG_DIR="$GEMINI_OVERRIDE_DIR" "$MODE_HELPER" gemini --enforcement=warn > "$TEST_DIR/gemini-override.out"
+grep -q '^APORT_ENFORCEMENT=warn$' "$GEMINI_OVERRIDE_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: gemini set-mode should honor APORT_CONFIG_DIR override" >&2
+    cat "$GEMINI_OVERRIDE_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+grep -q "Config dir:  $GEMINI_OVERRIDE_DIR" "$TEST_DIR/gemini-override.out" || {
+    echo "FAIL: gemini set-mode output should identify APORT_CONFIG_DIR" >&2
+    cat "$TEST_DIR/gemini-override.out" >&2
+    exit 1
+}
+if [[ -e "$GEMINI_OVERRIDE_HOME/.aport/gemini-cli/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: gemini set-mode should not write inactive home state when APORT_CONFIG_DIR is set" >&2
+    cat "$GEMINI_OVERRIDE_HOME/.aport/gemini-cli/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
 cat > "$LANGCHAIN_DIR/passport.json" << 'EOF'
 {"agent_id":"ap_local_langchain_test","capabilities":[],"limits":{}}
 EOF
