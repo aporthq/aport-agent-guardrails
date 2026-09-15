@@ -54,6 +54,38 @@ aport_hook_payload_has_conflicting_shell_command_aliases() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_payload_has_malformed_shell_command_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def malformed_command(v):
+        v != null and (v | type) != "string";
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      malformed_command(.command) or
+      any(argument_containers[]; (
+        malformed_command(.command) or
+        malformed_command(.cmd) or
+        malformed_command(.script) or
+        malformed_command(.shell_command)
+      ))
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
 aport_hook_payload_has_conflicting_file_target_aliases() {
     local payload="$1"
     jq -e '
@@ -319,11 +351,14 @@ aport_hook_context_from_payload() {
           ) catch "")
           end
         else
-          $s
+          if ($s | contains("\\") or test("[[:cntrl:]]") or test("[/@?#]")) then "" else ($s | ascii_downcase | sub("\\.$"; "")) end
         end;
       def malformed_server(v):
         str(v) as $s |
-        $s != "" and ($s | contains("\\") or test("[[:cntrl:]]"));
+        $s != "" and (
+          ($s | contains("\\") or test("[[:cntrl:]]")) or
+          (($s | test("^[A-Za-z][A-Za-z0-9+.-]*://") | not) and ($s | test("[/@?#]")))
+        );
       def clean_url(v):
         str(v) as $s |
         if $s == "" then ""
@@ -405,6 +440,7 @@ aport_hook_context_from_payload() {
               target_count($ti.include)
             ] | add)
           ),
+          has_directory_context: ((($ti.dir_path // "") | type) == "string" and (($ti.dir_path // "") | length) > 0),
           read_has_glob: (has_glob($ti.paths) or has_glob($ti.include) or has_glob($ti.pattern) or has_glob($ti.include_pattern))
         }
       elif $kind == "file_write" then

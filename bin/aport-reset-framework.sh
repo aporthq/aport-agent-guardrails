@@ -569,9 +569,11 @@ command_hook_config_references_state_dir() {
     [[ -f "$file" ]] || return 1
     command -v jq > /dev/null 2>&1 || return 1
     jq -e --arg state "$state_dir" '
+      def unescape_shell_single_quotes:
+        gsub("'\\''"; "'");
       [
         .. | objects | .command? |
-        select(type == "string" and contains($state))
+        select(type == "string" and ((contains($state)) or ((unescape_shell_single_quotes) | contains($state))))
       ] | length > 0
     ' "$file" > /dev/null 2>&1
 }
@@ -584,7 +586,8 @@ command_hook_file_references_state_dir() {
     if command_hook_config_references_state_dir "$file" "$state_dir"; then
         return 0
     fi
-    grep -F -- "$state_dir" "$file" > /dev/null 2>&1
+    grep -F -- "$state_dir" "$file" > /dev/null 2>&1 && return 0
+    sed "s/'\\\\''/'/g" "$file" 2> /dev/null | grep -F -- "$state_dir" > /dev/null 2>&1
 }
 
 preserve_command_hook_state_if_referenced() {

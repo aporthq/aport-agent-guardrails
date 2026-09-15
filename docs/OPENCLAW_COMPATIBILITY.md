@@ -22,7 +22,7 @@
 
 ### Enforcement model: AGENTS.md is best-effort, not deterministic
 
-**Current approach (AGENTS.md + skill):** The APort rule is written into `workspace/AGENTS.md` so the agent is *instructed* to call the guardrail script before effectful actions. That is **best-effort**: the LLM may skip it, forget it, or be prompted to bypass it. It is **not** a guarantee that every tool run is checked.
+**Current approach (AGENTS.md + skill):** The APort rule is written into `workspace/AGENTS.md` so the agent is *instructed* to call the guardrail script before effectful actions. That is **best-effort**: the LLM may skip it, forget it, or be prompted to bypass it. It is **not** a guarantee that every tool run is checked. Runtime hooks do not trust repository-controlled AGENTS.md passport settings unless the machine owner explicitly sets `APORT_TRUST_REPO_POLICY=1`.
 
 **Purpose of APort:** Pre-action **authorization** should be enforced by the **platform** (OpenClaw calling the guardrail before executing a tool), not by the model following a prompt. Same outcome every time = deterministic enforcement.
 

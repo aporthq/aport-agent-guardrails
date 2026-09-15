@@ -151,6 +151,11 @@ run_hook "Codex exec_command rejects conflicting command containers" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"command":"rm -rf /tmp/not-executed"},"input":{"command":"ls"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
 
+run_hook "Codex exec_command rejects non-string command aliases" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":{"unexpected":"shape"}}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
 run_hook "Codex Bash deny uses PreToolUse permissionDecision" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
@@ -228,6 +233,16 @@ run_hook "Codex rejects unknown hook event names" \
     '{"hook_event_name":"BeforePrompt","tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_hook_event"))'
 
+run_hook "Gemini rejects unknown hook event names" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"AfterTool","tool_name":"run_shell_command","tool_input":{"command":"ls -la"}}' \
+    '.decision == "deny" and (.reason | contains("oap.unknown_hook_event"))'
+
+run_hook "Goose rejects unknown hook event names" \
+    goose "$GOOSE" \
+    '{"hook_event_name":"PostToolUse","tool_name":"developer__shell","tool_input":{"command":"ls -la"}}' \
+    '.decision == "block" and (.reason | contains("oap.unknown_hook_event"))'
+
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
@@ -301,6 +316,11 @@ run_hook "Codex shell enforces configured timeout when supplied" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status","timeoutMs":2000}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.timeout_exceeded"))'
+
+run_hook "Codex shell requires timeout evidence when max execution time is configured" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
 
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
@@ -480,6 +500,11 @@ run_hook "Gemini grep_search denies recursive directory search" \
     '{"hook_event_name":"BeforeTool","tool_name":"grep_search","tool_input":{"pattern":"SECRET","dir_path":"/tmp/project"}}' \
     '.decision == "deny" and (.reason | contains("oap.recursive_search_unsupported"))'
 
+run_hook "Gemini grep_search denies serialized recursive directory search" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"grep_search","tool_input":"{\"pattern\":\"SECRET\",\"dir_path\":\"/tmp/project\"}"}' \
+    '.decision == "deny" and (.reason | contains("oap.recursive_search_unsupported"))'
+
 run_hook "Gemini glob enumeration fails closed" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"glob","tool_input":{"path":"/tmp/not-yet-expanded","pattern":"**/.env*"}}' \
@@ -535,6 +560,18 @@ jq -e '.guardrail_tool == "mcp.tool" and .context.mcp_server == "https://github"
     exit 1
 }
 echo "  ✅ MCP URL routing strips credentials before audit"
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Gemini MCP bare routing drops query and fragment data before audit" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"server_name":"mcp.example/path?token=supersecret#frag","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_mcp_server"))'
+if grep -q 'supersecret\|#frag' "$TEST_DIR/aport/session-decisions.jsonl" 2> /dev/null; then
+    echo "FAIL: bare MCP routing values must not persist query or fragment data" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+echo "  ✅ Bare MCP routing drops query and fragment data before audit"
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {
@@ -1239,6 +1276,7 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 }
 EOF
 rm -f "$TEST_DIR/aport/web-rate-state.json"
+rm -f "$TEST_DIR/aport/web-rate-state.json.initialized"
 rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
 run_hook "Gemini web_fetch first request respects local rate limit" \
     gemini "$GEMINI" \
@@ -1250,6 +1288,12 @@ run_hook "Gemini web_fetch second request exceeds local rate limit" \
     '.decision == "deny" and (.reason | contains("oap.rate_limit_exceeded"))'
 rm -f "$TEST_DIR/aport/web-rate-state.json"
 rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+run_hook "Gemini web_fetch deleted local rate state fails closed after initialization" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/deleted-state","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
+rm -f "$TEST_DIR/aport/web-rate-state.json.initialized"
+
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
@@ -1879,8 +1923,7 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "capabilities": [{"id": "agent.session.create"}],
   "limits": {
     "agent.session.create": {
-      "max_concurrent": 2,
-      "max_session_duration": 3600
+      "max_concurrent": 2
     }
   },
   "regions": ["US"],
@@ -2033,7 +2076,6 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "limits": {
     "agent.session.create": {
       "max_concurrent": 1,
-      "max_session_duration": 3600,
       "local_lease_ttl_seconds": 1
     }
   },
@@ -2140,8 +2182,7 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "capabilities": [{"id": "agent.session.create"}],
   "limits": {
     "agent.session.create": {
-      "max_concurrent": 2,
-      "max_session_duration": 3600
+      "max_concurrent": 2
     }
   },
   "regions": ["US"],
@@ -2229,8 +2270,7 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "capabilities": [{"id": "agent.session.create"}],
   "limits": {
     "agent.session.create": {
-      "max_concurrent": 1,
-      "max_session_duration": 3600
+      "max_concurrent": 1
     }
   },
   "regions": ["US"],
@@ -2271,15 +2311,10 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 }
 EOF
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
-run_hook "Codex local session lease starts under short max duration" \
+run_hook "Codex rejects unsupported local max session duration limit" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_use_id":"short-duration-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
-    '. == {}'
-sleep 2
-run_hook "Codex local session lease is not expired by max_session_duration" \
-    codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_use_id":"short-duration-next","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
-    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unsupported_limit"))'
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {
   "passport_id": "ap_limited_session_live_ttl",
@@ -2337,8 +2372,7 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "capabilities": [{"id": "agent.session.create"}],
   "limits": {
     "agent.session.create": {
-      "max_concurrent": 1,
-      "max_session_duration": 3600
+      "max_concurrent": 1
     }
   },
   "regions": ["US"],

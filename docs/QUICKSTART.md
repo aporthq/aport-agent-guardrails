@@ -373,7 +373,7 @@ Should see `"allow": true` now.
 
 ## Step 7: Integrate with Your OpenClaw Instance (5 minutes)
 
-### Option A: Add to AGENTS.md (Recommended)
+### Option A: Add to AGENTS.md (Best-effort)
 
 **1. Locate your OpenClaw AGENTS.md:**
 ```bash
@@ -390,6 +390,8 @@ cat docs/AGENTS.md.example >> ~/.openclaw/AGENTS.md
 ```bash
 cat ~/.openclaw/AGENTS.md | grep "Pre-Action Authorization"
 ```
+
+AGENTS.md is repository-controlled instruction text, not the trusted runtime identity source. Runtime hooks use machine-scoped config by default. Set `APORT_TRUST_REPO_POLICY=1` only if you intentionally want a trusted repository to select its own APort passport.
 
 ---
 

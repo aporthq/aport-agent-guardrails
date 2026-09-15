@@ -538,7 +538,7 @@ if [ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ]; then
         # default: allow any (*); blocked_patterns still apply
         allowed_commands_json="[\"*\"]"
     fi
-    limits_json="$limits_json\"system.command.execute\": {\"allowed_commands\": $allowed_commands_json, \"blocked_patterns\": [\"rm -rf\", \"sudo\", \"chmod 777\", \"dd if=\", \"mkfs\"], \"max_execution_time\": 300},"
+    limits_json="$limits_json\"system.command.execute\": {\"allowed_commands\": $allowed_commands_json, \"blocked_patterns\": [\"rm -rf\", \"sudo\", \"chmod 777\", \"dd if=\", \"mkfs\"]},"
 fi
 
 if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then

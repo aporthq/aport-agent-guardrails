@@ -567,6 +567,12 @@ web_rate_state_file_path() {
     printf '%s' "${APORT_WEB_RATE_STATE_FILE:-$data_dir/web-rate-state.json}"
 }
 
+web_rate_state_marker_path() {
+    local state_file
+    state_file="$(web_rate_state_file_path)"
+    printf '%s' "${APORT_WEB_RATE_STATE_MARKER_FILE:-$state_file.initialized}"
+}
+
 state_target_is_regular_or_absent() {
     local state_file="$1"
     [ ! -e "$state_file" ] || [ -f "$state_file" ]
@@ -984,8 +990,13 @@ mark_unresolved_session_lease() {
 }
 
 enforce_agent_session_concurrency() {
-    local max_concurrent_raw max_concurrent session_operation session_tracking hook_event active_count session_id parent_session_id state_file state_dir lock_dir synthetic_lease
+    local max_session_duration_raw max_concurrent_raw max_concurrent session_operation session_tracking hook_event active_count session_id parent_session_id state_file state_dir lock_dir synthetic_lease
     local session_call_id now ttl current_state pruned_state lease_count has_existing expires_at next_state tmp
+
+    max_session_duration_raw="$(echo "$LIMITS" | jq -c 'if has("max_session_duration") then .max_session_duration elif has("max_session_duration_seconds") then .max_session_duration_seconds else empty end' 2> /dev/null || true)"
+    if [ -n "$max_session_duration_raw" ]; then
+        write_decision false "$POLICY_ID" "oap.unsupported_limit" "Local session verification cannot safely enforce max_session_duration; use hosted verification or remove this local-only limit"
+    fi
 
     max_concurrent_raw="$(echo "$LIMITS" | jq -c 'if has("max_concurrent") then .max_concurrent elif has("max_concurrent_sessions") then .max_concurrent_sessions else empty end' 2> /dev/null || true)"
     [ -n "$max_concurrent_raw" ] || return 0
@@ -1167,7 +1178,7 @@ enforce_agent_session_concurrency() {
 }
 
 enforce_web_fetch_rate_limit() {
-    local max_requests_raw max_requests state_file state_dir lock_dir now current_state next_state allowed_count tmp
+    local max_requests_raw max_requests state_file marker_file state_dir lock_dir now current_state next_state allowed_count tmp
 
     max_requests_raw="$(echo "$LIMITS" | jq -c 'if has("max_requests_per_min") then .max_requests_per_min elif has("max_requests_per_minute") then .max_requests_per_minute else empty end' 2> /dev/null || true)"
     [ -n "$max_requests_raw" ] || return 0
@@ -1182,9 +1193,13 @@ enforce_web_fetch_rate_limit() {
     max_requests="$(jq -nr --argjson max "$max_requests_raw" 'if ($max | type) == "number" then ($max | floor | tostring) else $max end')"
 
     state_file="$(web_rate_state_file_path)"
+    marker_file="$(web_rate_state_marker_path)"
     state_dir="$(dirname "$state_file")"
     if ! state_target_is_regular_or_absent "$state_file"; then
         write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state path is not a regular file"
+    fi
+    if ! state_target_is_regular_or_absent "$marker_file"; then
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit marker path is not a regular file"
     fi
     if ! mkdir -p "$state_dir" 2> /dev/null; then
         write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state cannot be created"
@@ -1198,6 +1213,10 @@ enforce_web_fetch_rate_limit() {
     if ! state_target_is_regular_or_absent "$state_file"; then
         release_session_state_lock "$lock_dir"
         write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state path is not a regular file"
+    fi
+    if [ ! -f "$state_file" ] && [ -f "$marker_file" ]; then
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state is missing after initialization"
     fi
 
     now="$(date +%s)"
@@ -1243,6 +1262,10 @@ enforce_web_fetch_rate_limit() {
         write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state could not be written"
     fi
     chmod 600 "$state_file" 2> /dev/null || true
+    if ! { : > "$marker_file" && chmod 600 "$marker_file"; } 2> /dev/null; then
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit marker could not be written"
+    fi
     release_session_state_lock "$lock_dir"
 }
 
@@ -2112,12 +2135,13 @@ if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
             write_decision false "$POLICY_ID" "oap.invalid_limit" "max_execution_time must be a positive number when configured"
         fi
         MAX_EXECUTION_TIME="$(jq -nr --argjson max "$MAX_EXECUTION_TIME_RAW" 'if ($max | type) == "number" then ($max | tostring) else $max end')"
-        if [ -n "$COMMAND_TIMEOUT" ]; then
-            if ! jq -en --arg timeout "$COMMAND_TIMEOUT" --arg max "$MAX_EXECUTION_TIME" '
-                ($timeout | test("^[0-9]+(\\.[0-9]+)?$")) and (($timeout | tonumber) <= ($max | tonumber))
-            ' > /dev/null 2>&1; then
-                write_decision false "$POLICY_ID" "oap.timeout_exceeded" "Command timeout exceeds max_execution_time"
-            fi
+        if [ -z "$COMMAND_TIMEOUT" ]; then
+            write_decision false "$POLICY_ID" "oap.missing_required_context" "Command timeout evidence is required when max_execution_time is configured"
+        fi
+        if ! jq -en --arg timeout "$COMMAND_TIMEOUT" --arg max "$MAX_EXECUTION_TIME" '
+            ($timeout | test("^[0-9]+(\\.[0-9]+)?$")) and (($timeout | tonumber) <= ($max | tonumber))
+        ' > /dev/null 2>&1; then
+            write_decision false "$POLICY_ID" "oap.timeout_exceeded" "Command timeout exceeds max_execution_time"
         fi
     fi
 

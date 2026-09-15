@@ -174,6 +174,18 @@ if [ "$FRAMEWORK" = "codex" ]; then
         *) emit_response "deny" "hook.input" "oap.unknown_hook_event" "Unsupported Codex hook event: $HOOK_EVENT" ;;
     esac
     export APORT_CODEX_HOOK_EVENT_NAME="$HOOK_EVENT"
+elif [ "$FRAMEWORK" = "gemini-cli" ]; then
+    case "$HOOK_EVENT" in
+        BeforeTool) ;;
+        "") HOOK_EVENT="BeforeTool" ;;
+        *) emit_response "deny" "hook.input" "oap.unknown_hook_event" "Unsupported Gemini CLI hook event: $HOOK_EVENT" ;;
+    esac
+elif [ "$FRAMEWORK" = "goose" ]; then
+    case "$HOOK_EVENT" in
+        PreToolUse) ;;
+        "") HOOK_EVENT="PreToolUse" ;;
+        *) emit_response "deny" "hook.input" "oap.unknown_hook_event" "Unsupported Goose hook event: $HOOK_EVENT" ;;
+    esac
 fi
 
 is_session_tool() {
@@ -361,6 +373,9 @@ CONTEXT_JSON="{}"
 
 map_shell() {
     GUARDRAIL_TOOL="bash"
+    if aport_hook_payload_has_malformed_shell_command_aliases "$INPUT"; then
+        emit_response "deny" "system.command.execute" "oap.invalid_tool_arguments" "Shell command aliases must be strings"
+    fi
     if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
         emit_response "deny" "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
     fi
@@ -391,7 +406,7 @@ map_file_read() {
     file_path="$(printf '%s' "$CONTEXT_JSON" | jq -r '.file_path // ""' 2> /dev/null || true)"
     read_target_count="$(printf '%s' "$CONTEXT_JSON" | jq -r '.read_target_count // 0' 2> /dev/null || echo 0)"
     read_has_glob="$(printf '%s' "$CONTEXT_JSON" | jq -r '.read_has_glob // false' 2> /dev/null || echo false)"
-    has_directory_context="$(printf '%s' "$INPUT" | jq -r '((.tool_input.dir_path // .input.dir_path // .args.dir_path // "") != "")' 2> /dev/null || echo false)"
+    has_directory_context="$(printf '%s' "$CONTEXT_JSON" | jq -r '.has_directory_context // false' 2> /dev/null || echo false)"
     is_search_tool=false
     is_directory_enumeration_tool=false
     case "$TOOL_NORM" in
