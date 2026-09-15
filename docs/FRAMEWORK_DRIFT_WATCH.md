@@ -43,6 +43,9 @@ git diff docs/framework-drift-baseline.json
 
 Do not update the baseline just to make a scheduled issue disappear. Treat the
 issue as a prompt to inspect the affected framework integration and its tests.
+If an upstream project reorganizes documentation, update the watched source to
+the page that owns the exact runtime contract instead of weakening required
+markers.
 
 ## Local Smoke Test
 
