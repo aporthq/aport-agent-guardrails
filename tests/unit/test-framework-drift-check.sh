@@ -33,6 +33,7 @@ node -e "
 
 grep -q "APort Framework Drift Report" "$MD_OUT"
 grep -q "OpenClaw" "$MD_OUT"
+grep -q "Tool call policy hooks doc" "$MD_OUT"
 grep -q "GitHub Repository Guard" "$MD_OUT"
 
 if node "$REPO_ROOT/scripts/framework-drift-check.mjs" \
