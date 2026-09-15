@@ -122,7 +122,8 @@ CLI setup.
 | Bash, PowerShell, Monitor | system.command.execute.v1 | Enforce  |
 | Read, ReadFile, SemanticSearch, Grep (with `file_path`) | data.file.read.v1 | **Enforce** (sensitive paths blocked; API/local) |
 | Glob, LSP, ListMcpResourcesTool, ToolSearch, WaitForMcpServers, TaskGet, TaskList, TodoRead | — | Allow without evaluator (no single path or external side effect) |
-| Write, Edit, MultiEdit, NotebookEdit, TodoWrite, ShareOnboardingGuide | data.file.write.v1 | Enforce  |
+| Write, Edit, MultiEdit, NotebookEdit, ShareOnboardingGuide | data.file.write.v1 | Enforce  |
+| TodoWrite | Internal task-list bookkeeping | Allow |
 | WebSearch, WebFetch | web.fetch.v1             | Enforce  |
 | Browser            | web.browser.v1            | Enforce  |
 | Agent, Task, TaskCreate, TaskUpdate, TaskStop, Skill, EnterWorktree, ExitWorktree, SendMessage, TeamCreate, TeamDelete, RemoteTrigger | agent.session.create.v1 | Enforce  |

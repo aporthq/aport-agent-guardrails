@@ -47,7 +47,7 @@ run_setup() {
     fi
 
     # Harden permissions on passport (contains policy/capabilities)
-    [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
+    secure_framework_passport_file_if_present "$config_dir"
 
     if [[ -z "$hosted_agent_id" && -n "${APORT_AGENT_ID:-}" ]]; then
         hosted_agent_id="$APORT_AGENT_ID"

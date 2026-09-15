@@ -254,6 +254,87 @@ safe_prefix_match() {
     return 1
 }
 
+# Detect shell syntax that creates additional executable segments.
+# This is intentionally syntax-aware enough to ignore quoted JSON/strings while
+# rejecting unquoted chains that a single allowed-command prefix cannot cover.
+shell_command_has_unquoted_control_operator() {
+    local input="$1"
+    local quote=""
+    local escaped=0
+    local i ch next
+
+    for ((i = 0; i < ${#input}; i++)); do
+        ch="${input:i:1}"
+
+        if [ "$escaped" -eq 1 ]; then
+            escaped=0
+            continue
+        fi
+
+        if [ "$ch" = "\\" ] && [ "$quote" != "'" ]; then
+            escaped=1
+            continue
+        fi
+
+        # Bash ANSI-C / locale strings can contain escaped quotes that change
+        # how later control operators are parsed. The local guard does not need
+        # to emulate the shell; reject this syntax under restrictive allowlists.
+        if [ "$quote" != "'" ] && [ "$ch" = "$" ]; then
+            next="${input:i+1:1}"
+            case "$next" in
+                "(") return 0 ;;
+            esac
+            if [ -z "$quote" ]; then
+                case "$next" in
+                    "'" | '"') return 0 ;;
+                esac
+            fi
+        fi
+
+        if [ "$quote" = "'" ]; then
+            [ "$ch" = "$quote" ] && quote=""
+            continue
+        fi
+
+        if [ -n "$quote" ]; then
+            [ "$ch" = "$quote" ] && quote=""
+            continue
+        fi
+
+        case "$ch" in
+            '#')
+                # Shell comments can hide a later newline-separated command.
+                # Under restrictive allowlists we reject them instead of trying
+                # to emulate every shell parsing edge case.
+                if [ "$i" -eq 0 ] || [[ "${input:i-1:1}" =~ [[:space:]] ]]; then
+                    return 0
+                fi
+                ;;
+            "'" | '"')
+                quote="$ch"
+                ;;
+            $'\n' | ';')
+                return 0
+                ;;
+            '&')
+                return 0
+                ;;
+            '|')
+                return 0
+                ;;
+            '(' | ')')
+                return 0
+                ;;
+            '<' | '>')
+                next="${input:i+1:1}"
+                [ "$next" = "(" ] && return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
 # Sanitize sensitive values for logging
 # Usage: sanitize_log_value "value" "field_name"
 sanitize_log_value() {

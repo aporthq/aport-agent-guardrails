@@ -232,6 +232,41 @@ grep -q "cannot safely remove hook entries" "$TEST_DIR/reset-cursor-invalid-json
 
 echo "  ✅ reset cursor preserves runtime on cleanup failure"
 
+CURSOR_SPECIFIC_OVERRIDE_DIR="$TEST_DIR/cursor-specific-override"
+CURSOR_GENERIC_OVERRIDE_DIR="$TEST_DIR/cursor-generic-override"
+mkdir -p "$CURSOR_SPECIFIC_OVERRIDE_DIR/aport" "$CURSOR_GENERIC_OVERRIDE_DIR/aport"
+cat > "$CURSOR_SPECIFIC_OVERRIDE_DIR/hooks.json" << 'EOF'
+{
+  "hooks": {
+    "preToolUse": [
+      {"command":"/tmp/aport-cursor-hook.sh","__aport_hook":true,"timeout":10}
+    ]
+  }
+}
+EOF
+touch "$CURSOR_SPECIFIC_OVERRIDE_DIR/aport/passport.json" "$CURSOR_GENERIC_OVERRIDE_DIR/aport/passport.json"
+
+echo "  Test: reset cursor prefers framework-specific config over generic APORT_CONFIG_DIR..."
+APORT_CONFIG_DIR="$CURSOR_GENERIC_OVERRIDE_DIR" APORT_CURSOR_CONFIG_DIR="$CURSOR_SPECIFIC_OVERRIDE_DIR" "$DISPATCHER" reset cursor --yes > "$TEST_DIR/reset-cursor-specific-over-generic.txt" 2>&1
+if [[ -d "$CURSOR_SPECIFIC_OVERRIDE_DIR/aport" ]]; then
+    echo "FAIL: expected framework-specific Cursor state to be removed" >&2
+    cat "$TEST_DIR/reset-cursor-specific-over-generic.txt" >&2
+    exit 1
+fi
+if [[ ! -f "$CURSOR_GENERIC_OVERRIDE_DIR/aport/passport.json" ]]; then
+    echo "FAIL: reset cursor removed generic APORT_CONFIG_DIR instead of framework-specific state" >&2
+    cat "$TEST_DIR/reset-cursor-specific-over-generic.txt" >&2
+    exit 1
+fi
+CURSOR_SPECIFIC_OVERRIDE_COUNT=$(jq -r '[.hooks.preToolUse[]? | select(.__aport_hook == true)] | length' "$CURSOR_SPECIFIC_OVERRIDE_DIR/hooks.json")
+if [[ "$CURSOR_SPECIFIC_OVERRIDE_COUNT" -ne 0 ]]; then
+    echo "FAIL: expected framework-specific Cursor hook entries to be removed" >&2
+    cat "$CURSOR_SPECIFIC_OVERRIDE_DIR/hooks.json" >&2
+    exit 1
+fi
+
+echo "  ✅ reset cursor prefers framework-specific config over generic APORT_CONFIG_DIR"
+
 CODEX_DIR="$TEST_DIR/.codex"
 mkdir -p "$CODEX_DIR/aport"
 cat > "$CODEX_DIR/hooks.json" << 'EOF'
@@ -331,6 +366,100 @@ fi
 
 echo "  ✅ reset codex cleans project-local hooks and preserves shared state"
 
+CODEX_GLOBAL_UNRELATED="$TEST_DIR/codex-global-unrelated"
+CODEX_GLOBAL_HOME="$TEST_DIR/codex-global-home"
+CODEX_GLOBAL_STATE="$CODEX_GLOBAL_HOME/.aport/codex"
+CODEX_GLOBAL_OTHER_PROJECT="$TEST_DIR/codex-global-other-project/.codex"
+mkdir -p "$CODEX_GLOBAL_UNRELATED" "$CODEX_GLOBAL_HOME/.codex" "$CODEX_GLOBAL_STATE/aport" "$CODEX_GLOBAL_OTHER_PROJECT"
+cat > "$CODEX_GLOBAL_HOME/.codex/hooks.json" << 'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"/tmp/aport-codex-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cat > "$CODEX_GLOBAL_OTHER_PROJECT/hooks.json" << 'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"/tmp/aport-codex-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+touch "$CODEX_GLOBAL_STATE/aport/passport.json"
+
+echo "  Test: reset codex from unrelated directory preserves global shared state..."
+(
+    cd "$CODEX_GLOBAL_UNRELATED"
+    HOME="$CODEX_GLOBAL_HOME" "$DISPATCHER" reset codex --yes > "$TEST_DIR/reset-codex-global-unrelated.txt" 2>&1
+)
+if [[ ! -f "$CODEX_GLOBAL_STATE/aport/passport.json" ]]; then
+    echo "FAIL: expected auto-global Codex reset to preserve shared state" >&2
+    cat "$TEST_DIR/reset-codex-global-unrelated.txt" >&2
+    exit 1
+fi
+CODEX_GLOBAL_APORT_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_GLOBAL_HOME/.codex/hooks.json")
+if [[ "$CODEX_GLOBAL_APORT_COUNT" -ne 0 ]]; then
+    echo "FAIL: expected global Codex hook entries to be removed" >&2
+    cat "$CODEX_GLOBAL_HOME/.codex/hooks.json" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex auto-global cleanup preserves shared state"
+
+CODEX_HOME_RESET_UNRELATED="$TEST_DIR/codex-home-reset-unrelated"
+CODEX_HOME_RESET_HOME="$TEST_DIR/codex-home-reset-home"
+CODEX_HOME_RESET_CODEX_HOME="$TEST_DIR/codex-home-reset-codex-home"
+CODEX_HOME_RESET_STATE="$CODEX_HOME_RESET_HOME/.aport/codex"
+mkdir -p "$CODEX_HOME_RESET_UNRELATED" "$CODEX_HOME_RESET_CODEX_HOME" "$CODEX_HOME_RESET_STATE/aport"
+cat > "$CODEX_HOME_RESET_CODEX_HOME/hooks.json" << 'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"/tmp/aport-codex-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+touch "$CODEX_HOME_RESET_STATE/aport/passport.json"
+
+echo "  Test: reset codex --global honors CODEX_HOME..."
+(
+    cd "$CODEX_HOME_RESET_UNRELATED"
+    HOME="$CODEX_HOME_RESET_HOME" CODEX_HOME="$CODEX_HOME_RESET_CODEX_HOME" "$DISPATCHER" reset codex --global --yes > "$TEST_DIR/reset-codex-codex-home.txt" 2>&1
+)
+CODEX_HOME_RESET_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_HOME_RESET_CODEX_HOME/hooks.json")
+if [[ "$CODEX_HOME_RESET_COUNT" -ne 0 ]]; then
+    echo "FAIL: reset codex --global should remove APort hooks from CODEX_HOME" >&2
+    cat "$CODEX_HOME_RESET_CODEX_HOME/hooks.json" >&2
+    exit 1
+fi
+[[ ! -e "$CODEX_HOME_RESET_HOME/.codex/hooks.json" ]] || {
+    echo "FAIL: reset codex --global should not create or mutate HOME/.codex when CODEX_HOME is active" >&2
+    cat "$CODEX_HOME_RESET_HOME/.codex/hooks.json" >&2
+    exit 1
+}
+
+echo "  ✅ reset codex --global honors CODEX_HOME"
+
 CODEX_CUSTOM_DIR="$TEST_DIR/codex-custom-project"
 CODEX_CUSTOM_HOOKS="$TEST_DIR/codex-custom-hooks"
 CODEX_CUSTOM_STATE="$TEST_DIR/codex-custom-home/.aport/codex"
@@ -369,6 +498,94 @@ fi
 
 echo "  ✅ reset codex honors explicit hook directory override"
 
+CODEX_SHARED_PROJECT="$TEST_DIR/codex-shared-project"
+CODEX_SHARED_HOME="$TEST_DIR/codex-shared-home"
+CODEX_SHARED_STATE="$TEST_DIR/codex-shared-state"
+CODEX_SHARED_HOOKS_A="$TEST_DIR/codex-shared-hooks-a"
+CODEX_SHARED_HOOKS_B="$TEST_DIR/codex-shared-hooks-b"
+mkdir -p "$CODEX_SHARED_PROJECT" "$CODEX_SHARED_HOME" "$CODEX_SHARED_STATE/aport/runtime/bin" "$CODEX_SHARED_HOOKS_A" "$CODEX_SHARED_HOOKS_B"
+touch "$CODEX_SHARED_STATE/aport/marker"
+for hooks_dir in "$CODEX_SHARED_HOOKS_A" "$CODEX_SHARED_HOOKS_B"; do
+    cat > "$hooks_dir/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"$CODEX_SHARED_STATE/aport/runtime/bin/aport-codex-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+done
+
+echo "  Test: reset codex preserves explicit shared state still referenced elsewhere..."
+(
+    cd "$CODEX_SHARED_PROJECT"
+    HOME="$CODEX_SHARED_HOME" APORT_CONFIG_DIR="$CODEX_SHARED_STATE" APORT_CODEX_HOOKS_DIR="$CODEX_SHARED_HOOKS_A" "$DISPATCHER" reset codex --yes > "$TEST_DIR/reset-codex-shared-state.txt" 2>&1
+)
+CODEX_SHARED_A_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_SHARED_HOOKS_A/hooks.json")
+CODEX_SHARED_B_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_SHARED_HOOKS_B/hooks.json")
+if [[ "$CODEX_SHARED_A_COUNT" -ne 0 || "$CODEX_SHARED_B_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected selected Codex hook cleaned and other shared hook preserved" >&2
+    cat "$CODEX_SHARED_HOOKS_A/hooks.json" >&2
+    cat "$CODEX_SHARED_HOOKS_B/hooks.json" >&2
+    exit 1
+fi
+if [[ ! -f "$CODEX_SHARED_STATE/aport/marker" ]]; then
+    echo "FAIL: reset codex removed explicitly shared state still referenced by another install" >&2
+    cat "$TEST_DIR/reset-codex-shared-state.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex preserves explicit shared state still referenced elsewhere"
+
+CODEX_CUSTOM_AND_PROJECT="$TEST_DIR/codex-custom-and-project"
+CODEX_CUSTOM_AND_PROJECT_HOME="$TEST_DIR/codex-custom-and-project-home"
+CODEX_CUSTOM_AND_PROJECT_STATE="$TEST_DIR/codex-custom-and-project-state"
+CODEX_CUSTOM_AND_PROJECT_HOOKS="$TEST_DIR/codex-custom-and-project-hooks"
+mkdir -p "$CODEX_CUSTOM_AND_PROJECT/.codex/aport" "$CODEX_CUSTOM_AND_PROJECT_HOME" "$CODEX_CUSTOM_AND_PROJECT_STATE/aport" "$CODEX_CUSTOM_AND_PROJECT_HOOKS"
+touch "$CODEX_CUSTOM_AND_PROJECT/.codex/aport/passport.json" "$CODEX_CUSTOM_AND_PROJECT_STATE/aport/passport.json"
+cat > "$CODEX_CUSTOM_AND_PROJECT/.codex/hooks.json" << 'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"/legacy/aport-codex-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cp "$CODEX_CUSTOM_AND_PROJECT/.codex/hooks.json" "$CODEX_CUSTOM_AND_PROJECT_HOOKS/hooks.json"
+
+echo "  Test: reset codex custom hook preserves project state and hooks..."
+(
+    cd "$CODEX_CUSTOM_AND_PROJECT"
+    HOME="$CODEX_CUSTOM_AND_PROJECT_HOME" APORT_CONFIG_DIR="$CODEX_CUSTOM_AND_PROJECT_STATE" APORT_CODEX_HOOKS_DIR="$CODEX_CUSTOM_AND_PROJECT_HOOKS" "$DISPATCHER" reset codex --yes > "$TEST_DIR/reset-codex-custom-preserve-project.txt" 2>&1
+)
+CODEX_CUSTOM_AND_PROJECT_CUSTOM_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_CUSTOM_AND_PROJECT_HOOKS/hooks.json")
+CODEX_CUSTOM_AND_PROJECT_PROJECT_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_CUSTOM_AND_PROJECT/.codex/hooks.json")
+if [[ "$CODEX_CUSTOM_AND_PROJECT_CUSTOM_COUNT" -ne 0 || "$CODEX_CUSTOM_AND_PROJECT_PROJECT_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected selected custom Codex hook cleaned and project hook preserved" >&2
+    cat "$CODEX_CUSTOM_AND_PROJECT_HOOKS/hooks.json" >&2
+    cat "$CODEX_CUSTOM_AND_PROJECT/.codex/hooks.json" >&2
+    exit 1
+fi
+if [[ ! -f "$CODEX_CUSTOM_AND_PROJECT/.codex/aport/passport.json" ]]; then
+    echo "FAIL: reset codex custom hook deleted unrelated project-local state" >&2
+    cat "$TEST_DIR/reset-codex-custom-preserve-project.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex custom hook preserves project state and hooks"
+
 CODEX_OVERRIDE_PROJECT="$TEST_DIR/codex-config-override-project"
 CODEX_OVERRIDE_HOME="$TEST_DIR/codex-config-override-home"
 CODEX_OVERRIDE_STATE="$TEST_DIR/codex-config-override-state"
@@ -392,6 +609,312 @@ if [[ ! -d "$CODEX_OVERRIDE_DEFAULT_STATE/aport" ]]; then
 fi
 
 echo "  ✅ reset codex honors generic APORT_CONFIG_DIR"
+
+CODEX_COLOCATED_PROJECT="$TEST_DIR/codex-colocated-project"
+CODEX_COLOCATED_HOME="$TEST_DIR/codex-colocated-home"
+CODEX_COLOCATED_GLOBAL="$CODEX_COLOCATED_HOME/.codex"
+CODEX_COLOCATED_PROJECT_CONFIG="$CODEX_COLOCATED_PROJECT/.codex"
+mkdir -p "$CODEX_COLOCATED_GLOBAL/aport/runtime/bin" "$CODEX_COLOCATED_PROJECT_CONFIG"
+touch "$CODEX_COLOCATED_GLOBAL/aport/passport.json"
+cat > "$CODEX_COLOCATED_GLOBAL/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"$CODEX_COLOCATED_GLOBAL/aport/runtime/bin/aport-codex-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cat > "$CODEX_COLOCATED_PROJECT_CONFIG/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"$CODEX_COLOCATED_GLOBAL/aport/runtime/bin/aport-codex-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+echo "  Test: reset codex --global preserves co-located state used by project hooks..."
+(
+    cd "$CODEX_COLOCATED_PROJECT"
+    HOME="$CODEX_COLOCATED_HOME" APORT_CONFIG_DIR="$CODEX_COLOCATED_GLOBAL" "$DISPATCHER" reset codex --global --yes > "$TEST_DIR/reset-codex-colocated-global.txt" 2>&1
+)
+CODEX_COLOCATED_GLOBAL_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_COLOCATED_GLOBAL/hooks.json")
+CODEX_COLOCATED_PROJECT_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_COLOCATED_PROJECT_CONFIG/hooks.json")
+if [[ "$CODEX_COLOCATED_GLOBAL_COUNT" -ne 0 || "$CODEX_COLOCATED_PROJECT_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected global Codex hook cleaned and project hook preserved" >&2
+    cat "$CODEX_COLOCATED_GLOBAL/hooks.json" >&2
+    cat "$CODEX_COLOCATED_PROJECT_CONFIG/hooks.json" >&2
+    exit 1
+fi
+if [[ ! -f "$CODEX_COLOCATED_GLOBAL/aport/passport.json" ]]; then
+    echo "FAIL: reset codex --global deleted state still referenced by project hook" >&2
+    cat "$TEST_DIR/reset-codex-colocated-global.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex --global preserves co-located state used by project hooks"
+
+CODEX_CROSS_HOME="$TEST_DIR/codex-cross-home"
+CODEX_CROSS_GLOBAL="$CODEX_CROSS_HOME/.codex"
+CODEX_CROSS_PROJECT_A="$TEST_DIR/codex-cross-project-a"
+CODEX_CROSS_PROJECT_B="$TEST_DIR/codex-cross-project-b"
+mkdir -p "$CODEX_CROSS_GLOBAL/aport/runtime/bin" "$CODEX_CROSS_PROJECT_A/.codex" "$CODEX_CROSS_PROJECT_B"
+touch "$CODEX_CROSS_GLOBAL/aport/passport.json" "$CODEX_CROSS_GLOBAL/aport/runtime/bin/marker"
+cat > "$CODEX_CROSS_GLOBAL/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"APORT_CODEX_CONFIG_DIR='$CODEX_CROSS_GLOBAL' '$CODEX_CROSS_GLOBAL/aport/runtime/bin/aport-codex-hook.sh'","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cp "$CODEX_CROSS_GLOBAL/hooks.json" "$CODEX_CROSS_PROJECT_A/.codex/hooks.json"
+
+echo "  Test: reset codex --global preserves state referenced by another project..."
+(
+    cd "$CODEX_CROSS_PROJECT_B"
+    HOME="$CODEX_CROSS_HOME" APORT_CODEX_CONFIG_DIR="$CODEX_CROSS_GLOBAL" "$DISPATCHER" reset codex --global --yes > "$TEST_DIR/reset-codex-cross-project.txt" 2>&1
+)
+CODEX_CROSS_GLOBAL_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_CROSS_GLOBAL/hooks.json")
+CODEX_CROSS_PROJECT_A_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_CROSS_PROJECT_A/.codex/hooks.json")
+if [[ "$CODEX_CROSS_GLOBAL_COUNT" -ne 0 || "$CODEX_CROSS_PROJECT_A_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected global Codex hook cleaned and unrelated project hook preserved" >&2
+    cat "$CODEX_CROSS_GLOBAL/hooks.json" >&2
+    cat "$CODEX_CROSS_PROJECT_A/.codex/hooks.json" >&2
+    exit 1
+fi
+if [[ ! -f "$CODEX_CROSS_GLOBAL/aport/runtime/bin/marker" || ! -f "$CODEX_CROSS_GLOBAL/aport/passport.json" ]]; then
+    echo "FAIL: reset codex --global deleted state still referenced by another project" >&2
+    cat "$TEST_DIR/reset-codex-cross-project.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex --global preserves state referenced by another project"
+
+CODEX_PROJECT_SHARED_PROJECT="$TEST_DIR/codex-project-shared-project"
+CODEX_PROJECT_SHARED_HOME="$TEST_DIR/codex-project-shared-home"
+CODEX_PROJECT_SHARED_PROJECT_CONFIG="$CODEX_PROJECT_SHARED_PROJECT/.codex"
+CODEX_PROJECT_SHARED_GLOBAL_CONFIG="$CODEX_PROJECT_SHARED_HOME/.codex"
+mkdir -p "$CODEX_PROJECT_SHARED_PROJECT_CONFIG/aport/runtime/bin" "$CODEX_PROJECT_SHARED_GLOBAL_CONFIG"
+touch "$CODEX_PROJECT_SHARED_PROJECT_CONFIG/aport/passport.json"
+cat > "$CODEX_PROJECT_SHARED_PROJECT_CONFIG/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"APORT_CODEX_CONFIG_DIR='$CODEX_PROJECT_SHARED_PROJECT_CONFIG' '$CODEX_PROJECT_SHARED_PROJECT_CONFIG/aport/runtime/bin/aport-codex-hook.sh'","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cp "$CODEX_PROJECT_SHARED_PROJECT_CONFIG/hooks.json" "$CODEX_PROJECT_SHARED_GLOBAL_CONFIG/hooks.json"
+
+echo "  Test: reset codex --project preserves project state still used by global hooks..."
+(
+    cd "$CODEX_PROJECT_SHARED_PROJECT"
+    HOME="$CODEX_PROJECT_SHARED_HOME" APORT_CODEX_CONFIG_DIR="$CODEX_PROJECT_SHARED_PROJECT_CONFIG" "$DISPATCHER" reset codex --project --yes > "$TEST_DIR/reset-codex-project-shared-global.txt" 2>&1
+)
+CODEX_PROJECT_SHARED_PROJECT_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_PROJECT_SHARED_PROJECT_CONFIG/hooks.json")
+CODEX_PROJECT_SHARED_GLOBAL_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_PROJECT_SHARED_GLOBAL_CONFIG/hooks.json")
+if [[ "$CODEX_PROJECT_SHARED_PROJECT_COUNT" -ne 0 || "$CODEX_PROJECT_SHARED_GLOBAL_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected project Codex hook cleaned and global hook preserved" >&2
+    cat "$CODEX_PROJECT_SHARED_PROJECT_CONFIG/hooks.json" >&2
+    cat "$CODEX_PROJECT_SHARED_GLOBAL_CONFIG/hooks.json" >&2
+    exit 1
+fi
+if [[ ! -f "$CODEX_PROJECT_SHARED_PROJECT_CONFIG/aport/passport.json" ]]; then
+    echo "FAIL: reset codex --project deleted state still referenced by global hook" >&2
+    cat "$TEST_DIR/reset-codex-project-shared-global.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex --project preserves project state used by global hooks"
+
+CODEX_GEMINI_SHARED_PROJECT="$TEST_DIR/codex-gemini-shared-project"
+CODEX_GEMINI_SHARED_HOME="$TEST_DIR/codex-gemini-shared-home"
+CODEX_GEMINI_SHARED_CODEX="$CODEX_GEMINI_SHARED_PROJECT/.codex"
+CODEX_GEMINI_SHARED_GEMINI="$CODEX_GEMINI_SHARED_PROJECT/.gemini"
+mkdir -p "$CODEX_GEMINI_SHARED_CODEX/aport/runtime/bin" "$CODEX_GEMINI_SHARED_GEMINI" "$CODEX_GEMINI_SHARED_HOME"
+touch "$CODEX_GEMINI_SHARED_CODEX/aport/passport.json"
+cat > "$CODEX_GEMINI_SHARED_CODEX/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"APORT_CODEX_CONFIG_DIR='$CODEX_GEMINI_SHARED_CODEX' '$CODEX_GEMINI_SHARED_CODEX/aport/runtime/bin/aport-codex-hook.sh'","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cat > "$CODEX_GEMINI_SHARED_GEMINI/settings.json" << EOF
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"APORT_GEMINI_CLI_CONFIG_DIR='$CODEX_GEMINI_SHARED_CODEX' '$CODEX_GEMINI_SHARED_CODEX/aport/runtime/bin/aport-gemini-cli-hook.sh'","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+echo "  Test: reset codex preserves shared state still used by Gemini..."
+(
+    cd "$CODEX_GEMINI_SHARED_PROJECT"
+    HOME="$CODEX_GEMINI_SHARED_HOME" APORT_CODEX_CONFIG_DIR="$CODEX_GEMINI_SHARED_CODEX" "$DISPATCHER" reset codex --project --yes > "$TEST_DIR/reset-codex-preserve-gemini-shared.txt" 2>&1
+)
+CODEX_GEMINI_CODEX_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_GEMINI_SHARED_CODEX/hooks.json")
+CODEX_GEMINI_GEMINI_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_GEMINI_SHARED_GEMINI/settings.json")
+if [[ "$CODEX_GEMINI_CODEX_COUNT" -ne 0 || "$CODEX_GEMINI_GEMINI_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected Codex hook cleaned and Gemini hook preserved" >&2
+    cat "$CODEX_GEMINI_SHARED_CODEX/hooks.json" >&2
+    cat "$CODEX_GEMINI_SHARED_GEMINI/settings.json" >&2
+    exit 1
+fi
+if [[ ! -f "$CODEX_GEMINI_SHARED_CODEX/aport/passport.json" ]]; then
+    echo "FAIL: reset codex deleted state still referenced by Gemini" >&2
+    cat "$TEST_DIR/reset-codex-preserve-gemini-shared.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex preserves shared state still used by Gemini"
+
+CODEX_GEMINI_PROJECT_LOCAL="$TEST_DIR/codex-gemini-project-local"
+CODEX_GEMINI_PROJECT_LOCAL_HOME="$TEST_DIR/codex-gemini-project-local-home"
+mkdir -p "$CODEX_GEMINI_PROJECT_LOCAL/.codex/aport/runtime/bin" "$CODEX_GEMINI_PROJECT_LOCAL/.gemini" "$CODEX_GEMINI_PROJECT_LOCAL_HOME"
+touch "$CODEX_GEMINI_PROJECT_LOCAL/.codex/aport/passport.json"
+cat > "$CODEX_GEMINI_PROJECT_LOCAL/.codex/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"APORT_CODEX_CONFIG_DIR='$CODEX_GEMINI_PROJECT_LOCAL/.codex' '$CODEX_GEMINI_PROJECT_LOCAL/.codex/aport/runtime/bin/aport-codex-hook.sh'","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cat > "$CODEX_GEMINI_PROJECT_LOCAL/.gemini/settings.json" << EOF
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"APORT_GEMINI_CLI_CONFIG_DIR='$CODEX_GEMINI_PROJECT_LOCAL/.codex' '$CODEX_GEMINI_PROJECT_LOCAL/.codex/aport/runtime/bin/aport-gemini-cli-hook.sh'","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+echo "  Test: reset codex preserves project-local state still used by Gemini..."
+(
+    cd "$CODEX_GEMINI_PROJECT_LOCAL"
+    HOME="$CODEX_GEMINI_PROJECT_LOCAL_HOME" "$DISPATCHER" reset codex --project --yes > "$TEST_DIR/reset-codex-project-local-preserve-gemini.txt" 2>&1
+)
+CODEX_GEMINI_PROJECT_LOCAL_CODEX_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_GEMINI_PROJECT_LOCAL/.codex/hooks.json")
+CODEX_GEMINI_PROJECT_LOCAL_GEMINI_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_GEMINI_PROJECT_LOCAL/.gemini/settings.json")
+if [[ "$CODEX_GEMINI_PROJECT_LOCAL_CODEX_COUNT" -ne 0 || "$CODEX_GEMINI_PROJECT_LOCAL_GEMINI_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected project Codex hook cleaned and Gemini hook preserved" >&2
+    cat "$CODEX_GEMINI_PROJECT_LOCAL/.codex/hooks.json" >&2
+    cat "$CODEX_GEMINI_PROJECT_LOCAL/.gemini/settings.json" >&2
+    exit 1
+fi
+if [[ ! -f "$CODEX_GEMINI_PROJECT_LOCAL/.codex/aport/passport.json" ]]; then
+    echo "FAIL: reset codex deleted project-local state still referenced by Gemini" >&2
+    cat "$TEST_DIR/reset-codex-project-local-preserve-gemini.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex preserves project-local state still used by Gemini"
+
+CODEX_GOOSE_PROJECT_LOCAL="$TEST_DIR/codex-goose-project-local"
+CODEX_GOOSE_PROJECT_LOCAL_HOME="$TEST_DIR/codex-goose-project-local-home"
+CODEX_GOOSE_PLUGIN="$CODEX_GOOSE_PROJECT_LOCAL_HOME/.agents/plugins/aport-guardrail"
+mkdir -p "$CODEX_GOOSE_PROJECT_LOCAL/.codex/aport/runtime/bin" "$CODEX_GOOSE_PROJECT_LOCAL_HOME" "$CODEX_GOOSE_PLUGIN/scripts"
+touch "$CODEX_GOOSE_PROJECT_LOCAL/.codex/aport/passport.json"
+touch "$CODEX_GOOSE_PROJECT_LOCAL/.codex/aport/runtime/bin/aport-goose-hook.sh"
+cat > "$CODEX_GOOSE_PROJECT_LOCAL/.codex/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"APORT_CODEX_CONFIG_DIR='$CODEX_GOOSE_PROJECT_LOCAL/.codex' '$CODEX_GOOSE_PROJECT_LOCAL/.codex/aport/runtime/bin/aport-codex-hook.sh'","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cat > "$CODEX_GOOSE_PLUGIN/plugin.json" << 'EOF'
+{"name":"aport-guardrail","version":"1.0.0"}
+EOF
+cat > "$CODEX_GOOSE_PLUGIN/scripts/aport-goose-hook.sh" << EOF
+#!/bin/bash
+export APORT_GOOSE_CONFIG_DIR="$CODEX_GOOSE_PROJECT_LOCAL/.codex"
+export APORT_CONFIG_DIR="\${APORT_CONFIG_DIR:-\$APORT_GOOSE_CONFIG_DIR}"
+exec "$CODEX_GOOSE_PROJECT_LOCAL/.codex/aport/runtime/bin/aport-goose-hook.sh" "\$@"
+EOF
+chmod +x "$CODEX_GOOSE_PLUGIN/scripts/aport-goose-hook.sh"
+
+echo "  Test: reset codex preserves project-local state still used by Goose..."
+(
+    cd "$CODEX_GOOSE_PROJECT_LOCAL"
+    HOME="$CODEX_GOOSE_PROJECT_LOCAL_HOME" "$DISPATCHER" reset codex --project --yes > "$TEST_DIR/reset-codex-project-local-preserve-goose.txt" 2>&1
+)
+CODEX_GOOSE_PROJECT_LOCAL_CODEX_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true)] | length' "$CODEX_GOOSE_PROJECT_LOCAL/.codex/hooks.json")
+if [[ "$CODEX_GOOSE_PROJECT_LOCAL_CODEX_COUNT" -ne 0 ]]; then
+    echo "FAIL: expected project Codex hook cleaned" >&2
+    cat "$CODEX_GOOSE_PROJECT_LOCAL/.codex/hooks.json" >&2
+    exit 1
+fi
+if [[ ! -f "$CODEX_GOOSE_PROJECT_LOCAL/.codex/aport/passport.json" ]]; then
+    echo "FAIL: reset codex deleted project-local state still referenced by Goose" >&2
+    cat "$TEST_DIR/reset-codex-project-local-preserve-goose.txt" >&2
+    exit 1
+fi
+if [[ ! -x "$CODEX_GOOSE_PLUGIN/scripts/aport-goose-hook.sh" ]]; then
+    echo "FAIL: reset codex removed Goose wrapper" >&2
+    exit 1
+fi
+
+echo "  ✅ reset codex preserves project-local state still used by Goose"
 
 CODEX_BACKUP_PROJECT="$TEST_DIR/codex-backup-project"
 CODEX_BACKUP_HOME="$TEST_DIR/codex-backup-home"
@@ -670,6 +1193,193 @@ fi
 
 echo "  ✅ reset gemini honors explicit hook directory override"
 
+GEMINI_SHARED_PROJECT="$TEST_DIR/gemini-shared-project"
+GEMINI_SHARED_HOME="$TEST_DIR/gemini-shared-home"
+GEMINI_SHARED_STATE="$TEST_DIR/gemini-shared-state"
+GEMINI_SHARED_HOOKS_A="$TEST_DIR/gemini-shared-hooks-a"
+GEMINI_SHARED_HOOKS_B="$TEST_DIR/gemini-shared-hooks-b"
+mkdir -p "$GEMINI_SHARED_PROJECT" "$GEMINI_SHARED_HOME" "$GEMINI_SHARED_STATE/aport/runtime/bin" "$GEMINI_SHARED_HOOKS_A" "$GEMINI_SHARED_HOOKS_B"
+touch "$GEMINI_SHARED_STATE/aport/marker"
+for hooks_dir in "$GEMINI_SHARED_HOOKS_A" "$GEMINI_SHARED_HOOKS_B"; do
+    cat > "$hooks_dir/settings.json" << EOF
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"$GEMINI_SHARED_STATE/aport/runtime/bin/aport-gemini-cli-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+done
+
+echo "  Test: reset gemini preserves explicit shared state still referenced elsewhere..."
+(
+    cd "$GEMINI_SHARED_PROJECT"
+    HOME="$GEMINI_SHARED_HOME" APORT_CONFIG_DIR="$GEMINI_SHARED_STATE" APORT_GEMINI_CLI_HOOKS_DIR="$GEMINI_SHARED_HOOKS_A" "$DISPATCHER" reset gemini-cli --yes > "$TEST_DIR/reset-gemini-shared-state.txt" 2>&1
+)
+GEMINI_SHARED_A_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$GEMINI_SHARED_HOOKS_A/settings.json")
+GEMINI_SHARED_B_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$GEMINI_SHARED_HOOKS_B/settings.json")
+if [[ "$GEMINI_SHARED_A_COUNT" -ne 0 || "$GEMINI_SHARED_B_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected selected Gemini hook cleaned and other shared hook preserved" >&2
+    cat "$GEMINI_SHARED_HOOKS_A/settings.json" >&2
+    cat "$GEMINI_SHARED_HOOKS_B/settings.json" >&2
+    exit 1
+fi
+if [[ ! -f "$GEMINI_SHARED_STATE/aport/marker" ]]; then
+    echo "FAIL: reset gemini removed explicitly shared state still referenced by another install" >&2
+    cat "$TEST_DIR/reset-gemini-shared-state.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset gemini preserves explicit shared state still referenced elsewhere"
+
+GEMINI_CUSTOM_AND_PROJECT="$TEST_DIR/gemini-custom-and-project"
+GEMINI_CUSTOM_AND_PROJECT_HOME="$TEST_DIR/gemini-custom-and-project-home"
+GEMINI_CUSTOM_AND_PROJECT_STATE="$TEST_DIR/gemini-custom-and-project-state"
+GEMINI_CUSTOM_AND_PROJECT_HOOKS="$TEST_DIR/gemini-custom-and-project-hooks"
+mkdir -p "$GEMINI_CUSTOM_AND_PROJECT/.gemini/aport" "$GEMINI_CUSTOM_AND_PROJECT_HOME" "$GEMINI_CUSTOM_AND_PROJECT_STATE/aport" "$GEMINI_CUSTOM_AND_PROJECT_HOOKS"
+touch "$GEMINI_CUSTOM_AND_PROJECT/.gemini/aport/passport.json" "$GEMINI_CUSTOM_AND_PROJECT_STATE/aport/passport.json"
+cat > "$GEMINI_CUSTOM_AND_PROJECT/.gemini/settings.json" << 'EOF'
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"/legacy/aport-gemini-cli-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cp "$GEMINI_CUSTOM_AND_PROJECT/.gemini/settings.json" "$GEMINI_CUSTOM_AND_PROJECT_HOOKS/settings.json"
+
+echo "  Test: reset gemini custom hook preserves project state and hooks..."
+(
+    cd "$GEMINI_CUSTOM_AND_PROJECT"
+    HOME="$GEMINI_CUSTOM_AND_PROJECT_HOME" APORT_CONFIG_DIR="$GEMINI_CUSTOM_AND_PROJECT_STATE" APORT_GEMINI_CLI_HOOKS_DIR="$GEMINI_CUSTOM_AND_PROJECT_HOOKS" "$DISPATCHER" reset gemini-cli --yes > "$TEST_DIR/reset-gemini-custom-preserve-project.txt" 2>&1
+)
+GEMINI_CUSTOM_AND_PROJECT_CUSTOM_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$GEMINI_CUSTOM_AND_PROJECT_HOOKS/settings.json")
+GEMINI_CUSTOM_AND_PROJECT_PROJECT_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$GEMINI_CUSTOM_AND_PROJECT/.gemini/settings.json")
+if [[ "$GEMINI_CUSTOM_AND_PROJECT_CUSTOM_COUNT" -ne 0 || "$GEMINI_CUSTOM_AND_PROJECT_PROJECT_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected selected custom Gemini hook cleaned and project hook preserved" >&2
+    cat "$GEMINI_CUSTOM_AND_PROJECT_HOOKS/settings.json" >&2
+    cat "$GEMINI_CUSTOM_AND_PROJECT/.gemini/settings.json" >&2
+    exit 1
+fi
+if [[ ! -f "$GEMINI_CUSTOM_AND_PROJECT/.gemini/aport/passport.json" ]]; then
+    echo "FAIL: reset gemini custom hook deleted unrelated project-local state" >&2
+    cat "$TEST_DIR/reset-gemini-custom-preserve-project.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset gemini custom hook preserves project state and hooks"
+
+GEMINI_COLOCATED_PROJECT="$TEST_DIR/gemini-colocated-project"
+GEMINI_COLOCATED_HOME="$TEST_DIR/gemini-colocated-home"
+GEMINI_COLOCATED_GLOBAL="$GEMINI_COLOCATED_HOME/.gemini"
+GEMINI_COLOCATED_PROJECT_CONFIG="$GEMINI_COLOCATED_PROJECT/.gemini"
+mkdir -p "$GEMINI_COLOCATED_GLOBAL/aport/runtime/bin" "$GEMINI_COLOCATED_PROJECT_CONFIG"
+touch "$GEMINI_COLOCATED_GLOBAL/aport/passport.json"
+cat > "$GEMINI_COLOCATED_GLOBAL/settings.json" << EOF
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"$GEMINI_COLOCATED_GLOBAL/aport/runtime/bin/aport-gemini-cli-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cat > "$GEMINI_COLOCATED_PROJECT_CONFIG/settings.json" << EOF
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type":"command","command":"$GEMINI_COLOCATED_GLOBAL/aport/runtime/bin/aport-gemini-cli-hook.sh","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+echo "  Test: reset gemini --global preserves co-located state used by project hooks..."
+(
+    cd "$GEMINI_COLOCATED_PROJECT"
+    HOME="$GEMINI_COLOCATED_HOME" APORT_CONFIG_DIR="$GEMINI_COLOCATED_GLOBAL" "$DISPATCHER" reset gemini-cli --global --yes > "$TEST_DIR/reset-gemini-colocated-global.txt" 2>&1
+)
+GEMINI_COLOCATED_GLOBAL_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$GEMINI_COLOCATED_GLOBAL/settings.json")
+GEMINI_COLOCATED_PROJECT_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$GEMINI_COLOCATED_PROJECT_CONFIG/settings.json")
+if [[ "$GEMINI_COLOCATED_GLOBAL_COUNT" -ne 0 || "$GEMINI_COLOCATED_PROJECT_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected global Gemini hook cleaned and project hook preserved" >&2
+    cat "$GEMINI_COLOCATED_GLOBAL/settings.json" >&2
+    cat "$GEMINI_COLOCATED_PROJECT_CONFIG/settings.json" >&2
+    exit 1
+fi
+if [[ ! -f "$GEMINI_COLOCATED_GLOBAL/aport/passport.json" ]]; then
+    echo "FAIL: reset gemini --global deleted state still referenced by project hook" >&2
+    cat "$TEST_DIR/reset-gemini-colocated-global.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset gemini --global preserves co-located state used by project hooks"
+
+GEMINI_CROSS_HOME="$TEST_DIR/gemini-cross-home"
+GEMINI_CROSS_GLOBAL="$GEMINI_CROSS_HOME/.gemini"
+GEMINI_CROSS_PROJECT_A="$TEST_DIR/gemini-cross-project-a"
+GEMINI_CROSS_PROJECT_B="$TEST_DIR/gemini-cross-project-b"
+mkdir -p "$GEMINI_CROSS_GLOBAL/aport/runtime/bin" "$GEMINI_CROSS_PROJECT_A/.gemini" "$GEMINI_CROSS_PROJECT_B"
+touch "$GEMINI_CROSS_GLOBAL/aport/passport.json" "$GEMINI_CROSS_GLOBAL/aport/runtime/bin/marker"
+cat > "$GEMINI_CROSS_GLOBAL/settings.json" << EOF
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {"type":"command","command":"APORT_GEMINI_CLI_CONFIG_DIR='$GEMINI_CROSS_GLOBAL' '$GEMINI_CROSS_GLOBAL/aport/runtime/bin/aport-gemini-cli-hook.sh'","__aport_hook":true}
+        ]
+      }
+    ]
+  }
+}
+EOF
+cp "$GEMINI_CROSS_GLOBAL/settings.json" "$GEMINI_CROSS_PROJECT_A/.gemini/settings.json"
+
+echo "  Test: reset gemini --global preserves state referenced by another project..."
+(
+    cd "$GEMINI_CROSS_PROJECT_B"
+    HOME="$GEMINI_CROSS_HOME" APORT_GEMINI_CLI_CONFIG_DIR="$GEMINI_CROSS_GLOBAL" "$DISPATCHER" reset gemini-cli --global --yes > "$TEST_DIR/reset-gemini-cross-project.txt" 2>&1
+)
+GEMINI_CROSS_GLOBAL_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$GEMINI_CROSS_GLOBAL/settings.json")
+GEMINI_CROSS_PROJECT_A_COUNT=$(jq -r '[.hooks.BeforeTool[]?.hooks[]? | select(.__aport_hook == true)] | length' "$GEMINI_CROSS_PROJECT_A/.gemini/settings.json")
+if [[ "$GEMINI_CROSS_GLOBAL_COUNT" -ne 0 || "$GEMINI_CROSS_PROJECT_A_COUNT" -ne 1 ]]; then
+    echo "FAIL: expected global Gemini hook cleaned and unrelated project hook preserved" >&2
+    cat "$GEMINI_CROSS_GLOBAL/settings.json" >&2
+    cat "$GEMINI_CROSS_PROJECT_A/.gemini/settings.json" >&2
+    exit 1
+fi
+if [[ ! -f "$GEMINI_CROSS_GLOBAL/aport/runtime/bin/marker" || ! -f "$GEMINI_CROSS_GLOBAL/aport/passport.json" ]]; then
+    echo "FAIL: reset gemini --global deleted state still referenced by another project" >&2
+    cat "$TEST_DIR/reset-gemini-cross-project.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset gemini --global preserves state referenced by another project"
+
 GEMINI_BACKUP_PROJECT="$TEST_DIR/gemini-backup-project"
 GEMINI_BACKUP_HOME="$TEST_DIR/gemini-backup-home"
 GEMINI_BACKUP_HOOKS="$GEMINI_BACKUP_PROJECT/.gemini"
@@ -934,6 +1644,38 @@ if [[ ! -d "$GOOSE_CUSTOM_STATE" ]]; then
 fi
 
 echo "  ✅ reset goose honors explicit plugin directory override"
+
+GOOSE_CUSTOM_TWO_PROJECT_HOME="$TEST_DIR/goose-custom-two-project-home"
+GOOSE_CUSTOM_TWO_PROJECT_A="$TEST_DIR/goose-custom-two-project-a"
+GOOSE_CUSTOM_TWO_PROJECT_B="$TEST_DIR/goose-custom-two-project-b"
+GOOSE_CUSTOM_TWO_PROJECT_PLUGIN="$TEST_DIR/goose-custom-two-project-plugin"
+GOOSE_CUSTOM_TWO_PROJECT_STATE="$TEST_DIR/goose-custom-two-project-state"
+GOOSE_CUSTOM_TWO_PROJECT_OTHER_PLUGIN="$GOOSE_CUSTOM_TWO_PROJECT_B/.agents/plugins/aport-guardrail"
+mkdir -p "$GOOSE_CUSTOM_TWO_PROJECT_A" "$GOOSE_CUSTOM_TWO_PROJECT_HOME" "$GOOSE_CUSTOM_TWO_PROJECT_PLUGIN" "$GOOSE_CUSTOM_TWO_PROJECT_OTHER_PLUGIN" "$GOOSE_CUSTOM_TWO_PROJECT_STATE/aport"
+printf '{"name":"aport-guardrail","version":"1.0.0"}\n' > "$GOOSE_CUSTOM_TWO_PROJECT_PLUGIN/plugin.json"
+printf '{"name":"aport-guardrail","version":"1.0.0"}\n' > "$GOOSE_CUSTOM_TWO_PROJECT_OTHER_PLUGIN/plugin.json"
+touch "$GOOSE_CUSTOM_TWO_PROJECT_STATE/aport/passport.json"
+
+echo "  Test: reset goose custom plugin preserves shared state used by another project..."
+(
+    cd "$GOOSE_CUSTOM_TWO_PROJECT_A"
+    HOME="$GOOSE_CUSTOM_TWO_PROJECT_HOME" APORT_GOOSE_CONFIG_DIR="$GOOSE_CUSTOM_TWO_PROJECT_STATE" APORT_GOOSE_PLUGIN_DIR="$GOOSE_CUSTOM_TWO_PROJECT_PLUGIN" "$DISPATCHER" reset goose --yes > "$TEST_DIR/reset-goose-custom-two-project.txt" 2>&1
+)
+if [[ -d "$GOOSE_CUSTOM_TWO_PROJECT_PLUGIN" ]]; then
+    echo "FAIL: expected selected custom Goose plugin directory to be removed" >&2
+    exit 1
+fi
+if [[ ! -d "$GOOSE_CUSTOM_TWO_PROJECT_OTHER_PLUGIN" ]]; then
+    echo "FAIL: expected other project Goose plugin to remain" >&2
+    exit 1
+fi
+if [[ ! -f "$GOOSE_CUSTOM_TWO_PROJECT_STATE/aport/passport.json" ]]; then
+    echo "FAIL: custom Goose reset deleted shared state used by another project" >&2
+    cat "$TEST_DIR/reset-goose-custom-two-project.txt" >&2
+    exit 1
+fi
+
+echo "  ✅ reset goose custom plugin preserves shared state used by another project"
 
 GOOSE_SHARED_CUSTOM_HOME="$TEST_DIR/goose-shared-custom-home"
 GOOSE_SHARED_CUSTOM_PROJECT="$TEST_DIR/goose-shared-custom-project"

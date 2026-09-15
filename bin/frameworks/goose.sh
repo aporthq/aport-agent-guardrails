@@ -71,7 +71,7 @@ run_setup() {
         setup_from_agentsmd_or_wizard ${forward_args[@]+"${forward_args[@]}"}
     fi
 
-    [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
+    secure_framework_passport_file_if_present "$config_dir"
     [[ -z "$hosted_agent_id" && -n "${APORT_AGENT_ID:-}" ]] && hosted_agent_id="$APORT_AGENT_ID"
 
     select_guardrail_mode "goose" "$hosted_agent_id"
@@ -93,8 +93,7 @@ run_setup() {
     _write_goose_plugin "$plugin_dir" "$config_dir" "$hook_script" "$APORT_SELECTED_ENFORCEMENT"
 
     mkdir -p "$config_dir/aport"
-    : >> "$config_dir/aport/audit.log"
-    chmod 600 "$config_dir/aport/audit.log" 2> /dev/null || true
+    initialize_framework_audit_log "$config_dir"
 
     echo ""
     echo "  Next steps (Goose):"
@@ -140,7 +139,7 @@ const hooks = {
         hooks: [
           {
             type: "command",
-            command: "${PLUGIN_ROOT}/scripts/aport-goose-hook.sh",
+            command: "\"${PLUGIN_ROOT}/scripts/aport-goose-hook.sh\"",
             timeout,
             on_failure: onFailure
           }

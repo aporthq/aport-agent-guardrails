@@ -9,8 +9,10 @@ ensure_aport_dir_secure() {
     local config_dir
     config_dir="$(get_config_dir "$framework")"
     config_dir="${config_dir/#\~/$HOME}"
-    mkdir -p "$config_dir/aport"
-    chmod 700 "$config_dir/aport"
+    refuse_symlink_path "$config_dir" || return 1
+    refuse_symlink_path "$config_dir/aport" || return 1
+    mkdir -p "$config_dir/aport" || return 1
+    chmod 700 "$config_dir/aport" || return 1
     echo "$config_dir"
 }
 
@@ -32,6 +34,28 @@ resolve_hook_script_path() {
     fi
 
     echo "$hook_script"
+}
+
+initialize_framework_audit_log() {
+    local config_dir="${1/#\~/$HOME}"
+    local audit_log="$config_dir/aport/audit.log"
+
+    refuse_symlink_path "$audit_log" || return 1
+    : >> "$audit_log" || return 1
+    chmod 600 "$audit_log" 2> /dev/null || true
+}
+
+secure_framework_passport_file_if_present() {
+    local config_dir="${1/#\~/$HOME}"
+    local passport_file="$config_dir/aport/passport.json"
+
+    [[ -e "$passport_file" ]] || return 0
+    refuse_symlink_path "$passport_file" || return 1
+    if [[ ! -f "$passport_file" ]]; then
+        log_error "Refusing to use non-file passport path: $passport_file"
+        return 1
+    fi
+    chmod 600 "$passport_file" || return 1
 }
 
 warn_if_framework_command_missing() {
@@ -73,4 +97,4 @@ refuse_symlink_path() {
     done
 }
 
-export -f ensure_aport_dir_secure resolve_hook_script_path warn_if_framework_command_missing refuse_symlink_path
+export -f ensure_aport_dir_secure resolve_hook_script_path initialize_framework_audit_log secure_framework_passport_file_if_present warn_if_framework_command_missing refuse_symlink_path

@@ -72,8 +72,20 @@ aport_is_reentrant_guardrail_command() {
     local first_token
 
     [ -n "$command_text" ] || return 1
+    if command -v shell_command_has_unquoted_control_operator > /dev/null 2>&1; then
+        shell_command_has_unquoted_control_operator "$command_text" && return 1
+    else
+        # Conservative fallback for callers that source this file without the
+        # validation helpers. Reentrant bypass is only safe for one simple
+        # guardrail command, never for background jobs or chained commands.
+        case "$command_text" in
+            *$'\n'* | *\;* | *'&'* | *'|'* | *'>'* | *'<'* | *'`'* | *'$('* | *'#'*)
+                return 1
+                ;;
+        esac
+    fi
     case "$command_text" in
-        *$'\n'* | *\;* | *'&&'* | *'||'* | *'|'* | *'>'* | *'<'* | *'`'* | *'$('*)
+        *$'\n'* | *\;* | *'&'* | *'|'* | *'>'* | *'<'* | *'`'* | *'$('* | *'#'*)
             return 1
             ;;
     esac
@@ -108,6 +120,82 @@ aport_hook_enforcement_mode() {
 
 aport_hook_is_warn_mode() {
     [ "$(aport_hook_enforcement_mode)" = "warn" ]
+}
+
+aport_hook_is_hard_failure_reason() {
+    case "${1:-}" in
+        oap.evaluator_crash | \
+            oap.evaluation_error | \
+            oap.evaluator_failed | \
+            oap.missing_dependency | \
+            oap.passport_not_found | \
+            oap.passport_invalid | \
+            oap.passport_suspended | \
+            oap.passport_version_mismatch | \
+            oap.invalid_tool_name | \
+            oap.missing_command | \
+            oap.missing_file_path | \
+            oap.invalid_file_path | \
+            oap.command_chain_unsupported | \
+            oap.command_injection_detected | \
+            oap.multi_path_read_unsupported | \
+            oap.glob_read_unsupported | \
+            oap.recursive_search_unsupported | \
+            oap.metadata_enumeration_unsupported | \
+            oap.context_too_large | \
+            oap.input_too_large | \
+            oap.invalid_json | \
+            oap.invalid_tool_arguments | \
+            oap.invalid_limit | \
+            oap.missing_required_context | \
+            oap.invalid_url | \
+            oap.domain_mismatch | \
+            oap.session_state_unavailable | \
+            oap.rate_state_unavailable)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+aport_hook_shell_override_is_trusted() {
+    local shell_path="${1:-}"
+    local shell_base resolved configured_real resolved_real
+
+    [ -z "$shell_path" ] && return 0
+    case "$shell_path" in
+        *[$'\001'-$'\037'$'\177']* | *[[:space:]]* | *\;* | *'&'* | *'|'* | *'>'* | *'<'* | *'`'* | *'$('* | *'#'*)
+            return 1
+            ;;
+    esac
+
+    shell_base="${shell_path##*/}"
+    case "$shell_base" in
+        sh | bash | dash) ;;
+        *) return 1 ;;
+    esac
+
+    case "$shell_path" in
+        */*)
+            configured_real="$shell_path"
+            if command -v realpath > /dev/null 2>&1; then
+                configured_real="$(realpath "$shell_path" 2> /dev/null || printf '%s' "$shell_path")"
+            fi
+            case "$configured_real" in
+                /bin/sh | /bin/bash | /bin/dash | /usr/bin/sh | /usr/bin/bash | /usr/bin/dash)
+                    return 0
+                    ;;
+            esac
+            resolved="$(command -v "$shell_base" 2> /dev/null || true)"
+            [ -n "$resolved" ] || return 1
+            resolved_real="$resolved"
+            if command -v realpath > /dev/null 2>&1; then
+                resolved_real="$(realpath "$resolved" 2> /dev/null || printf '%s' "$resolved")"
+            fi
+            [ "$configured_real" = "$resolved_real" ] || return 1
+            ;;
+    esac
+    return 0
 }
 
 aport_hook_policy_reference() {

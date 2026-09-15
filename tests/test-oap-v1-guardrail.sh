@@ -176,14 +176,15 @@ echo "  Guardrail: system.command.execute (allow)..."
 assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "true" "system command allow"
 assert_json_eq "$OPENCLAW_DECISION_FILE" "policy_id" "system.command.execute.v1" "policy_id"
 
-echo "  Guardrail: system.command.execute (deny blocked pattern)..."
-# Use a command that matches allowlist (npm) but contains blocked pattern so we get oap.blocked_pattern
+echo "  Guardrail: system.command.execute (deny chained blocked command)..."
+# With a restrictive command allowlist, a chained command must fail before prefix
+# allowlist matching can authorize only the first executable segment.
 if "$GUARDRAIL" exec.run '{"command":"npm run build && rm -rf /tmp/x"}' 2> /dev/null; then
-    echo "FAIL: guardrail should DENY blocked pattern" >&2
+    echo "FAIL: guardrail should DENY chained blocked command" >&2
     exit 1
 fi
 assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
-assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.blocked_pattern" "reasons[0].code"
+assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.command_chain_unsupported" "reasons[0].code"
 
 echo "  Guardrail: unknown tool denied..."
 if "$GUARDRAIL" unknown.tool '{}' 2> /dev/null; then

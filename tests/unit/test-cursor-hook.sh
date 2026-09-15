@@ -181,6 +181,15 @@ run_hook() {
 run_hook "beforeShellExecution: allow (ls)" \
     '{"command":"ls -la"}' 0 '"permission":"allow"'
 
+run_hook "beforeShellExecution: rejects conflicting command aliases" \
+    '{"command":"ls","tool_input":{"command":"rm -rf /tmp/aport-test"}}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected beforeShellExecution command alias conflict to fail closed" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+echo "  ✅ beforeShellExecution command alias conflict fails closed"
+
 run_hook "beforeShellExecution: deny (rm -rf)" \
     '{"command":"rm -rf /tmp/x"}' 2 '"permission":"deny"'
 
@@ -193,6 +202,18 @@ run_hook "preToolUse Shell: allow (ls)" \
 
 run_hook "preToolUse run_terminal_cmd: allow (ls)" \
     '{"tool_name":"run_terminal_cmd","tool_input":{"args":{"command":"ls -la"}}}' 0 '"permission":"allow"'
+
+run_hook "preToolUse Shell: reject untrusted shell override" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la","shell":"/tmp/untrusted-shell"}}' 2 '"permission":"deny"'
+
+run_hook "preToolUse Shell: rejects conflicting command aliases" \
+    '{"tool_name":"Shell","command":"ls","tool_input":{"command":"rm -rf /tmp/aport-test"}}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected preToolUse shell command alias conflict to fail closed" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+echo "  ✅ preToolUse Shell command alias conflict fails closed"
 
 run_hook "preToolUse Shell: deny (sudo)" \
     '{"tool_name":"Shell","tool_input":{"command":"sudo reboot"}}' 2 '"permission":"deny"'
@@ -251,17 +272,56 @@ run_hook "preToolUse Write: allow" \
 run_hook "preToolUse edit_file: allow (args path)" \
     '{"tool_name":"edit_file","tool_input":{"args":{"path":"/tmp/test.txt"}}}' 0 '"permission":"allow"'
 
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_cursor_nested_write",
+  "agent_id": "ap_cursor_nested_write",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["/tmp/*"],
+      "max_file_size_bytes": 4
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "preToolUse edit_file: nested args content size is enforced" \
+    '{"tool_name":"edit_file","tool_input":{"args":{"path":"/tmp/test.txt","content":"0123456789"}}}' 2 '"permission":"deny"'
+grep -q 'oap.file_too_large' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected nested args content to exceed local max size" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
+run_hook "preToolUse edit_file: deny sensitive nested args path" \
+    '{"tool_name":"edit_file","tool_input":{"args":{"path":"/repo/.env.local","content":"secret"}}}' 2 '"permission":"deny"'
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+
 # --- preToolUse: Delete ---
 run_hook "preToolUse Delete: allow" \
     '{"tool_name":"Delete","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
 
 # --- preToolUse: Task ---
 run_hook "preToolUse Task: allow" \
-    '{"tool_name":"Task","tool_input":{"description":"run tests"}}' 0 '"permission":"allow"'
+    '{"tool_name":"Task","active_session_count":0,"tool_input":{"description":"run tests"}}' 0 '"permission":"allow"'
 
 # --- preToolUse: Agent / WebSearch (Claude Code parity) ---
+run_hook "preToolUse Agent malformed active count: deny" \
+    '{"tool_name":"Agent","active_session_count":"many","tool_input":{"description":"explore repo"}}' 2 '"permission":"deny"'
+grep -q 'oap.missing_required_context' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected Cursor Agent malformed active count to fail closed" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
 run_hook "preToolUse Agent: allow" \
-    '{"tool_name":"Agent","tool_input":{"description":"explore repo"}}' 0 '"permission":"allow"'
+    '{"tool_name":"Agent","active_session_count":0,"tool_input":{"description":"explore repo"}}' 0 '"permission":"allow"'
 
 run_hook "preToolUse WebSearch without URL/domain: deny" \
     '{"tool_name":"WebSearch","tool_input":{"query":"aport guardrails"}}' 2 '"permission":"deny"'
@@ -273,6 +333,9 @@ grep -q 'oap.missing_required_context' "$LAST_HOOK_OUTPUT" || {
 
 run_hook "preToolUse Edit: allow" \
     '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
+
+run_hook "preToolUse TodoWrite: allow internal bookkeeping" \
+    '{"tool_name":"TodoWrite","tool_input":{"todos":[{"content":"Review change","status":"in_progress","activeForm":"Reviewing change"}]}}' 0 '"permission":"allow"'
 
 # --- preToolUse: MCP:<name> ---
 run_hook "preToolUse MCP:tool: allow" \
@@ -316,6 +379,14 @@ grep -q 'oap.mcp_server_not_allowed' "$LAST_HOOK_OUTPUT" || {
 run_hook "beforeMCPExecution trusts native server metadata" \
     '{"hook_event_name":"beforeMCPExecution","tool_name":"issues.list","server":"github","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
 
+run_hook "beforeMCPExecution trusts native tool metadata over tool input" \
+    '{"hook_event_name":"beforeMCPExecution","tool_name":"repos.delete","server":"github","tool_input":{"name":"issues.list","query":"test"}}' 2 '"permission":"deny"'
+grep -q 'oap.mcp_tool_not_allowed' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected native Cursor MCP tool metadata to override spoofed tool_input name" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
 run_hook "legacy MCP event preserves top-level server metadata" \
     '{"tool_name":"issues.list","server":"github","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
@@ -328,7 +399,7 @@ tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '
     and .context.mcp_tool == "github.resources.read"
     and (.context.parameter_keys | index("uri"))
     and (.context | has("tool_input") | not)
-    and (.context | has("parameters") | not)
+    and .context.parameters == {}
 ' > /dev/null || {
     echo "FAIL: ReadMcpResourceTool should evaluate the resource operation, not the wrapper tool name" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
@@ -346,7 +417,7 @@ run_hook "beforeMCPExecution: allow with legacy server field" \
 # --- subagentStart ---
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "subagentStart: allow" \
-    '{"subagent_id":"abc-123","subagent_type":"worker","task":"secret_task_should_not_persist"}' 0 '"permission":"allow"'
+    '{"subagent_id":"abc-123","subagent_type":"worker","task":"secret_task_should_not_persist","active_session_count":0}' 0 '"permission":"allow"'
 if grep -q 'secret_task_should_not_persist' "$TEST_DIR/aport/session-decisions.jsonl"; then
     echo "FAIL: Cursor session decisions must not persist raw subagent prompts" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2

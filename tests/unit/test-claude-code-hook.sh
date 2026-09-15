@@ -202,6 +202,52 @@ EXIT2=$?
 }
 echo "  ✅ Bash allow: exit 0"
 
+echo "  Test: Bash rejects untrusted shell override..."
+OUT2B="$TEST_DIR/claude-deny-shell-override.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la","shell":"/tmp/untrusted-shell"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT2B" 2> /dev/null
+EXIT2B=$?
+set -e
+[[ "$EXIT2B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for shell override, got $EXIT2B" >&2
+    cat "$OUT2B" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT2B" || {
+    echo "FAIL: expected structured deny payload for shell override" >&2
+    cat "$OUT2B" >&2
+    exit 1
+}
+grep -q 'oap.shell_not_allowed' "$OUT2B" || {
+    echo "FAIL: shell override should fail closed" >&2
+    cat "$OUT2B" >&2
+    exit 1
+}
+echo "  ✅ Bash rejects untrusted shell override"
+
+echo "  Test: Bash rejects conflicting command aliases..."
+OUT2C="$TEST_DIR/claude-deny-command-alias-conflict.txt"
+set +e
+echo '{"tool_name":"Bash","command":"ls","tool_input":{"command":"rm -rf /tmp/aport-test"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT2C" 2> /dev/null
+EXIT2C=$?
+set -e
+[[ "$EXIT2C" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for command alias conflict, got $EXIT2C" >&2
+    cat "$OUT2C" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT2C" || {
+    echo "FAIL: expected structured deny payload for command alias conflict" >&2
+    cat "$OUT2C" >&2
+    exit 1
+}
+grep -q 'oap.invalid_tool_arguments' "$OUT2C" || {
+    echo "FAIL: command alias conflict should fail closed before command evaluation" >&2
+    cat "$OUT2C" >&2
+    exit 1
+}
+echo "  ✅ Bash rejects conflicting command aliases"
+
 # 3. Deny: Bash with blocked pattern (rm -rf) -> hookSpecificOutput
 echo "  Test: Bash deny (blocked pattern)..."
 OUT3="$TEST_DIR/claude-deny-bash.txt"
@@ -264,6 +310,21 @@ grep -q 'fail-closed' "$OUT4" || {
     exit 1
 }
 echo "  ✅ Unknown tool: structured deny, fail-closed"
+
+echo "  Test: TodoWrite tool -> allow (internal bookkeeping)..."
+OUT4B="$TEST_DIR/claude-allow-todowrite.txt"
+echo '{"tool_name":"TodoWrite","tool_input":{"todos":[{"content":"Review change","status":"in_progress","activeForm":"Reviewing change"}]}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4B" 2> /dev/null
+EXIT4B=$?
+[[ "$EXIT4B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for TodoWrite, got $EXIT4B" >&2
+    exit 1
+}
+[[ ! -s "$OUT4B" ]] || {
+    echo "FAIL: TodoWrite should allow without a blocking hook response" >&2
+    cat "$OUT4B" >&2
+    exit 1
+}
+echo "  ✅ TodoWrite internal bookkeeping: exit 0"
 
 # 6. Glob (read-family) -> allow without calling evaluator
 echo "  Test: Glob tool -> allow (read-family)..."
@@ -350,6 +411,197 @@ APORT_GUARDRAIL_MODE=local
 EOF
 echo "  ✅ Grep directory target: warn mode still fails closed"
 
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_claude_replace_all_size_limit",
+  "agent_id": "ap_claude_replace_all_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_bytes": 1000
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+CLAUDE_REPLACE_ALL_FILE="$TEST_DIR/claude-replace-all.txt"
+awk 'BEGIN { for (i = 0; i < 100; i++) printf "a" }' > "$CLAUDE_REPLACE_ALL_FILE"
+OUT6E="$TEST_DIR/claude-deny-replace-all-size.txt"
+REPLACE_ALL_PAYLOAD="$(
+    jq -n -c --arg file "$CLAUDE_REPLACE_ALL_FILE" \
+        '{tool_name:"Edit",tool_input:{file_path:$file,old_string:"a",new_string:"bbbbbbbbbbbbbbbbbbbb",replace_all:true}}'
+)"
+echo "  Test: replace_all edit with max-size limit fails closed..."
+set +e
+printf '%s' "$REPLACE_ALL_PAYLOAD" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT6E" 2> /dev/null
+EXIT6E=$?
+set -e
+[[ "$EXIT6E" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for replace_all size check, got $EXIT6E" >&2
+    cat "$OUT6E" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT6E" || {
+    echo "FAIL: expected structured deny payload for replace_all size check" >&2
+    cat "$OUT6E" >&2
+    exit 1
+}
+grep -q 'oap.missing_required_context' "$OUT6E" || {
+    echo "FAIL: replace_all without resulting size should fail closed" >&2
+    cat "$OUT6E" >&2
+    exit 1
+}
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+echo "  ✅ replace_all max-size edits fail closed without resulting size"
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+OUT6F="$TEST_DIR/claude-notebook-edit.txt"
+NOTEBOOK_PAYLOAD="$(
+    jq -n -c --arg file "$TEST_DIR/demo.ipynb" \
+        '{tool_name:"NotebookEdit",tool_input:{notebook_path:$file,new_source:"print(\"aport\")",edit_mode:"replace",cell_type:"code"}}'
+)"
+echo "  Test: NotebookEdit maps native notebook_path and new_source..."
+printf '{}' > "$TEST_DIR/demo.ipynb"
+set +e
+printf '%s' "$NOTEBOOK_PAYLOAD" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT6F" 2> /dev/null
+EXIT6F=$?
+set -e
+[[ "$EXIT6F" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for NotebookEdit, got $EXIT6F" >&2
+    cat "$OUT6F" >&2
+    exit 1
+}
+[[ ! -s "$OUT6F" ]] || {
+    echo "FAIL: expected NotebookEdit to allow without blocking response" >&2
+    cat "$OUT6F" >&2
+    exit 1
+}
+if grep -q 'print("aport")' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: NotebookEdit decision context must not persist raw source" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e --arg file "$TEST_DIR/demo.ipynb" '.context.file_path == $file and (.context.content_length | type == "number") and .context.write_operation == "replace"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: NotebookEdit context should include notebook path, content length, and edit mode" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ NotebookEdit maps native path and source length"
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_claude_notebook_size_limit",
+  "agent_id": "ap_claude_notebook_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_bytes": 1
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+NOTEBOOK_LIMIT_FILE="$TEST_DIR/demo-near-limit.ipynb"
+printf '%s' '{"cells":[{"id":"cell-1","cell_type":"code","source":["hello"]}],"metadata":{},"nbformat":4,"nbformat_minor":5}' > "$NOTEBOOK_LIMIT_FILE"
+NOTEBOOK_LIMIT_SIZE="$(wc -c < "$NOTEBOOK_LIMIT_FILE" | tr -d '[:space:]')"
+NOTEBOOK_LIMIT=$((NOTEBOOK_LIMIT_SIZE + 10))
+jq --argjson max "$NOTEBOOK_LIMIT" '.limits["data.file.write"].max_file_size_bytes = $max' \
+    "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.tmp"
+mv "$TEST_DIR/aport/passport.tmp" "$TEST_DIR/aport/passport.json"
+OUT6G="$TEST_DIR/claude-notebook-size-deny.txt"
+NOTEBOOK_LIMIT_PAYLOAD="$(
+    jq -n -c --arg file "$NOTEBOOK_LIMIT_FILE" \
+        '{tool_name:"NotebookEdit",tool_input:{notebook_path:$file,new_source:"12345678901234567890",edit_mode:"replace",cell_id:"cell-1",cell_type:"code"}}'
+)"
+echo "  Test: NotebookEdit max-size check uses conservative resulting size..."
+set +e
+printf '%s' "$NOTEBOOK_LIMIT_PAYLOAD" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT6G" 2> /dev/null
+EXIT6G=$?
+set -e
+[[ "$EXIT6G" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for NotebookEdit max-size check, got $EXIT6G" >&2
+    cat "$OUT6G" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT6G" || {
+    echo "FAIL: expected structured deny payload for NotebookEdit max-size check" >&2
+    cat "$OUT6G" >&2
+    exit 1
+}
+grep -q 'oap.file_too_large' "$OUT6G" || {
+    echo "FAIL: NotebookEdit max-size check should deny oversized resulting notebook" >&2
+    cat "$OUT6G" >&2
+    exit 1
+}
+OUT6H="$TEST_DIR/claude-notebook-insert-size-deny.txt"
+NOTEBOOK_INSERT_LIMIT_PAYLOAD="$(
+    jq -n -c --arg file "$NOTEBOOK_LIMIT_FILE" \
+        '{tool_name:"NotebookEdit",tool_input:{notebook_path:$file,new_source:"x",edit_mode:"insert",cell_id:"cell-1",cell_type:"code"}}'
+)"
+set +e
+printf '%s' "$NOTEBOOK_INSERT_LIMIT_PAYLOAD" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT6H" 2> /dev/null
+EXIT6H=$?
+set -e
+[[ "$EXIT6H" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for NotebookEdit insert max-size check, got $EXIT6H" >&2
+    cat "$OUT6H" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT6H" || {
+    echo "FAIL: expected structured deny payload for NotebookEdit insert max-size check" >&2
+    cat "$OUT6H" >&2
+    exit 1
+}
+grep -q 'oap.file_too_large' "$OUT6H" || {
+    echo "FAIL: NotebookEdit insert max-size check should account for cell serialization" >&2
+    cat "$OUT6H" >&2
+    exit 1
+}
+NOTEBOOK_DELETE_LIMIT_FILE="$TEST_DIR/demo-delete-limit.ipynb"
+BIG_NOTEBOOK_CELL="$(printf '%*s' 1000 '' | tr ' ' x)"
+printf '%s' "{\"cells\":[{\"id\":\"cell-small\",\"cell_type\":\"code\",\"source\":[\"a\"]},{\"id\":\"cell-large\",\"cell_type\":\"code\",\"source\":[\"$BIG_NOTEBOOK_CELL\"]}],\"metadata\":{},\"nbformat\":4,\"nbformat_minor\":5}" > "$NOTEBOOK_DELETE_LIMIT_FILE"
+jq '.limits["data.file.write"].max_file_size_bytes = 100' \
+    "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.tmp"
+mv "$TEST_DIR/aport/passport.tmp" "$TEST_DIR/aport/passport.json"
+OUT6I="$TEST_DIR/claude-notebook-delete-size-deny.txt"
+NOTEBOOK_DELETE_LIMIT_PAYLOAD="$(
+    jq -n -c --arg file "$NOTEBOOK_DELETE_LIMIT_FILE" \
+        '{tool_name:"NotebookEdit",tool_input:{notebook_path:$file,new_source:"",edit_mode:"delete",cell_id:"cell-small",cell_type:"code"}}'
+)"
+set +e
+printf '%s' "$NOTEBOOK_DELETE_LIMIT_PAYLOAD" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT6I" 2> /dev/null
+EXIT6I=$?
+set -e
+[[ "$EXIT6I" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for NotebookEdit delete max-size check, got $EXIT6I" >&2
+    cat "$OUT6I" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT6I" || {
+    echo "FAIL: expected structured deny payload for NotebookEdit delete max-size check" >&2
+    cat "$OUT6I" >&2
+    exit 1
+}
+grep -q 'oap.file_too_large' "$OUT6I" || {
+    echo "FAIL: NotebookEdit delete max-size check should use the remaining notebook bound, not new_source length" >&2
+    cat "$OUT6I" >&2
+    exit 1
+}
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+echo "  ✅ NotebookEdit max-size checks use conservative resulting size"
+
 # 7. Shell alias (Cursor/tool-wrapper style) -> allow
 echo "  Test: Shell alias -> allow..."
 OUT7="$TEST_DIR/claude-allow-shell-alias.txt"
@@ -434,10 +686,54 @@ EXIT9=$?
 echo "  ✅ local mode after switch allows"
 
 # 10. Agent tool -> session.create policy path (allow with fixture passport)
+echo "  Test: Agent tool without active_session_count -> deny..."
+OUT10A="$TEST_DIR/claude-deny-agent-no-active-count.txt"
+set +e
+echo '{"tool_name":"Agent","tool_input":{"description":"explore repo","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10A" 2> /dev/null
+EXIT10A=$?
+set -e
+[[ "$EXIT10A" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Agent missing active count, got $EXIT10A" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT10A" || {
+    echo "FAIL: expected structured deny payload for Agent missing active count" >&2
+    cat "$OUT10A" >&2
+    exit 1
+}
+grep -q 'oap.missing_required_context' "$OUT10A" || {
+    echo "FAIL: expected missing active-count reason" >&2
+    cat "$OUT10A" >&2
+    exit 1
+}
+echo "  ✅ Agent missing active_session_count fails closed"
+
+echo "  Test: Agent tool_input active_session_count is not trusted..."
+OUT10B="$TEST_DIR/claude-deny-agent-tool-input-active-count.txt"
+set +e
+echo '{"tool_name":"Agent","tool_input":{"description":"explore repo","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer","active_session_count":0}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10B" 2> /dev/null
+EXIT10B=$?
+set -e
+[[ "$EXIT10B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Agent tool_input active count, got $EXIT10B" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT10B" || {
+    echo "FAIL: expected structured deny payload for Agent tool_input active count" >&2
+    cat "$OUT10B" >&2
+    exit 1
+}
+grep -q 'oap.missing_required_context' "$OUT10B" || {
+    echo "FAIL: expected missing trusted active-count reason" >&2
+    cat "$OUT10B" >&2
+    exit 1
+}
+echo "  ✅ Agent tool_input active_session_count is not trusted"
+
 echo "  Test: Agent tool -> allow..."
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 OUT10="$TEST_DIR/claude-allow-agent.txt"
-echo '{"tool_name":"Agent","tool_input":{"description":"explore codebase","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
+echo '{"tool_name":"Agent","active_session_count":0,"tool_input":{"description":"explore codebase","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
 EXIT10=$?
 [[ "$EXIT10" -eq 0 ]] || {
     echo "FAIL: expected exit 0 for Agent, got $EXIT10 (output: $(cat "$OUT10" 2> /dev/null))" >&2
@@ -470,7 +766,7 @@ if grep -q 'secret_mcp_param_should_not_persist' "$TEST_DIR/aport/session-decisi
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 fi
-jq -e '.guardrail_tool == "mcp.tool" and .context.tool == "github.resources.read" and (.context.parameter_keys | index("uri")) and (.context | has("parameters") | not)' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+jq -e '.guardrail_tool == "mcp.tool" and .context.tool == "github.resources.read" and (.context.parameter_keys | index("uri")) and .context.parameters == {}' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
     echo "FAIL: Claude MCP context should include resource operation metadata only" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
@@ -569,6 +865,46 @@ grep -q 'oap.missing_required_context' "$OUT12" || {
     exit 1
 }
 echo "  ✅ WebSearch without URL/domain: structured deny"
+
+echo "  Test: WebFetch parser-ambiguous URL -> deny..."
+OUT12B="$TEST_DIR/claude-deny-webfetch-ambiguous-url.txt"
+echo '{"tool_name":"WebFetch","tool_input":{"url":"http:127.0.0.1/admin","prompt":"summarize"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT12B" 2> /dev/null
+EXIT12B=$?
+[[ "$EXIT12B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for ambiguous WebFetch URL, got $EXIT12B" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT12B" || {
+    echo "FAIL: expected structured deny payload for ambiguous WebFetch URL" >&2
+    cat "$OUT12B" >&2
+    exit 1
+}
+grep -q 'oap.invalid_url' "$OUT12B" || {
+    echo "FAIL: expected invalid-url reason for ambiguous WebFetch URL" >&2
+    cat "$OUT12B" >&2
+    exit 1
+}
+echo "  ✅ WebFetch parser-ambiguous URL: structured deny"
+
+echo "  Test: WebFetch Unicode-normalized loopback hostname -> deny..."
+OUT12C="$TEST_DIR/claude-deny-webfetch-unicode-loopback.txt"
+echo '{"tool_name":"WebFetch","tool_input":{"url":"http://１２７.０.０.１/admin","prompt":"summarize"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT12C" 2> /dev/null
+EXIT12C=$?
+[[ "$EXIT12C" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Unicode WebFetch hostname, got $EXIT12C" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT12C" || {
+    echo "FAIL: expected structured deny payload for Unicode WebFetch hostname" >&2
+    cat "$OUT12C" >&2
+    exit 1
+}
+grep -q 'oap.invalid_url' "$OUT12C" || {
+    echo "FAIL: expected invalid-url reason for Unicode WebFetch hostname" >&2
+    cat "$OUT12C" >&2
+    exit 1
+}
+echo "  ✅ WebFetch Unicode-normalized loopback hostname: structured deny"
 
 # 13. PowerShell -> allow (maps to bash policy)
 echo "  Test: PowerShell -> allow..."

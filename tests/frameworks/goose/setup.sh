@@ -11,6 +11,10 @@ GOOSE_CONFIG_DIR="$TEST_DIR/.aport/goose"
 GOOSE_PLUGIN_DIR="$PROJECT_DIR/.agents/plugins/aport-guardrail"
 PASSPORT_PATH="$GOOSE_CONFIG_DIR/aport/passport.json"
 
+file_mode() {
+    stat -c '%a' "$1" 2> /dev/null || stat -f '%Lp' "$1"
+}
+
 rm -rf "$PROJECT_DIR" "$GOOSE_CONFIG_DIR"
 mkdir -p "$PROJECT_DIR" "$(dirname "$PASSPORT_PATH")"
 
@@ -47,7 +51,7 @@ jq -e '.name == "aport-guardrail"' "$GOOSE_PLUGIN_DIR/plugin.json" > /dev/null |
 }
 jq -e '
   .hooks.PreToolUse[0].hooks[0].type == "command"
-  and .hooks.PreToolUse[0].hooks[0].command == "${PLUGIN_ROOT}/scripts/aport-goose-hook.sh"
+  and .hooks.PreToolUse[0].hooks[0].command == "\"${PLUGIN_ROOT}/scripts/aport-goose-hook.sh\""
   and .hooks.PreToolUse[0].hooks[0].on_failure == "block"
 ' "$GOOSE_PLUGIN_DIR/hooks/hooks.json" > /dev/null || {
     echo "FAIL: Goose hooks file should register blocking PreToolUse command hook" >&2
@@ -110,6 +114,42 @@ grep -q "$GENERIC_CONFIG_DIR/aport/runtime/bin/aport-goose-hook.sh" "$GENERIC_PL
 
 echo "  ✅ Goose setup honors generic APORT_CONFIG_DIR"
 
+SPACES_PROJECT_DIR="$TEST_DIR/project with spaces"
+SPACES_CONFIG_DIR="$TEST_DIR/.aport/goose with spaces"
+SPACES_PLUGIN_DIR="$SPACES_PROJECT_DIR/.agents/plugins/aport-guardrail"
+rm -rf "$SPACES_PROJECT_DIR" "$SPACES_CONFIG_DIR"
+mkdir -p "$SPACES_PROJECT_DIR"
+(
+    cd "$SPACES_PROJECT_DIR"
+    APORT_NONINTERACTIVE=1 \
+        APORT_GOOSE_CONFIG_DIR="$SPACES_CONFIG_DIR" \
+        APORT_GOOSE_PLUGIN_DIR="$SPACES_PLUGIN_DIR" \
+        "$DISPATCHER" goose --non-interactive --mode=local > "$TEST_DIR/goose-spaces-setup.log" 2>&1
+)
+
+SPACES_HOOK_COMMAND="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$SPACES_PLUGIN_DIR/hooks/hooks.json")"
+[[ "$SPACES_HOOK_COMMAND" == '"${PLUGIN_ROOT}/scripts/aport-goose-hook.sh"' ]] || {
+    echo "FAIL: Goose hook command should quote PLUGIN_ROOT path for spaces" >&2
+    cat "$SPACES_PLUGIN_DIR/hooks/hooks.json" >&2
+    exit 1
+}
+set +e
+PLUGIN_ROOT="$SPACES_PLUGIN_DIR" sh -c "$SPACES_HOOK_COMMAND" > "$TEST_DIR/goose-spaces-hook.out" 2>&1 < /dev/null
+SPACES_HOOK_EXIT=$?
+set -e
+if [[ "$SPACES_HOOK_EXIT" -ne 0 ]]; then
+    echo "FAIL: Goose hook command should execute from paths containing spaces" >&2
+    cat "$TEST_DIR/goose-spaces-hook.out" >&2
+    exit 1
+fi
+grep -q 'oap.empty_input' "$TEST_DIR/goose-spaces-hook.out" || {
+    echo "FAIL: Goose hook command should reach the APort hook, not fail shell parsing" >&2
+    cat "$TEST_DIR/goose-spaces-hook.out" >&2
+    exit 1
+}
+
+echo "  ✅ Goose setup quotes hook command for paths with spaces"
+
 WARN_PROJECT_DIR="$TEST_DIR/warn-project"
 WARN_CONFIG_DIR="$TEST_DIR/.aport/goose-warn"
 WARN_PLUGIN_DIR="$WARN_PROJECT_DIR/.agents/plugins/aport-guardrail"
@@ -166,3 +206,45 @@ if [[ "$(cat "$SYMLINK_TARGET")" != '{"name":"aport-guardrail","version":"existi
 fi
 
 echo "  ✅ Goose setup rejects symlinked plugin targets"
+
+SYMLINK_AUDIT_PROJECT="$TEST_DIR/symlink-audit-project"
+SYMLINK_AUDIT_CONFIG_DIR="$TEST_DIR/.aport/goose-symlink-audit"
+SYMLINK_AUDIT_PLUGIN_DIR="$SYMLINK_AUDIT_PROJECT/.agents/plugins/aport-guardrail"
+SYMLINK_AUDIT_TARGET="$TEST_DIR/goose-symlink-audit-target.log"
+rm -rf "$SYMLINK_AUDIT_PROJECT" "$SYMLINK_AUDIT_CONFIG_DIR"
+mkdir -p "$SYMLINK_AUDIT_PROJECT" "$SYMLINK_AUDIT_CONFIG_DIR/aport"
+printf 'audit-target\n' > "$SYMLINK_AUDIT_TARGET"
+chmod 644 "$SYMLINK_AUDIT_TARGET"
+ln -s "$SYMLINK_AUDIT_TARGET" "$SYMLINK_AUDIT_CONFIG_DIR/aport/audit.log"
+
+set +e
+(
+    cd "$SYMLINK_AUDIT_PROJECT"
+    APORT_NONINTERACTIVE=1 \
+        APORT_GOOSE_CONFIG_DIR="$SYMLINK_AUDIT_CONFIG_DIR" \
+        APORT_GOOSE_PLUGIN_DIR="$SYMLINK_AUDIT_PLUGIN_DIR" \
+        "$DISPATCHER" goose --output "$SYMLINK_AUDIT_CONFIG_DIR/aport/passport.json" --non-interactive --mode=local > "$TEST_DIR/goose-symlink-audit.log" 2>&1
+)
+SYMLINK_AUDIT_EXIT=$?
+set -e
+if [[ "$SYMLINK_AUDIT_EXIT" -eq 0 ]]; then
+    echo "FAIL: Goose setup should reject symlinked audit.log" >&2
+    exit 1
+fi
+grep -q "Refusing to write through symlink" "$TEST_DIR/goose-symlink-audit.log" || {
+    echo "FAIL: expected audit-log symlink refusal in Goose setup output" >&2
+    cat "$TEST_DIR/goose-symlink-audit.log" >&2
+    exit 1
+}
+if [[ "$(cat "$SYMLINK_AUDIT_TARGET")" != "audit-target" ]]; then
+    echo "FAIL: Goose setup modified symlinked audit target contents" >&2
+    cat "$SYMLINK_AUDIT_TARGET" >&2
+    exit 1
+fi
+if [[ "$(file_mode "$SYMLINK_AUDIT_TARGET")" != "644" ]]; then
+    echo "FAIL: Goose setup modified symlinked audit target permissions" >&2
+    ls -l "$SYMLINK_AUDIT_TARGET" >&2
+    exit 1
+fi
+
+echo "  ✅ Goose setup rejects symlinked audit log targets"
