@@ -506,6 +506,9 @@ map_web() {
 map_mcp() {
     GUARDRAIL_TOOL="mcp.tool"
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$ORIGINAL_TOOL")"
+    if [ "$(printf '%s' "$CONTEXT_JSON" | jq -r 'if .invalid_server == true then "true" else "false" end' 2> /dev/null || echo false)" = "true" ]; then
+        emit_response "deny" "mcp.tool.execute" "oap.invalid_mcp_server" "MCP server contains ambiguous parser characters"
+    fi
 }
 
 map_session() {
@@ -599,10 +602,7 @@ case "$FRAMEWORK" in
                 map_session
                 ;;
             "")
-                if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
-                    emit_response "allow" "" "" ""
-                fi
-                emit_response "deny" "hook.tool.map" "oap.unknown_tool" "Unknown Codex tool"
+                emit_response "deny" "hook.tool.map" "oap.missing_tool_name" "Codex $HOOK_EVENT payload did not include tool_name"
                 ;;
             *)
                 emit_response "deny" "hook.tool.map" "oap.unknown_tool" "Unknown Codex tool: $ORIGINAL_TOOL"
@@ -686,6 +686,12 @@ if [ -n "$HOOK_DECISION_FILE" ]; then
     HOOK_DECISION_FILE="${HOOK_DECISION_FILE%.json}-$$.json"
     export APORT_DECISION_FILE="$HOOK_DECISION_FILE"
     export OPENCLAW_DECISION_FILE="$HOOK_DECISION_FILE"
+    if [ -e "$HOOK_DECISION_FILE" ] && [ ! -f "$HOOK_DECISION_FILE" ]; then
+        emit_response "deny" "hook.runtime" "oap.decision_state_unavailable" "APort decision state path is not a regular file" "hard"
+    fi
+    if ! rm -f "$HOOK_DECISION_FILE" 2> /dev/null; then
+        emit_response "deny" "hook.runtime" "oap.decision_state_unavailable" "APort decision state path could not be reset before evaluation" "hard"
+    fi
 fi
 
 set +e

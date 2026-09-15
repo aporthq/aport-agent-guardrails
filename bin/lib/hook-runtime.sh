@@ -151,6 +151,7 @@ aport_hook_is_hard_failure_reason() {
             oap.invalid_url | \
             oap.domain_mismatch | \
             oap.session_state_unavailable | \
+            oap.decision_state_unavailable | \
             oap.rate_state_unavailable)
             return 0
             ;;

@@ -475,6 +475,76 @@ has_restrictive_limit_array() {
     echo "$1" | jq -e 'type == "array" and length > 0 and (index("*") == null)' > /dev/null 2>&1
 }
 
+validate_string_array_limit() {
+    local limit_key="$1"
+    if echo "$LIMITS" | jq -e --arg key "$limit_key" 'has($key) and ((.[$key] | type) != "array" or any(.[$key][]; type != "string"))' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "$limit_key must be an array of strings when configured"
+    fi
+}
+
+validate_string_array_limits() {
+    local limit_key
+    for limit_key in "$@"; do
+        validate_string_array_limit "$limit_key"
+    done
+}
+
+configured_file_size_limit_bytes() {
+    local bytes_raw mb_raw
+    bytes_raw="$(echo "$LIMITS" | jq -c 'if has("max_file_size_bytes") then .max_file_size_bytes elif has("max_size_bytes") then .max_size_bytes else empty end' 2> /dev/null || true)"
+    mb_raw="$(echo "$LIMITS" | jq -c 'if has("max_file_size_mb") then .max_file_size_mb elif has("max_size_mb") then .max_size_mb else empty end' 2> /dev/null || true)"
+    if [ -n "$bytes_raw" ]; then
+        if ! jq -en --argjson max "$bytes_raw" '
+            if ($max | type) == "number" then ($max > 0 and ($max | floor) == $max)
+            elif ($max | type) == "string" then ($max | test("^[1-9][0-9]*$"))
+            else false
+            end
+        ' > /dev/null 2>&1; then
+            printf '%s' "__APORT_INVALID_LIMIT__:max_file_size_bytes must be a positive integer when configured"
+            return 0
+        fi
+        jq -nr --argjson max "$bytes_raw" 'if ($max | type) == "number" then ($max | floor | tostring) else $max end'
+        return 0
+    fi
+    if [ -n "$mb_raw" ]; then
+        if ! jq -en --argjson max "$mb_raw" '
+            if ($max | type) == "number" then $max > 0
+            elif ($max | type) == "string" then ($max | test("^[0-9]+(\\.[0-9]+)?$") and ($max | tonumber) > 0)
+            else false
+            end
+        ' > /dev/null 2>&1; then
+            printf '%s' "__APORT_INVALID_LIMIT__:max_file_size_mb must be a positive number when configured"
+            return 0
+        fi
+        jq -nr --argjson max "$mb_raw" '($max | tonumber) * 1048576 | floor'
+    fi
+}
+
+reject_invalid_file_size_limit() {
+    local value="${1:-}"
+    case "$value" in
+        __APORT_INVALID_LIMIT__:*)
+            write_decision false "$POLICY_ID" "oap.invalid_limit" "${value#__APORT_INVALID_LIMIT__:}"
+            ;;
+    esac
+}
+
+portable_file_size_bytes() {
+    local path="$1"
+    local size=""
+    size="$(stat -f %z "$path" 2> /dev/null || true)"
+    if [ -z "$size" ]; then
+        size="$(stat -c %s "$path" 2> /dev/null || true)"
+    fi
+    if [ -z "$size" ]; then
+        size="$(wc -c < "$path" 2> /dev/null | tr -d '[:space:]' || true)"
+    fi
+    case "$size" in
+        "" | *[!0-9]*) return 1 ;;
+    esac
+    printf '%s' "$size"
+}
+
 contains_control_chars() {
     local LC_ALL=C
     case "$1" in
@@ -2028,6 +2098,26 @@ if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
         # Try to extract from args
         COMMAND=$(echo "$CONTEXT_JSON" | jq -r '.args[0] // ""')
     fi
+    COMMAND_TIMEOUT=$(echo "$CONTEXT_JSON" | jq -r '(.timeout // .timeout_seconds // empty) | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
+    MAX_EXECUTION_TIME_RAW="$(echo "$LIMITS" | jq -c 'if has("max_execution_time") then .max_execution_time elif has("max_execution_time_seconds") then .max_execution_time_seconds elif has("max_timeout") then .max_timeout else empty end' 2> /dev/null || true)"
+    if [ -n "$MAX_EXECUTION_TIME_RAW" ]; then
+        if ! jq -en --argjson max "$MAX_EXECUTION_TIME_RAW" '
+            if ($max | type) == "number" then $max > 0
+            elif ($max | type) == "string" then ($max | test("^[0-9]+(\\.[0-9]+)?$") and ($max | tonumber) > 0)
+            else false
+            end
+        ' > /dev/null 2>&1; then
+            write_decision false "$POLICY_ID" "oap.invalid_limit" "max_execution_time must be a positive number when configured"
+        fi
+        MAX_EXECUTION_TIME="$(jq -nr --argjson max "$MAX_EXECUTION_TIME_RAW" 'if ($max | type) == "number" then ($max | tostring) else $max end')"
+        if [ -n "$COMMAND_TIMEOUT" ]; then
+            if ! jq -en --arg timeout "$COMMAND_TIMEOUT" --arg max "$MAX_EXECUTION_TIME" '
+                ($timeout | test("^[0-9]+(\\.[0-9]+)?$")) and (($timeout | tonumber) <= ($max | tonumber))
+            ' > /dev/null 2>&1; then
+                write_decision false "$POLICY_ID" "oap.timeout_exceeded" "Command timeout exceeds max_execution_time"
+            fi
+        fi
+    fi
 
     if [ -n "$COMMAND" ]; then
         # SECURITY: Validate command doesn't contain injection characters
@@ -2186,11 +2276,11 @@ if [[ "$POLICY_ID" == "mcp.tool.execute.v1" ]]; then
     MCP_SERVER=$(echo "$CONTEXT_JSON" | jq -r '.server // .mcp_server // ""' 2> /dev/null || true)
     MCP_TOOL=$(echo "$CONTEXT_JSON" | jq -r '.tool // .mcp_tool // ""' 2> /dev/null || true)
     MCP_TIMEOUT=$(echo "$CONTEXT_JSON" | jq -r '.timeout // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
-    for limit_key in allowed_servers allowed_tools allowed_tool_prefixes; do
-        if echo "$LIMITS" | jq -e --arg key "$limit_key" 'has($key) and ((.[$key] | type) != "array" or any(.[$key][]; type != "string"))' > /dev/null 2>&1; then
-            write_decision false "$POLICY_ID" "oap.invalid_limit" "$limit_key must be an array of strings when configured"
-        fi
-    done
+    INVALID_MCP_SERVER=$(echo "$CONTEXT_JSON" | jq -r 'if .invalid_server == true then "true" else "false" end' 2> /dev/null || echo false)
+    if [ "$INVALID_MCP_SERVER" = "true" ]; then
+        write_decision false "$POLICY_ID" "oap.invalid_mcp_server" "MCP server contains ambiguous parser characters"
+    fi
+    validate_string_array_limits allowed_servers allowed_tools allowed_tool_prefixes
     ALLOWED_SERVERS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_servers | type) == "array" then .allowed_servers else [] end' 2> /dev/null || echo "[]")
     ALLOWED_TOOLS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_tools | type) == "array" then .allowed_tools else [] end' 2> /dev/null || echo "[]")
     ALLOWED_TOOL_PREFIXES_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_tool_prefixes | type) == "array" then .allowed_tool_prefixes else [] end' 2> /dev/null || echo "[]")
@@ -2237,6 +2327,9 @@ fi
 # File read policy evaluation
 if [[ "$POLICY_ID" == "data.file.read.v1" ]]; then
     FILE_PATH=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""')
+    validate_string_array_limits allowed_paths blocked_patterns blocked_paths allowed_extensions
+    MAX_FILE_SIZE_BYTES="$(configured_file_size_limit_bytes)"
+    reject_invalid_file_size_limit "$MAX_FILE_SIZE_BYTES"
     if [ -z "$FILE_PATH" ]; then
         write_decision false "$POLICY_ID" "oap.missing_file_path" "File read context must include file_path"
     fi
@@ -2249,6 +2342,15 @@ if [[ "$POLICY_ID" == "data.file.read.v1" ]]; then
         fi
         if is_default_sensitive_read_path "$FILE_PATH" || is_default_sensitive_read_path "$FILE_PATH_CANON"; then
             write_decision false "$POLICY_ID" "oap.blocked_pattern" "File path matches default sensitive read pattern"
+        fi
+        if [ -n "$MAX_FILE_SIZE_BYTES" ] && [ -f "$FILE_PATH_CANON" ]; then
+            FILE_SIZE_BYTES="$(portable_file_size_bytes "$FILE_PATH_CANON" || true)"
+            if [ -z "$FILE_SIZE_BYTES" ]; then
+                write_decision false "$POLICY_ID" "oap.missing_required_context" "File size could not be measured for max_file_size enforcement"
+            fi
+            if ! jq -en --arg size "$FILE_SIZE_BYTES" --arg max "$MAX_FILE_SIZE_BYTES" '($size | tonumber) <= ($max | tonumber)' > /dev/null 2>&1; then
+                write_decision false "$POLICY_ID" "oap.file_too_large" "File read target exceeds max_file_size"
+            fi
         fi
 
         # Check allowed paths
@@ -2280,6 +2382,7 @@ fi
 # File write policy evaluation
 if [[ "$POLICY_ID" == "data.file.write.v1" ]]; then
     FILE_PATH=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""')
+    validate_string_array_limits allowed_paths blocked_paths blocked_patterns allowed_extensions
     if [ -z "$FILE_PATH" ]; then
         write_decision false "$POLICY_ID" "oap.missing_file_path" "File write context must include file_path"
     fi
@@ -2295,30 +2398,8 @@ if [[ "$POLICY_ID" == "data.file.write.v1" ]]; then
         NOTEBOOK_SOURCE_LINE_COUNT=$(echo "$CONTEXT_JSON" | jq -r '.notebook_source_line_count // 0 | if type == "number" then tostring elif type == "string" then . else "0" end' 2> /dev/null || echo "0")
         REPLACE_ALL=$(echo "$CONTEXT_JSON" | jq -r 'if .replace_all == true then "true" else "false" end' 2> /dev/null || echo "false")
         WRITE_OPERATION=$(echo "$CONTEXT_JSON" | jq -r '.write_operation // "" | tostring | ascii_downcase' 2> /dev/null || true)
-        MAX_FILE_SIZE_BYTES_RAW="$(echo "$LIMITS" | jq -c 'if has("max_file_size_bytes") then .max_file_size_bytes elif has("max_size_bytes") then .max_size_bytes else empty end' 2> /dev/null || true)"
-        MAX_FILE_SIZE_MB_RAW="$(echo "$LIMITS" | jq -c 'if has("max_file_size_mb") then .max_file_size_mb elif has("max_size_mb") then .max_size_mb else empty end' 2> /dev/null || true)"
-        MAX_FILE_SIZE_BYTES=""
-        if [ -n "$MAX_FILE_SIZE_BYTES_RAW" ]; then
-            if ! jq -en --argjson max "$MAX_FILE_SIZE_BYTES_RAW" '
-                if ($max | type) == "number" then ($max > 0 and ($max | floor) == $max)
-                elif ($max | type) == "string" then ($max | test("^[1-9][0-9]*$"))
-                else false
-                end
-            ' > /dev/null 2>&1; then
-                write_decision false "$POLICY_ID" "oap.invalid_limit" "max_file_size_bytes must be a positive integer when configured"
-            fi
-            MAX_FILE_SIZE_BYTES="$(jq -nr --argjson max "$MAX_FILE_SIZE_BYTES_RAW" 'if ($max | type) == "number" then ($max | floor | tostring) else $max end')"
-        elif [ -n "$MAX_FILE_SIZE_MB_RAW" ]; then
-            if ! jq -en --argjson max "$MAX_FILE_SIZE_MB_RAW" '
-                if ($max | type) == "number" then $max > 0
-                elif ($max | type) == "string" then ($max | test("^[0-9]+(\\.[0-9]+)?$") and ($max | tonumber) > 0)
-                else false
-                end
-            ' > /dev/null 2>&1; then
-                write_decision false "$POLICY_ID" "oap.invalid_limit" "max_file_size_mb must be a positive number when configured"
-            fi
-            MAX_FILE_SIZE_BYTES="$(jq -nr --argjson max "$MAX_FILE_SIZE_MB_RAW" '($max | tonumber) * 1048576 | floor')"
-        fi
+        MAX_FILE_SIZE_BYTES="$(configured_file_size_limit_bytes)"
+        reject_invalid_file_size_limit "$MAX_FILE_SIZE_BYTES"
         if [ -n "$MAX_FILE_SIZE_BYTES" ]; then
             case "$CONTENT_LENGTH" in "" | *[!0-9]*) CONTENT_LENGTH="" ;; esac
             case "$OLD_CONTENT_LENGTH" in "" | *[!0-9]*) OLD_CONTENT_LENGTH="" ;; esac

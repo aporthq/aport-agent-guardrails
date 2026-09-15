@@ -162,6 +162,9 @@ aport_hook_context_from_payload() {
         else
           $s
         end;
+      def malformed_server(v):
+        str(v) as $s |
+        $s != "" and ($s | contains("\\") or test("[[:cntrl:]]"));
       def clean_url(v):
         str(v) as $s |
         if $s == "" then ""
@@ -213,12 +216,16 @@ aport_hook_context_from_payload() {
       (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
       ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
       if $kind == "shell" then
-        {
+        (
+          safe_timeout($ti.timeout // $ti.timeout_seconds // $ti.timeoutSeconds // .timeout // null) //
+          safe_timeout_ms($ti.timeout_ms // $ti.timeoutMs // .timeout_ms // .timeoutMs // null)
+        ) as $command_timeout |
+        ({
           command: (
             .command // $ti.command // $ti.cmd // $ti.script // $ti.shell_command // ""
           ),
           shell: (.shell // $ti.shell // "")
-        }
+        } + (if $command_timeout == null then {} else {timeout: $command_timeout} end))
       elif $kind == "file_read" then
         {
           file_path: (
@@ -305,26 +312,21 @@ aport_hook_context_from_payload() {
           end
         ) as $native_tool |
         (
+          $mcp.server_name // $mcp.server // $mcp.url //
+          .mcp_server_name // .mcp_server //
+          (if $event == "beforemcpexecution" then (.server // .url) else null end) //
+          $parsed.server //
+          (if $allows_input_routing then ($ti.server // $ti.mcp_server // $ti.mcp_server_name) else null end) //
+          ""
+        ) as $raw_server |
+        (
           safe_timeout($ti.timeout // $ti.timeout_seconds // $ti.timeoutSeconds // .timeout // null) //
           safe_timeout_ms($ti.timeout_ms // $ti.timeoutMs // .timeout_ms // .timeoutMs // null)
         ) as $mcp_timeout |
         ({
-          server: clean_server(
-            $mcp.server_name // $mcp.server // $mcp.url //
-            .mcp_server_name // .mcp_server //
-            (if $event == "beforemcpexecution" then (.server // .url) else null end) //
-            $parsed.server //
-            (if $allows_input_routing then ($ti.server // $ti.mcp_server // $ti.mcp_server_name) else null end) //
-            ""
-          ),
-          mcp_server: clean_server(
-            $mcp.server_name // $mcp.server // $mcp.url //
-            .mcp_server_name // .mcp_server //
-            (if $event == "beforemcpexecution" then (.server // .url) else null end) //
-            $parsed.server //
-            (if $allows_input_routing then ($ti.server // $ti.mcp_server // $ti.mcp_server_name) else null end) //
-            ""
-          ),
+          server: clean_server($raw_server),
+          mcp_server: clean_server($raw_server),
+          invalid_server: malformed_server($raw_server),
           tool: (
             $mcp.tool_name // $mcp.tool // $parsed.tool // $native_tool //
             $ti.tool // $ti.mcp_tool // $ti.name // $ti.operation // .mcp_tool // .tool //
