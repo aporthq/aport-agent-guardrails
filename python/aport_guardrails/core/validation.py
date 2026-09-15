@@ -136,6 +136,9 @@ def _default_passport_base_dirs() -> list[Path]:
         Path.home() / ".aport",
         Path.home() / ".claude",
         Path.home() / ".cursor",
+        Path.home() / ".codex",
+        Path.home() / ".gemini",
+        Path.home() / ".config" / "opencode",
         Path.home() / ".n8n",
         Path("/tmp"),  # Will check for aport- prefix separately
     ]

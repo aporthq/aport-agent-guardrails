@@ -1,278 +1,159 @@
 # Security Policy
 
-## OpenClaw and agent frameworks: why pre-action authorization matters
+APort Agent Guardrails provides pre-action authorization for AI agents and
+agent-operated automation. It checks an action against an Open Agent Passport
+(OAP) passport and policy before the action runs.
 
-OpenClaw and similar agent frameworks (IronClaw, PicoClaw, etc.) let AI agents run tools—shell commands, MCP servers, messaging, file access—often with third-party “skills” from the community. That creates a clear risk: **a malicious or compromised skill can exfiltrate data, run arbitrary commands, or escalate access without the user’s awareness.**
-
-Public research and disclosures have made this concrete:
-
-- **Cisco’s AI security team** documented [silent data exfiltration and prompt-injection attacks via third-party OpenClaw skills](https://blogs.cisco.com/ai/personal-ai-agents-like-openclaw-are-a-security-nightmare) (Jan 2026). Skills run with the same trust as the agent; the model may invoke them based on user or attacker-controlled prompts.
-- **AuthMind** and others describe the [agentic AI supply-chain risk from malicious skills](https://www.authmind.com/post/openclaw-malicious-skills-agentic-ai-supply-chain) (Feb 2026).
-- **FourWeekMBA** and **Bitsight** have amplified the [“OpenClaw security nightmare”](https://fourweekmba.com/openclaws-security-nightmare-the-risk-openai-just-inherited/) narrative (Feb 2026).
-- **SecurityWeek** reported [CVE-2026-25253](https://www.securityweek.com/vulnerability-allows-hackers-to-hijack-openclaw-ai-assistant/): token exfiltration leading to full gateway compromise (Feb 2026).
-
-APort Agent Guardrails does **not** fix every OpenClaw or gateway vulnerability (e.g. token exfiltration is a runtime/auth issue). It does provide a **pre-action authorization layer**: every tool call is evaluated against a passport and policy **before** it runs. Malicious or injected tool invocations are blocked at the hook; the tool never executes.
-
----
-
-## Prompt injection and how APort mitigates it
-
-### What is prompt injection in this context?
-
-The agent decides which tools to call and with what arguments based on user input, system prompts, and context. An attacker can try to **inject instructions** (e.g. in a user message or in data the agent reads) so the agent calls a dangerous tool—for example `exec.run` with `rm -rf /` or a skill that sends data to an attacker-controlled server. If the only control is “the agent is instructed to call a guardrail,” the agent can be prompted to skip or bypass that step.
-
-### How APort blocks it
-
-- **Enforcement is in the platform, not the prompt.** The APort OpenClaw plugin runs in the `before_tool_call` hook. OpenClaw invokes the hook for **every** tool call before execution. The model cannot “choose” to skip it; there is no prompt or agent response that bypasses the hook.
-- **Deterministic allow/deny.** Each tool call is evaluated against the passport (identity, capabilities, limits) and policy (e.g. `system.command.execute.v1`). If the request is not allowed—e.g. command not in allowlist, or matches a blocked pattern like `rm -rf`—the guardrail returns deny and the tool **never runs**.
-- **No “trust the model” for safety.** Safety is not delegated to the model following instructions; it is enforced by the runtime. So prompt injection that tries to get the model to run a bad command or skip checks does not help—the hook still runs and can deny.
-
-| Attack goal | Without APort | With APort (plugin) |
-|-------------|----------------|----------------------|
-| Run `rm -rf /` via injected prompt | Model may comply; no hard block | Hook evaluates command; blocked by policy (blocked pattern / allowlist) |
-| Get agent to “skip guardrail” | Model can be prompted to ignore instructions | Hook is not skippable by the model |
-| Use malicious skill to exfiltrate via `exec` | Skill runs; command executes | `exec` / `system.command.execute` checked; only allowlisted commands allowed |
-
----
-
-## Cisco findings and how APort addresses them
-
-Cisco’s blog ([“Personal AI agents like OpenClaw are a security nightmare”](https://blogs.cisco.com/ai/personal-ai-agents-like-openclaw-are-a-security-nightmare)) highlights risks from third-party OpenClaw skills and agent behavior. Below is how APort Agent Guardrails maps to those concerns.
-
-| Cisco / reported risk | What APort does |
-|------------------------|-----------------|
-| **Silent data exfiltration** (skill or agent sends data out without user awareness) | Tool calls that would send data (e.g. `messaging.message.send`, or custom tools if mapped) are subject to the same pre-action check. Passport and policy can restrict which channels/servers/commands are allowed; unauthorized sends are denied before execution. |
-| **Malicious or compromised third-party skills** (skill runs dangerous commands or calls) | Every tool invocation—whether from a “skill” or the core agent—goes through the same `before_tool_call` hook. A malicious skill cannot bypass the guardrail; its tool calls are evaluated against the passport and policy (allowlists, blocked patterns, rate limits). |
-| **Prompt-injection to trigger dangerous tool use** | As above: the model cannot skip the hook. Injected prompts that try to force a dangerous tool call still hit the guardrail; the call is allowed or denied by policy, not by the model. |
-| **Lack of identity/authorization for agents** | Passports (OAP v1.0) provide identity and scoped capabilities/limits. Enforcement is per tool call, so only authorized actions run. |
-
-APort does **not** replace secure development of OpenClaw itself, safe skill curation, or mitigation of issues like CVE-2026-25253 (token/gateway compromise). It adds a **pre-action authorization layer** so that even when the agent or a skill tries to run a tool, the platform can block it before it executes.
-
----
-
-## Other attack vectors and APort’s scope
-
-| Vector | Description | APort’s role |
-|--------|-------------|--------------|
-| **Token exfiltration / gateway takeover** (e.g. [CVE-2026-25253](https://www.securityweek.com/vulnerability-allows-hackers-to-hijack-openclaw-ai-assistant/)) | Attacker steals tokens or hijacks the gateway. | Out of scope: this is runtime/auth security of the OpenClaw stack. APort does not store or handle gateway tokens. Use upstream patches and secure deployment. |
-| **Malicious skill installed by user** | User adds a skill that is designed to abuse tools. | In scope: every tool call from that skill is still subject to the guardrail. Passport allowlists and blocked patterns limit what can run (e.g. which commands, which MCP tools). |
-| **Supply-chain compromise (skill or dependency)** | A trusted skill or dependency is compromised and tries to run bad commands. | In scope: same as above; tool calls are checked before execution. |
-| **PII or secrets in context** | Agent or skill has access to sensitive data in prompts or context. | Partially in scope: APort can restrict which tools run (e.g. no `data.export` or messaging to arbitrary endpoints). It does not redact or encrypt context; that requires other controls. |
-
----
-
-## Security features of this project
-
-- **Fail-closed by default**: If the guardrail errors or the passport is invalid, the tool is blocked. A separate `fail_open_on_api_error` option lets operators distinguish API infrastructure errors (4xx/5xx, network) from genuine policy denials—but defaults to fail-closed.
-- **Deterministic enforcement**: Policy runs in the platform hook; the AI cannot bypass it.
-- **Tamper-evident audit trail**: Decisions can be logged locally or via APort API (signed receipts in API mode).
-- **Local-first option**: You can run the guardrail entirely offline (bash evaluator) with no network dependency.
-- **Explicit allowlists and blocked patterns**: e.g. `system.command.execute` uses allowlists and 50+ blocked patterns (`rm -rf`, `sudo`, injection patterns, `nc`/`netcat`, `find -exec rm`, fork bombs) so only intended commands can run.
-- **Passport-configurable path overrides**: Passport owners can set `limits.allowed_paths` to override path-sensitivity heuristics (e.g. allow `/root/` operations) without weakening catastrophic protections (fork bombs, `rm -rf /`, reverse shells are never overridable).
-
----
-
-## Security model and trust boundaries
-
-### What APort Protects
-
-APort provides **pre-action authorization** for agent tool calls—policies enforce before execution, not after damage.
-
-**✅ Primary protection (agent actions):**
-- **Prompt injection** - Hook-based enforcement; agent cannot bypass via prompts
-- **Rogue agent behavior** - Only explicitly allowed tools execute
-- **Malicious skills** - Third-party OpenClaw skills checked before execution (addresses Cisco findings)
-- **Unauthorized commands** - Allowlist + 50+ blocked patterns for shell commands
-- **Data exfiltration** - File access, messaging, web requests controlled by policy
-- **Resource exhaustion** - Rate limits, size limits, time limits enforced
-
-**❌ Out of scope (infrastructure):**
-- Operating system security (file permissions, process isolation)
-- Framework/runtime vulnerabilities (OpenClaw CVEs, Node.js/Python security)
-- Network security (TLS, DNS, MITM protection)
-- Supply chain security (npm/PyPI package integrity)
-
-**Why?** APort operates at the **application layer**, enforcing authorization for agent decisions. It assumes the underlying platform (OS, runtime, network) is secure—the standard model for application-layer authorization systems.
-
-**Key insight:** If an attacker has write access to config files, they also control OpenClaw binaries, system libraries, and the entire user environment. This is an **OS security boundary**, not an APort issue. APort's value is preventing **agent misbehavior** (prompt injection, unauthorized actions), not filesystem attacks.
-
-**For full threat model, attack scenarios, and best practices by environment, see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).**
-
----
-
-## Configuration guide
-
-### ✅ Safe Defaults (Out of the Box)
-
-APort uses secure defaults:
-- `failClosed: true` - Block tools on errors (security over availability)
-- `allowUnmappedTools: false` - Deny-by-default for unmapped tools
-- API mode recommended for production
-- Passport status checked first (suspended/revoked → deny all)
-
-### Understanding Configuration Options
-
-#### `mode: "api"` (recommended) vs `mode: "local"`
-
-**API Mode (default for production):**
-- ✅ Full OAP policy evaluation (all policy packs, new rules without code changes)
-- ✅ Policies hosted by APort at api.aport.io
-- ✅ Cryptographically signed decisions (Ed25519)
-- ✅ Passport protected (fetched from API, cannot be tampered locally)
-- ✅ Global suspend (<200ms across all systems)
-- ⚠️ Requires network (~60-100ms API latency)
-
-**Local Mode (offline/privacy):**
-- ✅ Works offline (no network required)
-- ✅ Fast (<300ms latency)
-- ✅ Privacy (no data leaves machine)
-- ⚠️ Core policies only (hand-coded in bash)
-- ⚠️ Passport can be modified locally (filesystem trust)
-- ⚠️ Decisions unsigned
-
-**Recommendation:** API for production, local for development or air-gapped environments.
-
----
-
-#### `failClosed: true` (recommended) vs `failClosed: false`
-
-**True (default):**
-- If guardrail errors → deny tool execution
-- Security over availability
-- ✅ Recommended for production
-
-**False:**
-- If guardrail errors → allow tool execution
-- Availability over security
-- ⚠️ Error conditions become exploit opportunities
-- Use only for development/testing
-
----
-
-#### `allowUnmappedTools: false` (recommended) vs `allowUnmappedTools: true`
-
-**False (default):**
-- Tools without policy mapping → blocked
-- Deny-by-default security model
-- ✅ Recommended for production
-
-**True:**
-- Unmapped tools → allowed without checks
-- ⚠️ HIGH RISK - Unmapped tools bypass all authorization
-- Use only if you're using custom/community ClawHub skills and fully trust them
-
----
-
-## Security model and trust boundaries
-
-### What APort Protects
-
-APort provides **pre-action authorization** for agent tool calls—policies enforce before execution, not after damage.
-
-**✅ Primary protection (agent actions):**
-- **Prompt injection** - Hook-based enforcement; agent cannot bypass via prompts
-- **Rogue agent behavior** - Only explicitly allowed tools execute
-- **Malicious skills** - Third-party OpenClaw skills checked before execution (addresses Cisco findings)
-- **Unauthorized commands** - Allowlist + 40+ blocked patterns for shell commands
-- **Data exfiltration** - File access, messaging, web requests controlled by policy
-- **Resource exhaustion** - Rate limits, size limits, time limits enforced
-
-**❌ Out of scope (infrastructure):**
-- Operating system security (file permissions, process isolation)
-- Framework/runtime vulnerabilities (OpenClaw CVEs, Node.js/Python security)
-- Network security (TLS, DNS, MITM protection)
-- Supply chain security (npm/PyPI package integrity)
-
-**Why?** APort operates at the **application layer**, enforcing authorization for agent decisions. It assumes the underlying platform (OS, runtime, network) is secure—the standard model for application-layer authorization systems.
-
-**Key insight:** If an attacker has write access to config files, they also control OpenClaw binaries, system libraries, and the entire user environment. This is an **OS security boundary**, not an APort issue. APort's value is preventing **agent misbehavior** (prompt injection, unauthorized actions), not filesystem attacks.
-
-**For full threat model, attack scenarios, and best practices by environment, see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).**
-
----
-
-## Configuration guide
-
-### ✅ Safe Defaults (Out of the Box)
-
-APort uses secure defaults:
-- `failClosed: true` - Block tools on errors (security over availability)
-- `allowUnmappedTools: false` - Deny-by-default for unmapped tools
-- API mode recommended for production
-- Passport status checked first (suspended/revoked → deny all)
-
-### Understanding Configuration Options
-
-#### `mode: "api"` (recommended) vs `mode: "local"`
-
-**API Mode (default for production):**
-- ✅ Full OAP policy evaluation (all policy packs, new rules without code changes)
-- ✅ Policies hosted by APort at api.aport.io
-- ✅ Cryptographically signed decisions (Ed25519)
-- ✅ Passport protected (fetched from API, cannot be tampered locally)
-- ✅ Global suspend (<200ms across all systems)
-- ⚠️ Requires network (~60-100ms API latency)
-
-**Local Mode (offline/privacy):**
-- ✅ Works offline (no network required)
-- ✅ Fast (<300ms latency)
-- ✅ Privacy (no data leaves machine)
-- ⚠️ Core policies only (hand-coded in bash)
-- ⚠️ Passport can be modified locally (filesystem trust)
-- ⚠️ Decisions unsigned
-
-**Recommendation:** API for production, local for development or air-gapped environments.
-
----
-
-#### `failClosed: true` (recommended) vs `failClosed: false`
-
-**True (default):**
-- If guardrail errors → deny tool execution
-- Security over availability
-- ✅ Recommended for production
-
-**False:**
-- If guardrail errors → allow tool execution
-- Availability over security
-- ⚠️ Error conditions become exploit opportunities
-- Use only for development/testing
-
----
-
-#### `allowUnmappedTools: false` (recommended) vs `allowUnmappedTools: true`
-
-**False (default):**
-- Tools without policy mapping → blocked
-- Deny-by-default security model
-- ✅ Recommended for production
-
-**True:**
-- Unmapped tools → allowed without checks
-- ⚠️ HIGH RISK - Unmapped tools bypass all authorization
-- Use only if you're using custom/community ClawHub skills and fully trust them
-
----
-
-## Supported versions
-
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| 0.1.x   | :white_check_mark: |
-
----
-
-## Reporting a vulnerability
-
-**DO NOT** open public GitHub issues for security vulnerabilities.
-
-Please report security vulnerabilities to: **uchi@aport.io**
+The current priority surfaces are:
+
+- GitHub Repository Guard through `aporthq/policy-verify-action@v1`
+- Claude Code and Cursor local/hosted tool hooks
+- Codex CLI, Gemini CLI, and Goose beta command-hook harnesses
+- OpenClaw plugin support
+- LangChain, CrewAI, DeerFlow, and other framework adapters
+
+## What APort Protects
+
+APort is designed to reduce damage from prompt injection, compromised agent
+instructions, risky MCP tools, and automation that tries to perform actions
+outside its authorized passport.
+
+In scope:
+
+- Shell command execution, including blocked command patterns and allowlists
+- File reads and writes, including path restrictions
+- MCP tool calls and server/tool allowlists
+- Web fetch and network-like tool calls exposed by supported harnesses
+- Agent/session spawning where the framework exposes a pre-action hook
+- GitHub pull request, merge, release, and push evidence evaluated by APort
+- Hosted signed decisions and local/offline decisions depending on mode
+
+Out of scope:
+
+- Operating system compromise, root compromise, or direct process injection
+- A user or attacker with write access to disable framework hook config
+- Framework bugs that skip documented hook execution
+- Secret storage, TLS, DNS, package registry, or kernel sandbox security
+- Post-action cleanup after a tool already executed
+
+APort operates at the application/harness layer. It is most effective when the
+host framework reliably invokes its pre-action hook and branch protection or
+deployment controls require the guard check before sensitive operations.
+
+## Enforcement Modes
+
+Default mode is fail-closed.
+
+- `enforce`: Denied decisions block the action.
+- `warn`: Completed policy denials are reported but the action may continue.
+- `local`: Uses a local passport and local evaluator.
+- `api`/hosted: Uses the APort API, hosted passports, and signed decisions.
+
+Warn mode is intentionally narrow. It may downgrade a completed policy denial
+for rollout/audit, but these conditions still fail closed:
+
+- malformed or missing hook input
+- missing required tool name, command, or file path
+- unsupported multi-target patch writes or glob-expanded reads
+- unmapped effectful tools
+- missing dependencies such as `jq`
+- invalid, missing, suspended, or revoked passports
+- evaluator crashes, API integrity failures, or corrupted mode files
+
+This keeps "report-only" useful for adoption without turning schema drift or
+runtime failures into bypasses.
+
+## GitHub Repository Guard
+
+GitHub protection is the fastest path to secure AI-assisted repository changes:
+
+```yaml
+- uses: aporthq/policy-verify-action@v1
+  with:
+    mode: auto
+```
+
+`mode: auto` uses GitHub OIDC to create or reuse a repository-scoped hosted OAP
+passport without long-lived secrets. For enterprise or internal repositories,
+configure `agent-id` and `api-key` with GitHub Actions variables/secrets so
+decisions persist under a managed passport.
+
+Repository guard findings include:
+
+- workflow permission escalation
+- `pull_request_target` introduction
+- protected path changes
+- suspicious obfuscated or remote-execution content
+- incomplete or truncated GitHub evidence
+
+Workflow and `.aport` policy changes are control-plane changes. Treat them as
+high risk and require maintainer review or branch protection. Do not allow a PR
+to weaken the guard in the same change that modifies sensitive files.
+
+Repositories that dogfood APort may need to merge reviewed guard workflow or
+policy changes. Use an explicit maintainer-applied break-glass label bound to
+the reviewed head commit, such as `aport-control-plane-approved-4dfbf5cdc1a2`.
+The action should still run and write its denial/audit output; the label only
+prevents that exact reviewed control-plane change from blocking its own rollout.
+A later push changes the head SHA and invalidates the override.
+
+## Harness Security Rules
+
+For Claude Code, Cursor, Codex CLI, Gemini CLI, Goose, and OpenClaw, the hook
+must evaluate the action the host is about to execute. The implementation
+therefore follows these rules:
+
+- Do not trust prompts or model output as safety controls.
+- Do not forward raw prompt text, file content, or MCP payload bodies unless a
+  policy explicitly requires it.
+- Fail closed when the hook cannot map a tool to a policy.
+- Fail closed when one hook payload may affect multiple file targets and the
+  local evaluator cannot authorize each target independently.
+- Deny loopback, link-local, private, and cloud-metadata IP literals before
+  applying local web allowlists.
+- Prefer hosted mode for production because decisions are signed and passports
+  can be suspended centrally.
+- Keep local mode simple for development, offline use, and free report-only
+  experimentation.
+
+## Local vs Hosted Verification
+
+Hosted mode:
+
+- Full APort/OAP policy evaluation
+- Hosted passport lookup and global suspend
+- Ed25519-signed decision receipts
+- Decision history in the APort dashboard when authenticated
+- Requires network access to `api.aport.io`
+
+Local mode:
+
+- Offline and private
+- Fast local checks
+- No hosted decision persistence
+- Limited policy surface compared with the hosted verifier
+- Trusts local filesystem integrity for passport/config files
+
+## Supply Chain
+
+Install from the published npm/PyPI packages or the GitHub Marketplace action.
+For production use, pin versions where appropriate and monitor release notes.
+This repository includes tests for command hooks, framework setup, Python
+adapters, npm packages, and release packaging.
+
+## Reporting a Vulnerability
+
+Do not open public GitHub issues for security vulnerabilities.
+
+Report vulnerabilities to: **security@aport.io**
 
 Include:
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
 
-We aim to respond within 48 hours and provide a fix within 7 days for critical issues.
+- affected package, framework, or action
+- exact version or commit
+- reproduction steps
+- expected versus actual behavior
+- impact and any suggested mitigation
+
+We aim to acknowledge reports within 48 hours and prioritize critical issues
+for a fix within 7 days.

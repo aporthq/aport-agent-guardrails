@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Thin Gemini CLI wrapper around the shared APort command-hook adapter.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec bash "$SCRIPT_DIR/lib/command-hook-adapter.sh" gemini-cli "$@"

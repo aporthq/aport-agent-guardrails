@@ -1,5 +1,11 @@
 # Changelog - APort OpenClaw Plugin
 
+## 1.0.33
+
+### Patch Changes
+
+- Ship beta command-hook harnesses for Codex CLI, Gemini CLI, and Goose with stable runtime bundling, shared command mapping, host preflight warnings, warn-mode safety boundaries, and docs/tests.
+
 ## 1.0.32
 
 ### Patch Changes

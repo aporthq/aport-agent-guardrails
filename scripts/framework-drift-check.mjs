@@ -34,8 +34,8 @@ const WATCHLIST = Object.freeze([
       {
         id: "openclaw-hooks-doc",
         type: "http",
-        label: "Plugin hooks doc",
-        url: "https://docs.openclaw.ai/plugins/hooks",
+        label: "Tool call policy hooks doc",
+        url: "https://docs.openclaw.ai/plugins/hooks/tool-policy",
         requiredMarkers: [
           "before_tool_call",
           "matcher",

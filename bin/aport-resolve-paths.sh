@@ -34,9 +34,10 @@ resolve_aport_paths() {
     [ -n "$explicit_audit" ] && explicit_audit="${explicit_audit/#\~/$HOME}"
     [ -n "$explicit_config" ] && explicit_config="${explicit_config/#\~/$HOME}"
 
-    # 0) AGENTS.md enforcement block (repo-scoped, highest priority after explicit env)
-    #    Only checked when no explicit passport env var is set.
-    if [ -z "$explicit_passport" ]; then
+    # 0) AGENTS.md enforcement block (repo-scoped, opt-in runtime source).
+    #    Runtime hooks must not let a checked-out repository choose the active
+    #    passport unless the machine owner explicitly trusts repo policy.
+    if [ -z "$explicit_passport" ] && [ "${APORT_TRUST_REPO_POLICY:-0}" = "1" ]; then
         local _agentsmd_lib="$_resolve_script_dir/lib/agentsmd.sh"
         [ ! -f "$_agentsmd_lib" ] && _agentsmd_lib="$_resolve_script_dir/../bin/lib/agentsmd.sh"
         if [ -f "$_agentsmd_lib" ]; then
@@ -94,7 +95,7 @@ resolve_aport_paths() {
             config_dir="$explicit_config"
         else
             config_dir=""
-            for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.aport/deerflow" "$HOME/.n8n"; do
+            for candidate in "$HOME/.claude" "$HOME/.cursor" "$HOME/.aport/codex" "$HOME/.aport/gemini-cli" "$HOME/.codex" "$HOME/.gemini" "$HOME/.openclaw" "$HOME/.aport/langchain" "$HOME/.aport/crewai" "$HOME/.aport/deerflow" "$HOME/.aport/goose" "$HOME/.config/opencode" "$HOME/.n8n"; do
                 if [ -f "${candidate}/aport/passport.json" ]; then
                     config_dir="$candidate"
                     break

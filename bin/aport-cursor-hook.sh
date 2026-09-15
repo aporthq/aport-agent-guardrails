@@ -47,6 +47,8 @@ aport_hook_prepare_framework_paths "cursor" "${APORT_CURSOR_CONFIG_DIR:-}" "$HOM
 . "$ROOT_DIR/bin/lib/hook-read-policy.sh"
 # shellcheck source=bin/lib/hook-runtime.sh
 . "$ROOT_DIR/bin/lib/hook-runtime.sh"
+# shellcheck source=bin/lib/harness-context.sh
+. "$ROOT_DIR/bin/lib/harness-context.sh"
 load_guardrail_mode_for_hooks "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-$HOME/.cursor}}"
 
 GUARDRAIL="$ROOT_DIR/bin/aport-guardrail-bash.sh"
@@ -58,18 +60,9 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
 fi
 
 emit_cursor_input_too_large() {
-    local decision="deny"
-    local notice user_warning
-    if aport_hook_is_warn_mode; then
-        decision="allow"
-        notice="$(aport_format_guardrail_notice warn hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-        user_warning="$(aport_hook_format_user_warning hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-        aport_hook_build_response "$decision" "$notice" "$user_warning" "cursor"
-        exit 0
-    fi
-
+    local notice
     notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-    aport_hook_build_response "$decision" "$notice" "" "cursor"
+    aport_hook_build_response "deny" "$notice" "" "cursor"
     exit 2
 }
 
@@ -110,8 +103,9 @@ deny_or_warn() {
     local policy="$1"
     local code="${2:-oap.denied}"
     local message="${3:-}"
+    local failure_class="${4:-hard}"
     local notice user_warning
-    if aport_hook_is_warn_mode; then
+    if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
         notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
         user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message")"
         warn_allow "$notice" "$user_warning"
@@ -119,6 +113,10 @@ deny_or_warn() {
     notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
     deny "$notice"
 }
+
+if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then
+    deny_or_warn "hook.input" "oap.invalid_tool_arguments" "Hook tool arguments must be a JSON object"
+fi
 
 allow() {
     echo '{"permission":"allow","allowed":true}'
@@ -163,26 +161,14 @@ if [ "$HOOK_EVENT" = "beforeReadFile" ] || { [ -z "$HOOK_EVENT" ] && [ -z "$TOOL
 elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INPUT" | jq -e '.subagent_id' &> /dev/null; }; then
     # subagentStart: sub-agent spawning
     GUARDRAIL_TOOL="session.create"
-    CONTEXT_JSON="$(safe_jq "$INPUT" '{description: (.task // ""), subagent_type: (.subagent_type // "")}')"
+    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "subagentStart" "cursor")"
 
 elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -n "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.mcp_server_name // .server // .url' &> /dev/null; }; then
-    # beforeMCPExecution: MCP tool calls. Cursor's current native field is mcp_server_name;
-    # server/url are accepted for backwards compatibility with older fixtures.
+    # beforeMCPExecution: MCP tool calls. Cursor's current native field is
+    # mcp_server_name; server-qualified tool names are parsed by the shared
+    # context helper. Do not trust ordinary tool_input.server values.
     GUARDRAIL_TOOL="mcp.tool"
-    CONTEXT_JSON="$(safe_jq "$INPUT" '
-      def parsed_tool_input:
-        (.tool_input // {}) as $ti |
-        if ($ti | type) == "string" then (try ($ti | fromjson) catch {raw_input: $ti}) else $ti end;
-      parsed_tool_input as $params |
-      {
-        server: (.mcp_server_name // .server // .url // ""),
-        mcp_server: (.mcp_server_name // .server // .url // ""),
-        tool: ($params.tool // $params.name // $params.operation // .mcp_tool // .tool_name // ""),
-        mcp_tool: ($params.tool // $params.name // $params.operation // .mcp_tool // .tool_name // ""),
-        tool_name: (.tool_name // ""),
-        tool_input: $params,
-        parameters: $params
-      }')"
+    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME" "beforeMCPExecution")"
 
 elif [ -n "$TOOL_NAME" ]; then
     # preToolUse: Shell, Read, Write, Grep, Delete, Task, WebSearch, Agent, MCP:*, etc.
@@ -191,45 +177,71 @@ elif [ -n "$TOOL_NAME" ]; then
     case "$TOOL_NORM" in
         shell | bash | runterminalcmd | run_terminal_cmd | runcommand | run_command | terminal | terminalcommand | terminal_command)
             GUARDRAIL_TOOL="bash"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{command: (.tool_input.command // .tool_input.cmd // .tool_input.args.command // .tool_input.args.cmd // "")}')"
+            if aport_hook_payload_has_malformed_shell_command_aliases "$INPUT"; then
+                deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell command aliases must be strings"
+            fi
+            if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
+                deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
+            fi
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" shell "$TOOL_NAME" "cursor")"
             COMMAND_TEXT="$(printf '%s' "$CONTEXT_JSON" | jq -r '.command // ""' 2> /dev/null || true)"
+            SHELL_OVERRIDE="$(printf '%s' "$CONTEXT_JSON" | jq -r '.shell // ""' 2> /dev/null || true)"
+            if [ -z "$COMMAND_TEXT" ]; then
+                deny_or_warn "system.command.execute" "oap.missing_command" "Shell tool did not provide a command that APort can evaluate"
+            fi
+            if ! aport_hook_shell_override_is_trusted "$SHELL_OVERRIDE"; then
+                deny_or_warn "system.command.execute" "oap.shell_not_allowed" "Shell override is not a trusted interpreter"
+            fi
             if aport_is_reentrant_guardrail_command "$COMMAND_TEXT" "$ROOT_DIR"; then
                 allow
             fi
             ;;
         read | readfile | read_file | semanticsearch | presentfile | present_file | viewimage | view_image)
             TOOL_INPUT="$(safe_jq "$INPUT" '.tool_input // {}')"
-            if ! aport_hook_try_read_evaluation "$TOOL_NORM" "$TOOL_INPUT"; then
+            set +e
+            trap - ERR
+            aport_hook_try_read_evaluation "$TOOL_NORM" "$TOOL_INPUT"
+            READ_STATUS=$?
+            set -e
+            trap '__aport_emit_crash_deny "$LINENO"' ERR
+            if [ "$READ_STATUS" -eq 2 ]; then
+                deny_or_warn "data.file.read" "$APORT_HOOK_READ_ERROR_CODE" "$APORT_HOOK_READ_ERROR_MESSAGE"
+            fi
+            if [ "$READ_STATUS" -ne 0 ]; then
                 allow
             fi
+            :
             ;;
         readmcpresourcetool)
             GUARDRAIL_TOOL="mcp.tool"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '
-              def parsed_tool_input:
-                (.tool_input // {}) as $ti |
-                if ($ti | type) == "string" then (try ($ti | fromjson) catch {raw_input: $ti}) else $ti end;
-              parsed_tool_input as $params |
-              {
-                server: (.mcp_server_name // .server // .url // $params.server // $params.mcp_server // ""),
-                mcp_server: (.mcp_server_name // .server // .url // $params.server // $params.mcp_server // ""),
-                tool: ($params.tool // $params.name // $params.operation // .mcp_tool // "resources.read"),
-                mcp_tool: ($params.tool // $params.name // $params.operation // .mcp_tool // "resources.read"),
-                uri: ($params.uri // $params.resource_uri // ""),
-                tool_input: $params,
-                parameters: $params
-              }')"
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
             ;;
-        grep | grepsearch | grep_search | glob | filesearch | file_search | codebasesearch | codebase_search | ls | listdir | list_dir | lsp | todoread | askquestion | askuserquestion | listmcpresourcestool | toolsearch | waitformcpservers | taskget | tasklist | taskoutput | cronlist)
+        grep | grepsearch | grep_search)
+            TOOL_INPUT="$(safe_jq "$INPUT" '.tool_input // {}')"
+            set +e
+            trap - ERR
+            aport_hook_try_read_evaluation "$TOOL_NORM" "$TOOL_INPUT"
+            READ_STATUS=$?
+            set -e
+            trap '__aport_emit_crash_deny "$LINENO"' ERR
+            if [ "$READ_STATUS" -eq 2 ]; then
+                deny_or_warn "data.file.read" "$APORT_HOOK_READ_ERROR_CODE" "$APORT_HOOK_READ_ERROR_MESSAGE"
+            fi
+            if [ "$READ_STATUS" -ne 0 ]; then
+                deny_or_warn "data.file.read" "oap.missing_file_path" "Search tool did not provide a path that APort can evaluate"
+            fi
+            :
+            ;;
+        glob | filesearch | file_search | codebasesearch | codebase_search | ls | listdir | list_dir | lsp | todoread | todowrite | askquestion | askuserquestion | listmcpresourcestool | toolsearch | waitformcpservers | taskget | tasklist | taskoutput | cronlist)
             allow
             ;;
-        write | writefile | write_file | strreplace | str_replace | edit | editfile | edit_file | createfile | create_file | multiedit | editnotebook | applypatch | searchreplace | search_replace | notebookedit | todowrite | delete | deletefile | delete_file | removefile | remove_file)
+        write | writefile | write_file | strreplace | str_replace | edit | editfile | edit_file | createfile | create_file | multiedit | editnotebook | applypatch | searchreplace | search_replace | notebookedit | delete | deletefile | delete_file | removefile | remove_file)
             GUARDRAIL_TOOL="write"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{file_path: (.tool_input.file_path // .tool_input.path // .tool_input.args.file_path // .tool_input.args.path // "")}')"
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" file_write)"
             ;;
         websearch | webfetch)
             GUARDRAIL_TOOL="websearch"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{url: (.tool_input.url // .tool_input.args.url // ""), query: (.tool_input.query // .tool_input.args.query // "")}')"
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
             ;;
         browser)
             GUARDRAIL_TOOL="browser"
@@ -237,28 +249,15 @@ elif [ -n "$TOOL_NAME" ]; then
             ;;
         task | agent | taskcreate | taskupdate | taskstop | skill | subagent | subagentstart | sendmessage | teamcreate | teamdelete)
             GUARDRAIL_TOOL="session.create"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{description: (.tool_input.description // .tool_input.prompt // "")}')"
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "cursor")"
             ;;
         croncreate | crondelete)
             GUARDRAIL_TOOL="session.create"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{description: (.tool_input.description // .tool_input.schedule // "")}')"
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "cursor")"
             ;;
         mcp__* | mcp:* | callmcptool)
             GUARDRAIL_TOOL="mcp.tool"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '
-              def parsed_tool_input:
-                (.tool_input // {}) as $ti |
-                if ($ti | type) == "string" then (try ($ti | fromjson) catch {raw_input: $ti}) else $ti end;
-              parsed_tool_input as $params |
-              {
-                server: (.mcp_server_name // .server // .url // ""),
-                mcp_server: (.mcp_server_name // .server // .url // ""),
-                tool: (.tool_name // .mcp_tool // ""),
-                mcp_tool: (.tool_name // .mcp_tool // ""),
-                tool_name: (.tool_name // ""),
-                tool_input: $params,
-                parameters: $params
-              }')"
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
             ;;
         *)
             deny_or_warn "hook.tool.map" "oap.unknown_tool" "Unknown tool: $TOOL_NAME (fail-closed)"
@@ -268,7 +267,16 @@ elif [ -n "$TOOL_NAME" ]; then
 elif echo "$INPUT" | jq -e '.command' &> /dev/null; then
     # beforeShellExecution: { "command": "..." }
     GUARDRAIL_TOOL="bash"
+    if aport_hook_payload_has_malformed_shell_command_aliases "$INPUT"; then
+        deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell command aliases must be strings"
+    fi
+    if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
+        deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell hook supplied conflicting command aliases"
+    fi
     CMD="$(echo "$INPUT" | jq -r '.command // ""' 2> /dev/null)"
+    if [ -z "$CMD" ]; then
+        deny_or_warn "system.command.execute" "oap.missing_command" "Shell hook did not provide a command that APort can evaluate"
+    fi
     if aport_is_reentrant_guardrail_command "$CMD" "$ROOT_DIR"; then
         allow
     fi
@@ -277,7 +285,16 @@ elif echo "$INPUT" | jq -e '.command' &> /dev/null; then
 elif echo "$INPUT" | jq -e '.tool // .input.command' &> /dev/null; then
     # Legacy Copilot-style: { "tool": "runTerminalCommand", "input": { "command": "..." } }
     GUARDRAIL_TOOL="bash"
+    if aport_hook_payload_has_malformed_shell_command_aliases "$INPUT"; then
+        deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell command aliases must be strings"
+    fi
+    if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
+        deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
+    fi
     CMD="$(echo "$INPUT" | jq -r '.input.command // .input.cmd // .args[0] // ""' 2> /dev/null)"
+    if [ -z "$CMD" ]; then
+        deny_or_warn "system.command.execute" "oap.missing_command" "Shell tool did not provide a command that APort can evaluate"
+    fi
     if aport_is_reentrant_guardrail_command "$CMD" "$ROOT_DIR"; then
         allow
     fi
@@ -294,6 +311,12 @@ if [ -n "$HOOK_DECISION_FILE" ]; then
     HOOK_DECISION_FILE="${HOOK_DECISION_FILE%.json}-$$.json"
     export APORT_DECISION_FILE="$HOOK_DECISION_FILE"
     export OPENCLAW_DECISION_FILE="$HOOK_DECISION_FILE"
+    if [ -e "$HOOK_DECISION_FILE" ] && [ ! -f "$HOOK_DECISION_FILE" ]; then
+        deny_or_warn "hook.runtime" "oap.decision_state_unavailable" "APort decision state path is not a regular file" "hard"
+    fi
+    if ! rm -f "$HOOK_DECISION_FILE" 2> /dev/null; then
+        deny_or_warn "hook.runtime" "oap.decision_state_unavailable" "APort decision state path could not be reset before evaluation" "hard"
+    fi
 fi
 
 # Read tools: send only file_path to the evaluator (Cursor may attach large file bodies in tool_input).
@@ -330,7 +353,9 @@ fi
 # Deny: read reason from decision file
 REASON="Policy denied this action."
 REASON_CODE=""
+HAS_DECISION_FILE=0
 if [ -n "$HOOK_DECISION_FILE" ] && [ -f "$HOOK_DECISION_FILE" ]; then
+    HAS_DECISION_FILE=1
     R="$(jq -r 'if (.allow == false) then (.reasons[0].message // empty) else empty end' "$HOOK_DECISION_FILE" 2> /dev/null)"
     [ -n "$R" ] && REASON="$R"
     C="$(aport_hook_reason_code "$HOOK_DECISION_FILE")"
@@ -352,4 +377,11 @@ if [ "$REASON" = "Policy denied this action." ] && [ -n "$GUARDRAIL_OUTPUT" ]; t
 fi
 aport_append_local_session_decision "$HOOK_DECISION_FILE" "cursor" "$INPUT" "$TOOL_NAME" "$GUARDRAIL_TOOL" "$CONTEXT_JSON"
 cleanup_decision
-deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON"
+if [ "$HAS_DECISION_FILE" -ne 1 ]; then
+    deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "oap.evaluator_failed" "$REASON" "hard"
+fi
+if aport_hook_is_hard_failure_reason "${REASON_CODE:-oap.denied}"; then
+    deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "hard"
+else
+    deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "policy"
+fi

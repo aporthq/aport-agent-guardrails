@@ -77,6 +77,31 @@ make install
 make test
 ```
 
+## Local PR Review
+
+Before pushing security-sensitive guardrail changes, run the same review shape we
+expect from GitHub Codex:
+
+```bash
+git fetch origin staging
+npm run local-pr-review
+```
+
+`local-pr-review` runs `codex review --base origin/staging` with the repository's
+APort-specific review prompt and `AGENTS.md` rules. Use
+`CODEX_REVIEW_BASE=origin/main npm run local-pr-review` when preparing a
+staging-to-main PR.
+
+For a heavier local gate, run:
+
+```bash
+npm run local-pr-gate
+```
+
+That runs the pre-push checks first, then Codex review. Every security review
+finding should also get a deterministic regression test in the shared harness
+path when practical.
+
 ## Code Style
 
 - Follow existing code style

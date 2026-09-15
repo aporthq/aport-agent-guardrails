@@ -34,7 +34,31 @@ cursor_name="$(jq -r '.metadata.name' "$cursor_passport")"
 cursor_desc="$(jq -r '.metadata.description' "$cursor_passport")"
 assert_eq "$cursor_name" "Cursor Agent" "cursor default agent name"
 assert_eq "$cursor_desc" "Cursor IDE AI agent with APort guardrails" "cursor default agent description"
+jq -e '
+  (.capabilities | map(.id) | index("agent.session.create"))
+  and ((.limits["agent.session.create"].max_concurrent // null) == null)
+' "$cursor_passport" > /dev/null || {
+    echo "FAIL: cursor defaults should include agent.session.create capability without an unenforceable max_concurrent limit" >&2
+    cat "$cursor_passport" >&2
+    exit 1
+}
 echo "  ✅ cursor defaults are framework-specific"
+
+claude_passport="$TEST_DIR/claude-code-passport.json"
+run_noninteractive_for_framework "claude-code" "$claude_passport"
+claude_name="$(jq -r '.metadata.name' "$claude_passport")"
+claude_desc="$(jq -r '.metadata.description' "$claude_passport")"
+assert_eq "$claude_name" "Claude Code Agent" "claude-code default agent name"
+assert_eq "$claude_desc" "Claude Code AI agent with APort guardrails" "claude-code default agent description"
+jq -e '
+  (.capabilities | map(.id) | index("agent.session.create"))
+  and ((.limits["agent.session.create"].max_concurrent // null) == null)
+' "$claude_passport" > /dev/null || {
+    echo "FAIL: claude-code defaults should include agent.session.create capability without an unenforceable max_concurrent limit" >&2
+    cat "$claude_passport" >&2
+    exit 1
+}
+echo "  ✅ claude-code defaults are framework-specific"
 
 openclaw_passport="$TEST_DIR/openclaw-passport.json"
 run_noninteractive_for_framework "openclaw" "$openclaw_passport"

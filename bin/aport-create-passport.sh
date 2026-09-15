@@ -6,7 +6,7 @@
 # Usage: ./aport-create-passport.sh [--output FILE] [--non-interactive] [--framework=NAME]
 #   --output FILE       Write passport to FILE (overrides framework default).
 #   --non-interactive   Use defaults only; no prompts (for CI/tests). Use --output or set APORT_FRAMEWORK for default path.
-#   --framework=NAME    Default passport path for this framework (cursor, openclaw, langchain, crewai, n8n).
+#   --framework=NAME    Default passport path for this framework.
 #
 # In interactive mode the first question is "Passport file path [default]:"; you can press Enter for the
 # framework default or type a different path. In non-interactive mode, --output always overrides; if not
@@ -171,6 +171,36 @@ case "${APORT_FRAMEWORK:-}" in
         DEFAULT_AGENT_SESSION=y
         DEFAULT_MCP_TOOL=y
         ;;
+    goose)
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"Goose Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Goose AI agent with APort guardrails"}
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=y
+        DEFAULT_MCP_TOOL=y
+        ;;
+    codex)
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"Codex Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Codex CLI coding agent with APort guardrails"}
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=n
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=y
+        DEFAULT_MCP_TOOL=y
+        ;;
+    gemini-cli | gemini)
+        DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"Gemini CLI Agent"}
+        DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Gemini CLI coding agent with APort guardrails"}
+        DEFAULT_FILE_READ=y
+        DEFAULT_FILE_WRITE=y
+        DEFAULT_WEB_FETCH=y
+        DEFAULT_WEB_BROWSER=n
+        DEFAULT_AGENT_SESSION=n
+        DEFAULT_MCP_TOOL=y
+        ;;
     openclaw)
         DEFAULT_AGENT_NAME=${DEFAULT_AGENT_NAME:-"OpenClaw Agent"}
         DEFAULT_AGENT_DESC=${DEFAULT_AGENT_DESC:-"Local OpenClaw AI agent with APort guardrails"}
@@ -283,7 +313,10 @@ else
     echo "  ───────────────"
     case "${APORT_FRAMEWORK:-}" in
         claude-code) echo "  Choose what your agent can do (y/n). Claude Code defaults: most capabilities = yes." ;;
+        codex) echo "  Choose what your agent can do (y/n). Codex defaults: file ops, exec, sub-agents, and MCP = yes." ;;
         cursor) echo "  Choose what your agent can do (y/n). Cursor defaults: file ops, exec, web, sub-agents = yes." ;;
+        gemini-cli | gemini) echo "  Choose what your agent can do (y/n). Gemini CLI defaults: file ops, exec, web, and MCP = yes." ;;
+        goose) echo "  Choose what your agent can do (y/n). Goose defaults: file ops, exec, web, sub-agents, and MCP = yes." ;;
         openclaw) echo "  Choose what your agent can do (y/n). OpenClaw defaults: PRs, exec, messaging, file ops = yes." ;;
         *) echo "  Choose what your agent can do (y/n). Defaults: PRs, exec, and messaging = yes; others vary by framework." ;;
     esac
@@ -505,7 +538,7 @@ if [ "$exec_cap" = "y" ] || [ "$exec_cap" = "Y" ]; then
         # default: allow any (*); blocked_patterns still apply
         allowed_commands_json="[\"*\"]"
     fi
-    limits_json="$limits_json\"system.command.execute\": {\"allowed_commands\": $allowed_commands_json, \"blocked_patterns\": [\"rm -rf\", \"sudo\", \"chmod 777\", \"dd if=\", \"mkfs\"], \"max_execution_time\": 300},"
+    limits_json="$limits_json\"system.command.execute\": {\"allowed_commands\": $allowed_commands_json, \"blocked_patterns\": [\"rm -rf\", \"sudo\", \"chmod 777\", \"dd if=\", \"mkfs\"]},"
 fi
 
 if [ "$msg_cap" = "y" ] || [ "$msg_cap" = "Y" ]; then
@@ -566,7 +599,7 @@ if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
 fi
 
 if [ "${agent_session_cap:-n}" = "y" ] || [ "${agent_session_cap:-n}" = "Y" ]; then
-    limits_json="$limits_json\"agent.session.create\": {\"max_concurrent\": 10},"
+    limits_json="$limits_json\"agent.session.create\": {},"
 fi
 
 if [ "${mcp_tool_cap:-n}" = "y" ] || [ "${mcp_tool_cap:-n}" = "Y" ]; then

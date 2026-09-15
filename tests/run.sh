@@ -50,6 +50,10 @@ run_one "$TESTS_DIR/frameworks/deerflow/setup.sh"
 run_one "$TESTS_DIR/frameworks/n8n/setup.sh"
 run_one "$TESTS_DIR/frameworks/cursor/setup.sh"
 run_one "$TESTS_DIR/frameworks/claude-code/setup.sh"
+run_one "$TESTS_DIR/frameworks/codex/setup.sh"
+run_one "$TESTS_DIR/frameworks/gemini-cli/setup.sh"
+run_one "$TESTS_DIR/frameworks/goose/setup.sh"
+run_one "$TESTS_DIR/frameworks/opencode/setup.sh"
 
 # Node integration test (setup.test.mjs)
 if [[ -f "$TESTS_DIR/frameworks/openclaw/setup.test.mjs" ]]; then
