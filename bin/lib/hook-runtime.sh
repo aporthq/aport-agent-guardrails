@@ -51,7 +51,8 @@ aport_read_stdin_with_timeout() {
 }
 
 aport_extract_session_id() {
-    local payload="${1:-{}}"
+    local default_payload='{}'
+    local payload="${1:-$default_payload}"
     if ! command -v jq > /dev/null 2>&1; then
         return 0
     fi
@@ -147,6 +148,7 @@ aport_hook_is_hard_failure_reason() {
             oap.invalid_json | \
             oap.invalid_tool_arguments | \
             oap.invalid_limit | \
+            oap.unsupported_limit | \
             oap.missing_required_context | \
             oap.invalid_url | \
             oap.domain_mismatch | \
@@ -231,6 +233,58 @@ aport_sanitize_display_text() {
     printf '%s' "$value" | cut -c 1-320
 }
 
+aport_hash_sha256() {
+    local value
+    if [ "$#" -gt 0 ]; then
+        value="${1:-}"
+    else
+        value="$(cat)"
+    fi
+    if command -v shasum > /dev/null 2>&1; then
+        printf '%s' "$value" | shasum -a 256 | awk '{print $1}'
+        return 0
+    fi
+    if command -v sha256sum > /dev/null 2>&1; then
+        printf '%s' "$value" | sha256sum | awk '{print $1}'
+        return 0
+    fi
+    printf ''
+}
+
+aport_persistable_session_context() {
+    local guardrail_tool="$1"
+    local default_context='{}'
+    local context_json="${2:-$default_context}"
+    local command_hash
+
+    if ! printf '%s' "$context_json" | jq -e . > /dev/null 2>&1; then
+        printf '{}'
+        return 0
+    fi
+
+    case "$guardrail_tool" in
+        bash)
+            command_hash="$(printf '%s' "$context_json" | jq -r '.command // "" | tostring' 2> /dev/null | aport_hash_sha256)"
+            printf '%s' "$context_json" | jq -c --arg command_hash "$command_hash" '
+              def keep_value(v):
+                v != null and v != "" and v != [];
+              {
+                command_length: ((.command // "") | tostring | length),
+                command_hash_sha256: (if $command_hash == "" then null else $command_hash end),
+                timeout: (.timeout // null),
+                timeout_seconds: (.timeout_seconds // null),
+                shell: (.shell // null),
+                cwd: (.cwd // null)
+              }
+              | with_entries(select(keep_value(.value)))
+            ' 2> /dev/null || printf '{}'
+            ;;
+        *)
+            printf '%s' "$context_json" | jq -c . 2> /dev/null || printf '{}'
+            ;;
+    esac
+}
+
 aport_hook_reason_code() {
     local decision_file="${1:-}"
     if [ -n "$decision_file" ] && [ -f "$decision_file" ] && command -v jq > /dev/null 2>&1; then
@@ -281,12 +335,13 @@ aport_append_local_session_decision() {
     [ -n "$decision_file" ] && [ -f "$decision_file" ] || return 0
     command -v jq > /dev/null 2>&1 || return 0
 
-    local data_dir jsonl session_id now tmp
+    local data_dir jsonl session_id now tmp persisted_context
     data_dir="$(dirname "$decision_file")"
     jsonl="${APORT_SESSION_DECISIONS_FILE:-$data_dir/session-decisions.jsonl}"
     session_id="$(aport_extract_session_id "$hook_payload")"
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     tmp="$(mktemp "${data_dir}/session-decision.XXXXXX" 2> /dev/null || mktemp)"
+    persisted_context="$(aport_persistable_session_context "$guardrail_tool" "$context_json")"
 
     if jq -c \
         --arg recorded_at "$now" \
@@ -294,7 +349,7 @@ aport_append_local_session_decision() {
         --arg session_id "$session_id" \
         --arg original_tool "$original_tool" \
         --arg guardrail_tool "$guardrail_tool" \
-        --argjson context "$context_json" \
+        --argjson context "$persisted_context" \
         '{recorded_at:$recorded_at,framework:$framework,session_id:(if $session_id == "" then null else $session_id end),original_tool:$original_tool,guardrail_tool:$guardrail_tool,context:$context,decision:.}' \
         "$decision_file" > "$tmp" 2> /dev/null; then
         cat "$tmp" >> "$jsonl" 2> /dev/null || true

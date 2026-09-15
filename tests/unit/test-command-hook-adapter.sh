@@ -98,6 +98,29 @@ run_hook "Codex Bash allow returns empty success JSON" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
     '. == {}'
 
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex shell session context stores hash instead of raw command" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls secret_should_not_persist","timeout_seconds":5,"cwd":"/tmp"}}' \
+    '. == {}'
+if grep -q 'secret_should_not_persist\|ls ' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: shell decision context must not persist raw command text" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '
+  .guardrail_tool == "bash"
+  and .context.command_length > 0
+  and (.context.command_hash_sha256 | type == "string" and length == 64)
+  and .context.timeout == 5
+  and (.context | has("command") | not)
+' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: shell decision context should contain command metadata only" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Shell session decision context stores metadata only"
+
 run_hook "Codex exec_command maps to shell policy" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la"}}' \
@@ -324,6 +347,72 @@ run_hook "Codex shell requires timeout evidence when max execution time is confi
 
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
+DIRECT_ARGS_OUT="$TEST_DIR/direct-shell-args-object-out.txt"
+DIRECT_ARGS_ERR="$TEST_DIR/direct-shell-args-object-err.txt"
+set +e
+"$REPO_ROOT/bin/aport-guardrail-bash.sh" bash '{"args":{"0":"ls"}}' > "$DIRECT_ARGS_OUT" 2> "$DIRECT_ARGS_ERR"
+DIRECT_ARGS_EXIT=$?
+set -e
+if [[ "$DIRECT_ARGS_EXIT" -eq 0 ]]; then
+    echo "FAIL: direct local evaluator must reject non-array shell args" >&2
+    cat "$DIRECT_ARGS_OUT" >&2 || true
+    cat "$DIRECT_ARGS_ERR" >&2 || true
+    exit 1
+fi
+jq -e '.allow == false and (.reasons[0].code == "oap.invalid_tool_arguments")' "$TEST_DIR/aport/decision.json" > /dev/null || {
+    echo "FAIL: direct local evaluator should report invalid_tool_arguments for non-array shell args" >&2
+    cat "$TEST_DIR/aport/decision.json" >&2
+    exit 1
+}
+echo "  ✅ Direct shell evaluator rejects non-array args"
+
+if command -v mkfifo > /dev/null 2>&1; then
+    cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_read_fifo_size_limit",
+  "agent_id": "ap_read_fifo_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.read"}],
+  "limits": {
+    "data.file.read": {
+      "allowed_paths": ["*"],
+      "max_file_size_bytes": 1
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+    FIFO_PATH="$TEST_DIR/read-fifo"
+    rm -f "$FIFO_PATH"
+    mkfifo "$FIFO_PATH"
+    FIFO_OUT="$TEST_DIR/read-fifo-out.txt"
+    FIFO_ERR="$TEST_DIR/read-fifo-err.txt"
+    FIFO_CONTEXT="$(jq -n -c --arg file "$FIFO_PATH" '{file_path:$file}')"
+    set +e
+    "$REPO_ROOT/bin/aport-guardrail-bash.sh" read "$FIFO_CONTEXT" > "$FIFO_OUT" 2> "$FIFO_ERR"
+    FIFO_EXIT=$?
+    set -e
+    if [[ "$FIFO_EXIT" -eq 0 ]]; then
+        echo "FAIL: non-regular file reads with size limits must fail closed" >&2
+        cat "$FIFO_OUT" >&2 || true
+        cat "$FIFO_ERR" >&2 || true
+        exit 1
+    fi
+    jq -e '.allow == false and (.reasons[0].code == "oap.missing_required_context")' "$TEST_DIR/aport/decision.json" > /dev/null || {
+        echo "FAIL: FIFO read should fail with missing_required_context" >&2
+        cat "$TEST_DIR/aport/decision.json" >&2
+        exit 1
+    }
+    echo "  ✅ Non-regular file reads with size limits fail closed"
+    cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+else
+    echo "  ⚠️  mkfifo unavailable; skipping non-regular file-read size-limit test"
+fi
+
 run_hook "Gemini run_shell_command deny uses Gemini decision JSON" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"run_shell_command","tool_input":{"command":"rm -rf /tmp/x"}}' \
@@ -407,9 +496,11 @@ run_hook "Gemini read_many_files denies brace-expanded single target" \
     '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"include":["/tmp/{README.md,.env}"]}}' \
     '.decision == "deny" and (.reason | contains("oap.glob_read_unsupported"))'
 
+GEMINI_READ_MANY_SINGLE="$TEST_DIR/gemini-read-many-single.txt"
+printf 'single read fixture\n' > "$GEMINI_READ_MANY_SINGLE"
 run_hook "Gemini read_many_files allows include-only single target" \
     gemini "$GEMINI" \
-    '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"include":["/tmp/test.txt"]}}' \
+    "{\"hook_event_name\":\"BeforeTool\",\"tool_name\":\"read_many_files\",\"tool_input\":{\"include\":[\"$GEMINI_READ_MANY_SINGLE\"]}}" \
     '.decision == "allow"'
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
@@ -1121,6 +1212,21 @@ run_hook "Gemini web_fetch denies private metadata IP" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://169.254.169.254/latest/meta-data","method":"GET"}}' \
     '.decision == "deny" and (.reason | contains("oap.private_network_destination"))'
 
+run_hook "Gemini web_fetch denies multicast IPv4 literal" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://224.0.0.1/","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.private_network_destination"))'
+
+run_hook "Gemini web_fetch denies limited-broadcast IPv4 literal" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://255.255.255.255/","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.private_network_destination"))'
+
+run_hook "Gemini web_fetch denies documentation IPv4 literal" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://192.0.2.1/","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.private_network_destination"))'
+
 run_hook "Gemini web_fetch denies shortened loopback IPv4 literal" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://127.1/admin","method":"GET"}}' \
@@ -1149,6 +1255,11 @@ run_hook "Gemini web_fetch denies compressed IPv6 loopback literal" \
 run_hook "Gemini web_fetch denies link-local IPv6 literal" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://[fe90::1]/admin","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.private_network_destination"))'
+
+run_hook "Gemini web_fetch denies multicast IPv6 literal" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://[ff02::1]/admin","method":"GET"}}' \
     '.decision == "deny" and (.reason | contains("oap.private_network_destination"))'
 
 run_hook "Gemini web_fetch denies private IPv6 domain literal" \
@@ -1294,6 +1405,21 @@ run_hook "Gemini web_fetch deleted local rate state fails closed after initializ
     '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
 rm -f "$TEST_DIR/aport/web-rate-state.json.initialized"
 
+rm -f "$TEST_DIR/aport/web-rate-state.json"
+rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+RATE_MARKER_TARGET="$TEST_DIR/rate-marker-target.txt"
+printf 'do-not-truncate\n' > "$RATE_MARKER_TARGET"
+ln -s "$RATE_MARKER_TARGET" "$TEST_DIR/aport/web-rate-state.json.initialized"
+run_hook "Gemini web_fetch symlinked rate marker fails closed" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/symlink-marker","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
+if [ "$(cat "$RATE_MARKER_TARGET")" != "do-not-truncate" ]; then
+    echo "FAIL: rate marker symlink target must not be truncated" >&2
+    exit 1
+fi
+rm -f "$TEST_DIR/aport/web-rate-state.json.initialized" "$RATE_MARKER_TARGET"
+
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
@@ -1425,11 +1551,13 @@ run_hook "Goose clean allow stays silent" \
     'empty'
 
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+GOOSE_READ_IMAGE="$TEST_DIR/goose-diagram.png"
+printf 'not really png\n' > "$GOOSE_READ_IMAGE"
 run_hook "Goose read_image local source maps to file read" \
     goose "$GOOSE" \
-    '{"hook_event_name":"PreToolUse","tool_name":"developer__read_image","tool_input":{"source":"/tmp/diagram.png"}}' \
+    "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"developer__read_image\",\"tool_input\":{\"source\":\"$GOOSE_READ_IMAGE\"}}" \
     'empty'
-jq -e '.guardrail_tool == "read" and .decision.policy_id == "data.file.read.v1" and .context.file_path == "/tmp/diagram.png"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+jq -e --arg file "$GOOSE_READ_IMAGE" '.guardrail_tool == "read" and .decision.policy_id == "data.file.read.v1" and .context.file_path == $file' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
     echo "FAIL: Goose local read_image should map source to data.file.read context" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
