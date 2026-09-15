@@ -680,7 +680,7 @@ acquire_session_state_lock() {
                 read -r owner_pid owner_time < "$lock_dir/owner" 2> /dev/null || true
                 is_lock_timestamp "$owner_time" || return 1
                 age=$((now - owner_time))
-                if process_id_is_absent "$owner_pid" || { [ -z "${owner_pid:-}" ] && [ "$age" -ge "$stale_after" ] 2> /dev/null; }; then
+                if process_id_is_absent "$owner_pid" || [ "$age" -ge "$stale_after" ] 2> /dev/null; then
                     rm -f "$lock_dir/owner" 2> /dev/null || true
                     if rmdir "$lock_dir" 2> /dev/null; then
                         recovered_lock=1
@@ -710,7 +710,7 @@ acquire_session_state_lock() {
                 read -r recovery_pid recovery_time < "$recovery_lock/owner" 2> /dev/null || true
                 is_lock_timestamp "$recovery_time" || return 1
                 recovery_age=$((now - recovery_time))
-                if process_id_is_absent "$recovery_pid" || { [ -z "${recovery_pid:-}" ] && [ "$recovery_age" -ge "$stale_after" ] 2> /dev/null; }; then
+                if process_id_is_absent "$recovery_pid" || [ "$recovery_age" -ge "$stale_after" ] 2> /dev/null; then
                     rm -f "$recovery_lock/owner" 2> /dev/null || true
                     rmdir "$recovery_lock" 2> /dev/null || true
                 fi
