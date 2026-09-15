@@ -72,8 +72,20 @@ aport_is_reentrant_guardrail_command() {
     local first_token
 
     [ -n "$command_text" ] || return 1
+    if command -v shell_command_has_unquoted_control_operator > /dev/null 2>&1; then
+        shell_command_has_unquoted_control_operator "$command_text" && return 1
+    else
+        # Conservative fallback for callers that source this file without the
+        # validation helpers. Reentrant bypass is only safe for one simple
+        # guardrail command, never for background jobs or chained commands.
+        case "$command_text" in
+            *$'\n'* | *\;* | *'&'* | *'|'* | *'>'* | *'<'* | *'`'* | *'$('* | *'#'*)
+                return 1
+                ;;
+        esac
+    fi
     case "$command_text" in
-        *$'\n'* | *\;* | *'&&'* | *'||'* | *'|'* | *'>'* | *'<'* | *'`'* | *'$('*)
+        *$'\n'* | *\;* | *'&'* | *'|'* | *'>'* | *'<'* | *'`'* | *'$('* | *'#'*)
             return 1
             ;;
     esac
@@ -108,6 +120,83 @@ aport_hook_enforcement_mode() {
 
 aport_hook_is_warn_mode() {
     [ "$(aport_hook_enforcement_mode)" = "warn" ]
+}
+
+aport_hook_is_hard_failure_reason() {
+    case "${1:-}" in
+        oap.evaluator_crash | \
+            oap.evaluation_error | \
+            oap.evaluator_failed | \
+            oap.missing_dependency | \
+            oap.passport_not_found | \
+            oap.passport_invalid | \
+            oap.passport_suspended | \
+            oap.passport_version_mismatch | \
+            oap.invalid_tool_name | \
+            oap.missing_command | \
+            oap.missing_file_path | \
+            oap.invalid_file_path | \
+            oap.command_chain_unsupported | \
+            oap.command_injection_detected | \
+            oap.multi_path_read_unsupported | \
+            oap.glob_read_unsupported | \
+            oap.recursive_search_unsupported | \
+            oap.metadata_enumeration_unsupported | \
+            oap.context_too_large | \
+            oap.input_too_large | \
+            oap.invalid_json | \
+            oap.invalid_tool_arguments | \
+            oap.invalid_limit | \
+            oap.missing_required_context | \
+            oap.invalid_url | \
+            oap.domain_mismatch | \
+            oap.session_state_unavailable | \
+            oap.decision_state_unavailable | \
+            oap.rate_state_unavailable)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+aport_hook_shell_override_is_trusted() {
+    local shell_path="${1:-}"
+    local shell_base resolved configured_real resolved_real
+
+    [ -z "$shell_path" ] && return 0
+    case "$shell_path" in
+        *[$'\001'-$'\037'$'\177']* | *[[:space:]]* | *\;* | *'&'* | *'|'* | *'>'* | *'<'* | *'`'* | *'$('* | *'#'*)
+            return 1
+            ;;
+    esac
+
+    shell_base="${shell_path##*/}"
+    case "$shell_base" in
+        sh | bash | dash) ;;
+        *) return 1 ;;
+    esac
+
+    case "$shell_path" in
+        */*)
+            configured_real="$shell_path"
+            if command -v realpath > /dev/null 2>&1; then
+                configured_real="$(realpath "$shell_path" 2> /dev/null || printf '%s' "$shell_path")"
+            fi
+            case "$configured_real" in
+                /bin/sh | /bin/bash | /bin/dash | /usr/bin/sh | /usr/bin/bash | /usr/bin/dash)
+                    return 0
+                    ;;
+            esac
+            resolved="$(command -v "$shell_base" 2> /dev/null || true)"
+            [ -n "$resolved" ] || return 1
+            resolved_real="$resolved"
+            if command -v realpath > /dev/null 2>&1; then
+                resolved_real="$(realpath "$resolved" 2> /dev/null || printf '%s' "$resolved")"
+            fi
+            [ "$configured_real" = "$resolved_real" ] || return 1
+            ;;
+    esac
+    return 0
 }
 
 aport_hook_policy_reference() {
@@ -238,6 +327,8 @@ aport_hook_detect_framework() {
         printf 'cursor'
     elif [ -n "${CLAUDE_CODE:-}" ] || [ "$config_dir" = "$HOME/.claude" ]; then
         printf 'claude-code'
+    elif [ "$config_dir" = "$HOME/.aport/goose" ]; then
+        printf 'goose'
     else
         printf 'unknown'
     fi
@@ -343,6 +434,102 @@ aport_hook_build_response_cursor() {
     fi
 }
 
+aport_hook_build_response_goose() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local escaped_reason
+
+    if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+        reason="$user_warning"
+    fi
+
+    if [ "$decision" = "allow" ] && [ -z "$reason" ]; then
+        return 0
+    fi
+
+    if ! command -v jq > /dev/null 2>&1; then
+        escaped_reason="$(aport_hook_json_escape "$reason")"
+        if [ "$decision" = "allow" ]; then
+            printf '{"decision":"allow","reason":"%s"}\n' "$escaped_reason"
+        else
+            printf '{"decision":"block","reason":"%s"}\n' "$escaped_reason"
+        fi
+        return 0
+    fi
+
+    if [ "$decision" = "allow" ]; then
+        jq -n -c --arg reason "$reason" '{decision:"allow",reason:$reason}'
+    else
+        jq -n -c --arg reason "$reason" '{decision:"block",reason:$reason}'
+    fi
+}
+
+aport_hook_build_response_codex() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local event="${APORT_CODEX_HOOK_EVENT_NAME:-PreToolUse}"
+    local escaped_reason escaped_warning escaped_event
+
+    if ! command -v jq > /dev/null 2>&1; then
+        escaped_reason="$(aport_hook_json_escape "$reason")"
+        escaped_warning="$(aport_hook_json_escape "$user_warning")"
+        escaped_event="$(aport_hook_json_escape "$event")"
+        if [ "$event" = "PermissionRequest" ] && [ "$decision" = "deny" ]; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"%s"}}}\n' "$escaped_reason"
+        elif [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+            printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$escaped_warning" "$escaped_event" "$escaped_reason"
+        elif [ "$decision" = "allow" ]; then
+            printf '{}\n'
+        else
+            printf '{"hookSpecificOutput":{"hookEventName":"%s","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$escaped_event" "$escaped_reason"
+        fi
+        return 0
+    fi
+
+    if [ "$event" = "PermissionRequest" ] && [ "$decision" = "deny" ]; then
+        jq -n --arg reason "$reason" \
+            '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"deny",message:$reason}}}'
+    elif [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+        jq -n --arg event "$event" --arg reason "$reason" --arg warning "$user_warning" \
+            '{systemMessage:$warning,hookSpecificOutput:{hookEventName:$event,additionalContext:$reason}}'
+    elif [ "$decision" = "allow" ]; then
+        jq -n '{}'
+    else
+        jq -n --arg event "$event" --arg reason "$reason" \
+            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"deny",permissionDecisionReason:$reason}}'
+    fi
+}
+
+aport_hook_build_response_gemini_cli() {
+    local decision="$1"
+    local reason="$2"
+    local user_warning="${3:-}"
+    local escaped_reason escaped_warning
+
+    if ! command -v jq > /dev/null 2>&1; then
+        escaped_reason="$(aport_hook_json_escape "$reason")"
+        escaped_warning="$(aport_hook_json_escape "$user_warning")"
+        if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+            printf '{"decision":"allow","systemMessage":"%s"}\n' "$escaped_warning"
+        elif [ "$decision" = "allow" ]; then
+            printf '{"decision":"allow"}\n'
+        else
+            printf '{"decision":"deny","reason":"%s"}\n' "$escaped_reason"
+        fi
+        return 0
+    fi
+
+    if [ "$decision" = "allow" ] && [ -n "$user_warning" ]; then
+        jq -n -c --arg warning "$user_warning" '{decision:"allow",systemMessage:$warning}'
+    elif [ "$decision" = "allow" ]; then
+        jq -n -c '{decision:"allow"}'
+    else
+        jq -n -c --arg reason "$reason" '{decision:"deny",reason:$reason}'
+    fi
+}
+
 aport_hook_build_response() {
     local decision="$1"
     local reason="$2"
@@ -359,6 +546,15 @@ aport_hook_build_response() {
             ;;
         cursor)
             aport_hook_build_response_cursor "$decision" "$reason" "$user_warning"
+            ;;
+        goose)
+            aport_hook_build_response_goose "$decision" "$reason" "$user_warning"
+            ;;
+        codex)
+            aport_hook_build_response_codex "$decision" "$reason" "$user_warning"
+            ;;
+        gemini-cli | gemini)
+            aport_hook_build_response_gemini_cli "$decision" "$reason" "$user_warning"
             ;;
         *)
             printf 'APort hook runtime error: unsupported hook response framework: %s\n' "$framework" >&2

@@ -95,6 +95,9 @@ validate_passport_path() {
         "$HOME/.aport"
         "$HOME/.claude"
         "$HOME/.cursor"
+        "$HOME/.codex"
+        "$HOME/.gemini"
+        "$HOME/.config/opencode"
         "$HOME/.n8n"
         "/tmp/aport-"
     )
@@ -225,20 +228,109 @@ glob_to_regex() {
 }
 
 # Safe prefix matching (for allowed commands)
-# Returns 0 if string starts with prefix, 1 otherwise
+# Returns 0 if string starts with prefix at a shell-token boundary, 1 otherwise.
 safe_prefix_match() {
     local string="$1"
     local prefix="$2"
+    local remainder first
 
     # Handle wildcard case
     if [ "$prefix" = "*" ]; then
         return 0
     fi
 
-    # Use parameter expansion for safe prefix check
-    if [ "${string#"$prefix"}" != "$string" ]; then
-        return 0
-    fi
+    remainder="${string#"$prefix"}"
+    [ "$remainder" != "$string" ] || return 1
+    [ -z "$remainder" ] && return 0
+    case "$prefix" in
+        *[[:space:]]) return 0 ;;
+    esac
+
+    first="${remainder:0:1}"
+    case "$first" in
+        [[:space:]]) return 0 ;;
+    esac
+
+    return 1
+}
+
+# Detect shell syntax that creates additional executable segments.
+# This is intentionally syntax-aware enough to ignore quoted JSON/strings while
+# rejecting unquoted chains that a single allowed-command prefix cannot cover.
+shell_command_has_unquoted_control_operator() {
+    local input="$1"
+    local quote=""
+    local escaped=0
+    local i ch next
+
+    for ((i = 0; i < ${#input}; i++)); do
+        ch="${input:i:1}"
+
+        if [ "$escaped" -eq 1 ]; then
+            escaped=0
+            continue
+        fi
+
+        if [ "$ch" = "\\" ] && [ "$quote" != "'" ]; then
+            escaped=1
+            continue
+        fi
+
+        # Bash ANSI-C / locale strings can contain escaped quotes that change
+        # how later control operators are parsed. The local guard does not need
+        # to emulate the shell; reject this syntax under restrictive allowlists.
+        if [ "$quote" != "'" ] && [ "$ch" = "$" ]; then
+            next="${input:i+1:1}"
+            case "$next" in
+                "(") return 0 ;;
+            esac
+            if [ -z "$quote" ]; then
+                case "$next" in
+                    "'" | '"') return 0 ;;
+                esac
+            fi
+        fi
+
+        if [ "$quote" = "'" ]; then
+            [ "$ch" = "$quote" ] && quote=""
+            continue
+        fi
+
+        if [ -n "$quote" ]; then
+            [ "$ch" = "$quote" ] && quote=""
+            continue
+        fi
+
+        case "$ch" in
+            '#')
+                # Shell comments can hide a later newline-separated command.
+                # Under restrictive allowlists we reject them instead of trying
+                # to emulate every shell parsing edge case.
+                if [ "$i" -eq 0 ] || [[ "${input:i-1:1}" =~ [[:space:]] ]]; then
+                    return 0
+                fi
+                ;;
+            "'" | '"')
+                quote="$ch"
+                ;;
+            $'\n' | ';')
+                return 0
+                ;;
+            '&')
+                return 0
+                ;;
+            '|')
+                return 0
+                ;;
+            '(' | ')')
+                return 0
+                ;;
+            '<' | '>')
+                next="${input:i+1:1}"
+                [ "$next" = "(" ] && return 0
+                ;;
+        esac
+    done
 
     return 1
 }

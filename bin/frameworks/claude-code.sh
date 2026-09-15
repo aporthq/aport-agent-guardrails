@@ -14,6 +14,8 @@ source "$LIB/config.sh"
 source "$LIB/framework-setup.sh"
 # shellcheck source=../lib/guardrail-mode.sh
 source "$LIB/guardrail-mode.sh"
+# shellcheck source=../lib/runtime.sh
+source "$LIB/runtime.sh"
 # shellcheck source=../lib/quick-hosted.sh
 source "$LIB/quick-hosted.sh"
 
@@ -40,11 +42,11 @@ run_setup() {
         # Check AGENTS.md for enforcement config — skip wizard if already configured
         # shellcheck source=../lib/agentsmd.sh
         source "$LIB/agentsmd.sh"
-        setup_from_agentsmd_or_wizard "${APORT_FRAMEWORK_ARGS[@]}"
+        setup_from_agentsmd_or_wizard ${APORT_FRAMEWORK_ARGS[@]+"${APORT_FRAMEWORK_ARGS[@]}"}
     fi
 
     # Harden permissions on passport (contains policy/capabilities)
-    [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
+    secure_framework_passport_file_if_present "$config_dir"
 
     if [[ -z "$hosted_agent_id" && -n "${APORT_AGENT_ID:-}" ]]; then
         hosted_agent_id="$APORT_AGENT_ID"
@@ -58,8 +60,12 @@ run_setup() {
     select_guardrail_enforcement
     MODE_FILE="$(write_guardrail_mode_file "$config_dir" "$APORT_SELECTED_GUARDRAIL_MODE" "${APORT_SELECTED_API_URL:-}" "$hosted_agent_id" "$APORT_SELECTED_ENFORCEMENT")"
 
-    # Resolve absolute path to hook script (works from repo or npx package)
-    HOOK_SCRIPT="$(resolve_hook_script_path "${APORT_CLAUDE_CODE_HOOK_SCRIPT:-}" "aport-claude-code-hook.sh" "$LIB")"
+    install_runtime_tree "$config_dir"
+
+    # Resolve absolute path to hook script. By default this points at the stable
+    # per-framework runtime copy, so one-shot npx setup does not depend on an
+    # evictable package cache path.
+    HOOK_SCRIPT="$(resolve_hook_script_path "${APORT_CLAUDE_CODE_HOOK_SCRIPT:-$config_dir/aport/runtime/bin/aport-claude-code-hook.sh}" "aport-claude-code-hook.sh" "$LIB")"
     if [ ! -f "$HOOK_SCRIPT" ]; then
         log_warn "Hook script not found at $HOOK_SCRIPT; settings.json will reference it (create the file for hooks to work)."
     else

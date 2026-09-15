@@ -4,7 +4,8 @@ Quick reference for what each part of the repo does.
 
 ## `bin/`
 
-CLI and guardrail entrypoints used by OpenClaw (or any framework):
+CLI and guardrail entrypoints used by the setup wizard, runtime hooks, and
+framework adapters:
 
 | Script | Purpose |
 |--------|---------|
@@ -15,6 +16,7 @@ CLI and guardrail entrypoints used by OpenClaw (or any framework):
 | **aport-guardrail.sh** | Backward-compat wrapper → runs bash guardrail |
 | **aport-guardrail-v2.sh** | Backward-compat wrapper → runs API guardrail |
 | **aport-status.sh** | Show passport summary and status |
+| **aport-claude-code-hook.sh**, **aport-cursor-hook.sh**, **aport-codex-hook.sh**, **aport-gemini-cli-hook.sh**, **aport-goose-hook.sh** | Host-specific hook wrappers that normalize payloads and call the shared local/API evaluator before supported tools run |
 
 ## `src/`
 
@@ -29,7 +31,8 @@ Node.js code for **API-based** evaluation and optional proxy:
 
 ## `extensions/openclaw-aport/`
 
-OpenClaw plugin — `before_tool_call` hook that invokes the guardrail script or API before every tool execution. Deterministic enforcement; AI cannot bypass.
+OpenClaw plugin — `before_tool_call` hook that invokes the guardrail script or
+API before mapped tool execution.
 
 ## `external/`
 

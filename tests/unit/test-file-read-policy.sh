@@ -112,6 +112,46 @@ else
     exit 1
 fi
 
+TRAVERSAL_ROOT="$(mktemp -d /tmp/aport-file-read-traversal.XXXXXX)"
+mkdir -p "$TRAVERSAL_ROOT/allowed" "$TRAVERSAL_ROOT/private"
+touch "$TRAVERSAL_ROOT/private/secret.txt"
+cat > "$PASSPORT_FILE" << EOF
+{
+  "spec_version": "oap/1.0",
+  "passport_id": "ap_test_file_read_traversal",
+  "owner_id": "org_test",
+  "owner_type": "organization",
+  "kind": "agent",
+  "status": "active",
+  "assurance_level": "L0",
+  "never_expires": true,
+  "capabilities": [
+    {"id": "data.file.read"}
+  ],
+  "limits": {
+    "data.file.read": {
+      "allowed_paths": ["$TRAVERSAL_ROOT/allowed"]
+    }
+  }
+}
+EOF
+
+echo
+echo "Test 5b: Deny traversal outside allowed read prefix"
+if "$SCRIPT_DIR/bin/aport-guardrail-bash.sh" read "{\"file_path\":\"$TRAVERSAL_ROOT/allowed/../private/secret.txt\"}" > "$DECISION_FILE" 2>&1; then
+    ALLOW=$(jq -r '.allow' "$DECISION_FILE")
+    if [ "$ALLOW" = "false" ]; then
+        echo "✅ PASS: Denied traversal outside allowed read prefix"
+    else
+        echo "❌ FAIL: Should deny traversal outside allowed read prefix"
+        cat "$DECISION_FILE"
+        exit 1
+    fi
+else
+    echo "✅ PASS: Denied traversal outside allowed read prefix (exit code 1)"
+fi
+rm -rf "$TRAVERSAL_ROOT"
+
 cat > "$PASSPORT_FILE" << 'EOF'
 {
   "spec_version": "oap/1.0",

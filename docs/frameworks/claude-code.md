@@ -9,8 +9,8 @@ Claude Code's **PreToolUse** hook runs as a separate process before each tool ex
 ## How it works
 
 - **Settings file:** Claude Code uses `~/.claude/settings.json` (user-level) or `.claude/settings.json` (project-level). This is **not** `~/.cursor/hooks.json` — different location and JSON structure.
-- **PreToolUse hook:** The hook receives JSON on stdin with `tool_name` and `tool_input`, runs the APort guardrail, and outputs Claude Code's exact structured format on stdout. Enforce mode blocks with `hookSpecificOutput.permissionDecision: "deny"`. Warn/report-only mode returns `permissionDecision: "allow"` plus a `systemMessage` warning so the action can continue while the user sees that APort would have blocked it. Claude Code reads structured hook JSON from stdout on exit 0; exit 2 is only for stderr-based blocking.
-- **Hook script:** `bin/aport-claude-code-hook.sh` — maps all Claude Code tool names (Bash, Read, Write, Edit, MultiEdit, Glob, LS, Grep, WebSearch, WebFetch, Browser, TodoRead, TodoWrite, Task, MCP tools) to APort policies and calls the core evaluator.
+- **PreToolUse hook:** The hook receives JSON on stdin with `tool_name` and `tool_input`, runs the APort guardrail, and outputs Claude Code's exact structured format on stdout. Enforce mode blocks with `hookSpecificOutput.permissionDecision: "deny"`. Warn/report-only mode returns `permissionDecision: "allow"` plus a `systemMessage` warning only after APort completed policy evaluation; malformed hook input, invalid config, missing dependencies, and evaluator integrity failures still fail closed. Claude Code reads structured hook JSON from stdout on exit 0; exit 2 is only for stderr-based blocking.
+- **Hook script:** setup copies a stable runtime to `~/.claude/aport/runtime/` and registers `~/.claude/aport/runtime/bin/aport-claude-code-hook.sh`. The hook maps Claude Code tool names (Bash, Read, Write, Edit, MultiEdit, Glob, LS, Grep, WebSearch, WebFetch, Browser, TodoRead, TodoWrite, Task, MCP tools) to APort policies and calls the core evaluator.
 
 ---
 
@@ -22,7 +22,10 @@ npx @aporthq/aport-agent-guardrails claude-code
 npx @aporthq/aport-agent-guardrails --framework=claude-code
 ```
 
-This runs setup and writes **`~/.claude/settings.json`** with the APort hook registered for **all tools** via `"matcher": "*"`. Restart Claude Code after setup so the PreToolUse hook is picked up.
+This runs setup, copies the APort runtime to `~/.claude/aport/runtime/`,
+and writes **`~/.claude/settings.json`** with the APort hook registered for
+**all tools** via `"matcher": "*"`. Restart Claude Code after setup so the
+PreToolUse hook is picked up.
 
 When prompted for passport setup:
 
@@ -63,7 +66,9 @@ Default enforcement is `enforce` (fail-closed). To roll out without blocking dev
 npx @aporthq/aport-agent-guardrails claude-code --enforcement=warn
 ```
 
-In warn mode, Claude Code receives an allow decision plus a visible APort warning that includes the policy, reason code, and the hosted passport or local passport-file reference to update.
+In warn mode, Claude Code receives an allow decision plus a visible APort
+warning that includes the policy, reason code, and the hosted passport or local
+passport-file reference to update. Hook/runtime failures remain fail-closed.
 
 To change enforcement later without creating a new passport or reinstalling the hook:
 
@@ -115,9 +120,10 @@ CLI setup.
 | Claude Code tool   | APort policy              | Default   |
 |--------------------|---------------------------|----------|
 | Bash, PowerShell, Monitor | system.command.execute.v1 | Enforce  |
-| Read, ReadFile, SemanticSearch (with `file_path`) | data.file.read.v1 | **Enforce** (sensitive paths blocked; API/local) |
-| Glob, Grep, LSP, ListMcpResourcesTool, ReadMcpResourceTool, ToolSearch, WaitForMcpServers, TaskGet, TaskList, TodoRead | data.file.read.v1 | Allow without evaluator (no single path) |
-| Write, Edit, MultiEdit, NotebookEdit, TodoWrite, ShareOnboardingGuide | data.file.write.v1 | Enforce  |
+| Read, ReadFile, SemanticSearch, Grep (with `file_path`) | data.file.read.v1 | **Enforce** (sensitive paths blocked; API/local) |
+| Glob, LSP, ListMcpResourcesTool, ToolSearch, WaitForMcpServers, TaskGet, TaskList, TodoRead | — | Allow without evaluator (no single path or external side effect) |
+| Write, Edit, MultiEdit, NotebookEdit, ShareOnboardingGuide | data.file.write.v1 | Enforce  |
+| TodoWrite | Internal task-list bookkeeping | Allow |
 | WebSearch, WebFetch | web.fetch.v1             | Enforce  |
 | Browser            | web.browser.v1            | Enforce  |
 | Agent, Task, TaskCreate, TaskUpdate, TaskStop, Skill, EnterWorktree, ExitWorktree, SendMessage, TeamCreate, TeamDelete, RemoteTrigger | agent.session.create.v1 | Enforce  |
@@ -128,8 +134,16 @@ CLI setup.
 | **Unknown tool**    | —                         | **Denied (fail-closed)** |
 
 Permission-rule specifiers such as `Agent(Explore)` are stripped before mapping (the hook receives `Agent(Explore)` and normalizes to `agent`).
+For `WebSearch`, local enforce mode requires a concrete URL or domain in the
+hook payload before allowing the call. If Claude Code supplies only a search
+query, APort fails closed locally because domain policy cannot be evaluated
+safely; use hosted mode or explicit warn mode while tuning search-heavy agent
+workflows.
 
-Path-based **Read** tools call the guardrail with only `file_path` in context (not full file bodies). **Glob/Grep/LS** and similar tools still allow without an evaluator call when no single `file_path` is present.
+Path-based **Read** and **Grep** tools call the guardrail with only `file_path`
+in context (not full file bodies or search results). Grep/search payloads
+without a concrete path fail closed; Glob/LS and similar metadata tools still
+allow without an evaluator call when no single `file_path` is present.
 
 ---
 

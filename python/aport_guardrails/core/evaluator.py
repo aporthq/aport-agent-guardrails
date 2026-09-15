@@ -32,10 +32,15 @@ def _resolve_passport_path(
     *,
     config_path: Path | None = None,
 ) -> str | None:
-    """Resolve passport path: AGENTS.md, config, env, framework default, or first existing default path."""
-    # 0) AGENTS.md enforcement block (repo-scoped, checked before config/env)
-    #    Skip if explicit passport_path or OPENCLAW_PASSPORT_FILE is set — those always win.
-    if not config.get("passport_path") and not os.environ.get("OPENCLAW_PASSPORT_FILE"):
+    """Resolve passport path: config, env, framework default, or trusted AGENTS.md."""
+    # AGENTS.md is repository-controlled. Treat it as a runtime source only
+    # when the machine owner explicitly opts in; deterministic hooks should
+    # otherwise use machine-scoped config/env/default paths.
+    if (
+        os.environ.get("APORT_TRUST_REPO_POLICY") == "1"
+        and not config.get("passport_path")
+        and not os.environ.get("OPENCLAW_PASSPORT_FILE")
+    ):
         from aport_guardrails.core.agentsmd import resolve_agentsmd_enforcement
         agentsmd = resolve_agentsmd_enforcement()
         if agentsmd:

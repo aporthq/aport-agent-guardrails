@@ -49,8 +49,7 @@ cat > "$PASSPORT_FILE" << 'EOF'
   "limits": {
     "system.command.execute": {
       "allowed_commands": ["ls", "pwd", "echo"],
-      "blocked_patterns": ["rm -rf", "sudo"],
-      "max_execution_time": 300
+      "blocked_patterns": ["rm -rf", "sudo"]
     }
   },
   "issued_at": "2026-02-14T00:00:00Z",
