@@ -2,7 +2,11 @@
 
 The shell/API guardrail entrypoints invoke the guardrail with a **tool name** and **context JSON**. The guardrail maps the tool name to a **policy pack** in `external/aport-policies/` and evaluates the request against that policy and the passport.
 
-This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guardrail-bash.sh`. The OpenClaw plugin has its own host-specific mapping in `extensions/openclaw-aport/tool-mapping.js`.
+This mapping is implemented in `bin/aport-guardrail-api.sh` and
+`bin/aport-guardrail-bash.sh`. Claude Code, Cursor, Codex CLI, Gemini CLI, and
+Goose normalize host payloads before calling those entrypoints. The OpenClaw
+plugin has its own host-specific mapping in
+`extensions/openclaw-aport/tool-mapping.js`.
 
 ## Mapping table
 
@@ -26,22 +30,32 @@ This mapping is implemented in `bin/aport-guardrail-api.sh` and `bin/aport-guard
 
 **Unknown tool:** In the **bash/API guardrail script**, an unknown tool name results in deny (exit 1). In the **OpenClaw plugin**, unmapped tools are **blocked** by default. Set `allowUnmappedTools: true` only when explicitly rolling out trusted custom skills and accepting that unmapped tools bypass policy checks.
 
-## How OpenClaw uses it
+Unknown effectful tools intentionally do **not** become warnings in strict/enforce mode. During an experimental rollout, use `--enforcement=warn` to keep completed policy denials report-only while tuning passports and mappings; leave unknown tools fail-closed until they are mapped or explicitly accepted as trusted custom tools. This avoids converting host schema drift into a silent bypass.
 
-1. OpenClaw (or your integration code) decides to run a tool, e.g. `system.command.execute` with `{"command":"npm install"}`.
-2. Before executing, it calls the guardrail script with that tool name and context:
+## How runtime hooks use it
+
+1. A host such as GitHub Actions, Claude Code, Cursor, Codex CLI, Gemini CLI,
+   Goose, OpenClaw, LangChain, or CrewAI decides to run a tool/action.
+2. Before executing, the integration maps the host-specific tool name to an
+   APort guardrail tool id or policy pack.
+3. The guardrail script or hosted verifier receives the minimal policy context,
+   for example `system.command.execute` with `{"command":"npm install"}`:
    ```bash
    ~/.openclaw/.skills/aport-guardrail.sh system.command.execute '{"command":"npm install"}'
    ```
-3. The script maps `system.command.execute` → `system.command.execute.v1`, loads the passport and policy (or calls the API), and evaluates.
-4. Exit 0 = allow, exit 1 = deny. Decision details are in `~/.openclaw/decision.json` (or your configured path).
+4. The evaluator maps `system.command.execute` ->
+   `system.command.execute.v1`, loads the passport and policy or calls the API,
+   and evaluates.
+5. Exit 0 = allow, exit 1 = deny for direct guardrail scripts. Host hooks then
+   translate that result into the host-specific allow/deny response JSON.
 
 ## Local repository checks
 
 The local evaluator intentionally implements a small subset of hosted repository enforcement:
 
 - `pr.merge` requires `repo.merge`.
-- `pr.create`, `pr.update`, and `repo.push` require `repo.pr.create`.
+- `pr.create` and `pr.update` require `repo.pr.create`.
+- `repo.push` requires `repo.push`.
 - PR actions check `base_branch` when present; push-like actions check `branch`.
 - `allowed_repos`, `allowed_base_branches`, and `allowed_paths` support simple glob patterns.
 

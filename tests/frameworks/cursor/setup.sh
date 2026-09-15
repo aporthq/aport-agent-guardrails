@@ -64,6 +64,16 @@ if command -v jq &> /dev/null; then
     fi
     echo "  ✅ hooks.json references APort hook script"
 
+    if [[ "$HOOK_CMD" != *"$CURSOR_DIR/aport/runtime/bin/aport-cursor-hook.sh"* ]]; then
+        echo "FAIL: Cursor hook should point to stable APort runtime, got: $HOOK_CMD" >&2
+        exit 1
+    fi
+    [[ -x "$CURSOR_DIR/aport/runtime/bin/aport-cursor-hook.sh" ]] || {
+        echo "FAIL: expected stable Cursor runtime hook at $CURSOR_DIR/aport/runtime/bin/aport-cursor-hook.sh" >&2
+        exit 1
+    }
+    echo "  ✅ hooks.json uses stable APort runtime hook"
+
     MARKER_COUNT=$(jq -r '[
         .hooks.beforeShellExecution[]?,
         .hooks.preToolUse[]?,

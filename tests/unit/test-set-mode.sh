@@ -8,6 +8,10 @@ TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d)}"
 MODE_HELPER="$REPO_ROOT/bin/aport-set-mode.sh"
 DISPATCHER="$REPO_ROOT/bin/agent-guardrails"
 
+shell_quote_value() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 echo ""
 echo "  Unit — aport set-mode"
 echo ""
@@ -207,6 +211,389 @@ if grep -q "project-api.aport.io" "$PROJECT_HOME/.aport/langchain/config.yaml"; 
     cat "$PROJECT_HOME/.aport/langchain/config.yaml" >&2
     exit 1
 fi
+
+CODEX_OVERRIDE_DIR="$TEST_DIR/codex-override"
+CODEX_OVERRIDE_HOME="$TEST_DIR/codex-override-home"
+mkdir -p "$CODEX_OVERRIDE_DIR/aport" "$CODEX_OVERRIDE_HOME"
+cat > "$CODEX_OVERRIDE_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT=enforce
+APORT_API_URL=https://api.aport.io
+APORT_AGENT_ID=ap_codex_override_existing
+APORT_API_KEY=apk_codex_override_key
+EOF
+HOME="$CODEX_OVERRIDE_HOME" APORT_CONFIG_DIR="$CODEX_OVERRIDE_DIR" "$MODE_HELPER" codex --enforcement=warn > "$TEST_DIR/codex-override.out"
+grep -q '^APORT_ENFORCEMENT=warn$' "$CODEX_OVERRIDE_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: codex set-mode should honor APORT_CONFIG_DIR override" >&2
+    cat "$CODEX_OVERRIDE_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+grep -q "Config dir:  $CODEX_OVERRIDE_DIR" "$TEST_DIR/codex-override.out" || {
+    echo "FAIL: codex set-mode output should identify APORT_CONFIG_DIR" >&2
+    cat "$TEST_DIR/codex-override.out" >&2
+    exit 1
+}
+if [[ -e "$CODEX_OVERRIDE_HOME/.aport/codex/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: codex set-mode should not write inactive home state when APORT_CONFIG_DIR is set" >&2
+    cat "$CODEX_OVERRIDE_HOME/.aport/codex/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
+CODEX_HOOK_PROJECT="$TEST_DIR/codex-hook-project"
+CODEX_HOOK_HOME="$TEST_DIR/codex-hook-home"
+CODEX_HOOK_STATE="$CODEX_HOOK_HOME/.aport/codex"
+mkdir -p "$CODEX_HOOK_PROJECT/.codex/aport" "$CODEX_HOOK_STATE/aport"
+cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$CODEX_HOOK_STATE/aport/passport.json"
+cat > "$CODEX_HOOK_PROJECT/.codex/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+APORT_ENFORCEMENT_MODE=warn
+EOF
+cat > "$CODEX_HOOK_STATE/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+APORT_ENFORCEMENT_MODE=warn
+EOF
+cat > "$CODEX_HOOK_PROJECT/.codex/hooks.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "APORT_CODEX_CONFIG_DIR='$CODEX_HOOK_STATE' '$REPO_ROOT/bin/aport-codex-hook.sh'",
+            "__aport_hook": true
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+(
+    cd "$CODEX_HOOK_PROJECT"
+    HOME="$CODEX_HOOK_HOME" "$MODE_HELPER" codex --enforcement=enforce
+) > "$TEST_DIR/codex-hook-state.out"
+grep -q '^APORT_ENFORCEMENT=enforce$' "$CODEX_HOOK_STATE/aport/guardrail-mode.env" || {
+    echo "FAIL: codex set-mode should update the installed hook state directory" >&2
+    cat "$CODEX_HOOK_STATE/aport/guardrail-mode.env" >&2
+    cat "$TEST_DIR/codex-hook-state.out" >&2
+    exit 1
+}
+grep -q '^APORT_ENFORCEMENT=warn$' "$CODEX_HOOK_PROJECT/.codex/aport/guardrail-mode.env" || {
+    echo "FAIL: codex set-mode should not update incidental project-local state when hook uses shared state" >&2
+    cat "$CODEX_HOOK_PROJECT/.codex/aport/guardrail-mode.env" >&2
+    exit 1
+}
+set +e
+printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"rm -rf /tmp/x"}}' \
+    | HOME="$CODEX_HOOK_HOME" APORT_CODEX_CONFIG_DIR="$CODEX_HOOK_STATE" "$REPO_ROOT/bin/aport-codex-hook.sh" > "$TEST_DIR/codex-hook-state-hook.out" 2> "$TEST_DIR/codex-hook-state-hook.err"
+CODEX_HOOK_STATUS=$?
+set -e
+if [[ "$CODEX_HOOK_STATUS" -ne 0 ]]; then
+    echo "FAIL: codex hook should return structured JSON" >&2
+    cat "$TEST_DIR/codex-hook-state-hook.err" >&2
+    exit 1
+fi
+jq -e '.hookSpecificOutput.permissionDecision == "deny"' "$TEST_DIR/codex-hook-state-hook.out" > /dev/null || {
+    echo "FAIL: codex installed hook state should now enforce denials" >&2
+    cat "$TEST_DIR/codex-hook-state-hook.out" >&2
+    cat "$TEST_DIR/codex-hook-state-hook.err" >&2
+    exit 1
+}
+
+CODEX_QUOTED_PROJECT="$TEST_DIR/codex-quoted-hook-project"
+CODEX_QUOTED_HOME="$TEST_DIR/codex-quoted-hook-home"
+CODEX_QUOTED_STATE="$TEST_DIR/codex owner's-state"
+mkdir -p "$CODEX_QUOTED_PROJECT/.codex" "$CODEX_QUOTED_HOME" "$CODEX_QUOTED_STATE/aport"
+cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$CODEX_QUOTED_STATE/aport/passport.json"
+cat > "$CODEX_QUOTED_STATE/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+APORT_ENFORCEMENT_MODE=warn
+EOF
+CODEX_QUOTED_COMMAND="APORT_CODEX_CONFIG_DIR=$(shell_quote_value "$CODEX_QUOTED_STATE") $(shell_quote_value "$REPO_ROOT/bin/aport-codex-hook.sh")"
+jq -n --arg cmd "$CODEX_QUOTED_COMMAND" \
+    '{hooks:{PreToolUse:[{matcher:"*",hooks:[{type:"command",command:$cmd,__aport_hook:true}]}]}}' \
+    > "$CODEX_QUOTED_PROJECT/.codex/hooks.json"
+(
+    cd "$CODEX_QUOTED_PROJECT"
+    HOME="$CODEX_QUOTED_HOME" "$MODE_HELPER" codex --enforcement=enforce
+) > "$TEST_DIR/codex-quoted-hook-state.out"
+grep -q '^APORT_ENFORCEMENT=enforce$' "$CODEX_QUOTED_STATE/aport/guardrail-mode.env" || {
+    echo "FAIL: codex set-mode should use discovered quoted hook state for passport validation and updates" >&2
+    cat "$CODEX_QUOTED_STATE/aport/guardrail-mode.env" >&2
+    cat "$TEST_DIR/codex-quoted-hook-state.out" >&2
+    exit 1
+}
+if [[ -e "$CODEX_QUOTED_HOME/.aport/codex/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: codex quoted hook state discovery should not write inactive default state" >&2
+    cat "$CODEX_QUOTED_HOME/.aport/codex/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
+CODEX_HOME_MODE_DIR="$TEST_DIR/codex-home-mode"
+CODEX_HOME_MODE_HOME="$TEST_DIR/codex-home-mode-user"
+CODEX_HOME_MODE_STATE="$TEST_DIR/codex-home-mode-state"
+mkdir -p "$CODEX_HOME_MODE_DIR" "$CODEX_HOME_MODE_HOME" "$CODEX_HOME_MODE_STATE/aport"
+cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$CODEX_HOME_MODE_STATE/aport/passport.json"
+cat > "$CODEX_HOME_MODE_STATE/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=enforce
+APORT_ENFORCEMENT_MODE=enforce
+EOF
+CODEX_HOME_MODE_COMMAND="APORT_CODEX_CONFIG_DIR=$(shell_quote_value "$CODEX_HOME_MODE_STATE") $(shell_quote_value "$REPO_ROOT/bin/aport-codex-hook.sh")"
+jq -n --arg cmd "$CODEX_HOME_MODE_COMMAND" \
+    '{hooks:{PreToolUse:[{matcher:"*",hooks:[{type:"command",command:$cmd,__aport_hook:true}]}]}}' \
+    > "$CODEX_HOME_MODE_DIR/hooks.json"
+(
+    cd "$TEST_DIR"
+    HOME="$CODEX_HOME_MODE_HOME" CODEX_HOME="$CODEX_HOME_MODE_DIR" "$MODE_HELPER" codex --enforcement=warn
+) > "$TEST_DIR/codex-home-mode.out"
+grep -q '^APORT_ENFORCEMENT=warn$' "$CODEX_HOME_MODE_STATE/aport/guardrail-mode.env" || {
+    echo "FAIL: codex set-mode should discover state from CODEX_HOME" >&2
+    cat "$CODEX_HOME_MODE_STATE/aport/guardrail-mode.env" >&2
+    cat "$TEST_DIR/codex-home-mode.out" >&2
+    exit 1
+}
+
+CODEX_HOOKS_OVERRIDE_DIR="$TEST_DIR/codex-hooks-dir-override"
+CODEX_HOOKS_OVERRIDE_HOME="$TEST_DIR/codex-hooks-dir-home"
+CODEX_HOOKS_OVERRIDE_STATE="$TEST_DIR/codex-hooks-dir-state"
+mkdir -p "$CODEX_HOOKS_OVERRIDE_DIR" "$CODEX_HOOKS_OVERRIDE_HOME" "$CODEX_HOOKS_OVERRIDE_STATE/aport"
+cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$CODEX_HOOKS_OVERRIDE_STATE/aport/passport.json"
+cat > "$CODEX_HOOKS_OVERRIDE_STATE/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+APORT_ENFORCEMENT_MODE=warn
+EOF
+CODEX_HOOKS_OVERRIDE_COMMAND="APORT_CODEX_CONFIG_DIR=$(shell_quote_value "$CODEX_HOOKS_OVERRIDE_STATE") $(shell_quote_value "$REPO_ROOT/bin/aport-codex-hook.sh")"
+jq -n --arg cmd "$CODEX_HOOKS_OVERRIDE_COMMAND" \
+    '{hooks:{PreToolUse:[{matcher:"*",hooks:[{type:"command",command:$cmd,__aport_hook:true}]}]}}' \
+    > "$CODEX_HOOKS_OVERRIDE_DIR/hooks.json"
+(
+    cd "$TEST_DIR"
+    HOME="$CODEX_HOOKS_OVERRIDE_HOME" APORT_CODEX_HOOKS_DIR="$CODEX_HOOKS_OVERRIDE_DIR" "$MODE_HELPER" codex --enforcement=enforce
+) > "$TEST_DIR/codex-hooks-dir-override.out"
+grep -q '^APORT_ENFORCEMENT=enforce$' "$CODEX_HOOKS_OVERRIDE_STATE/aport/guardrail-mode.env" || {
+    echo "FAIL: codex set-mode should discover state from APORT_CODEX_HOOKS_DIR" >&2
+    cat "$CODEX_HOOKS_OVERRIDE_STATE/aport/guardrail-mode.env" >&2
+    cat "$TEST_DIR/codex-hooks-dir-override.out" >&2
+    exit 1
+}
+
+GOOSE_SPECIFIC_DIR="$TEST_DIR/goose-specific-override"
+GOOSE_GENERIC_DIR="$TEST_DIR/goose-generic-override"
+GOOSE_OVERRIDE_HOME="$TEST_DIR/goose-override-home"
+mkdir -p "$GOOSE_SPECIFIC_DIR/aport" "$GOOSE_GENERIC_DIR/aport" "$GOOSE_OVERRIDE_HOME"
+cat > "$GOOSE_SPECIFIC_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT=enforce
+APORT_API_URL=https://api.aport.io
+APORT_AGENT_ID=ap_goose_specific_existing
+APORT_API_KEY=apk_goose_specific_key
+EOF
+cat > "$GOOSE_GENERIC_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT=enforce
+APORT_API_URL=https://api.aport.io
+APORT_AGENT_ID=ap_goose_generic_existing
+APORT_API_KEY=apk_goose_generic_key
+EOF
+HOME="$GOOSE_OVERRIDE_HOME" APORT_CONFIG_DIR="$GOOSE_GENERIC_DIR" APORT_GOOSE_CONFIG_DIR="$GOOSE_SPECIFIC_DIR" "$MODE_HELPER" goose --enforcement=warn > "$TEST_DIR/goose-specific-override.out"
+grep -q '^APORT_ENFORCEMENT=warn$' "$GOOSE_SPECIFIC_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: goose set-mode should prefer APORT_GOOSE_CONFIG_DIR over generic APORT_CONFIG_DIR" >&2
+    cat "$GOOSE_SPECIFIC_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+grep -q '^APORT_ENFORCEMENT=enforce$' "$GOOSE_GENERIC_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: goose set-mode should not update inactive generic APORT_CONFIG_DIR when framework override is set" >&2
+    cat "$GOOSE_GENERIC_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+grep -q "Config dir:  $GOOSE_SPECIFIC_DIR" "$TEST_DIR/goose-specific-override.out" || {
+    echo "FAIL: goose set-mode output should identify the framework-specific config dir" >&2
+    cat "$TEST_DIR/goose-specific-override.out" >&2
+    exit 1
+}
+
+GOOSE_HOOK_PROJECT="$TEST_DIR/goose-hook-project"
+GOOSE_HOOK_HOME="$TEST_DIR/goose-hook-home"
+GOOSE_HOOK_STATE="$TEST_DIR/goose owner's-state"
+mkdir -p "$GOOSE_HOOK_PROJECT" "$GOOSE_HOOK_HOME"
+(
+    cd "$GOOSE_HOOK_PROJECT"
+    HOME="$GOOSE_HOOK_HOME" APORT_NONINTERACTIVE=1 APORT_GOOSE_CONFIG_DIR="$GOOSE_HOOK_STATE" "$DISPATCHER" goose --non-interactive --mode=api ap_test123
+) > "$TEST_DIR/goose-hook-setup.out" 2>&1
+(
+    cd "$GOOSE_HOOK_PROJECT"
+    HOME="$GOOSE_HOOK_HOME" "$MODE_HELPER" goose --enforcement=warn
+) > "$TEST_DIR/goose-hook-state.out"
+grep -q '^APORT_ENFORCEMENT=warn$' "$GOOSE_HOOK_STATE/aport/guardrail-mode.env" || {
+    echo "FAIL: goose set-mode should discover state from installed plugin wrapper" >&2
+    cat "$GOOSE_HOOK_STATE/aport/guardrail-mode.env" >&2
+    cat "$TEST_DIR/goose-hook-state.out" >&2
+    exit 1
+}
+grep -q "Config dir:  $GOOSE_HOOK_STATE" "$TEST_DIR/goose-hook-state.out" || {
+    echo "FAIL: goose set-mode output should identify installed plugin state" >&2
+    cat "$TEST_DIR/goose-hook-state.out" >&2
+    exit 1
+}
+if [[ -e "$GOOSE_HOOK_HOME/.aport/goose/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: goose installed plugin discovery should not write inactive default state" >&2
+    cat "$GOOSE_HOOK_HOME/.aport/goose/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
+GEMINI_OVERRIDE_DIR="$TEST_DIR/gemini-override"
+GEMINI_OVERRIDE_HOME="$TEST_DIR/gemini-override-home"
+mkdir -p "$GEMINI_OVERRIDE_DIR/aport" "$GEMINI_OVERRIDE_HOME"
+cat > "$GEMINI_OVERRIDE_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT=enforce
+APORT_API_URL=https://api.aport.io
+APORT_AGENT_ID=ap_gemini_override_existing
+APORT_API_KEY=apk_gemini_override_key
+EOF
+HOME="$GEMINI_OVERRIDE_HOME" APORT_CONFIG_DIR="$GEMINI_OVERRIDE_DIR" "$MODE_HELPER" gemini --enforcement=warn > "$TEST_DIR/gemini-override.out"
+grep -q '^APORT_ENFORCEMENT=warn$' "$GEMINI_OVERRIDE_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: gemini set-mode should honor APORT_CONFIG_DIR override" >&2
+    cat "$GEMINI_OVERRIDE_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+grep -q "Config dir:  $GEMINI_OVERRIDE_DIR" "$TEST_DIR/gemini-override.out" || {
+    echo "FAIL: gemini set-mode output should identify APORT_CONFIG_DIR" >&2
+    cat "$TEST_DIR/gemini-override.out" >&2
+    exit 1
+}
+if [[ -e "$GEMINI_OVERRIDE_HOME/.aport/gemini-cli/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: gemini set-mode should not write inactive home state when APORT_CONFIG_DIR is set" >&2
+    cat "$GEMINI_OVERRIDE_HOME/.aport/gemini-cli/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
+GEMINI_HOOK_PROJECT="$TEST_DIR/gemini-hook-project"
+GEMINI_HOOK_HOME="$TEST_DIR/gemini-hook-home"
+GEMINI_HOOK_STATE="$GEMINI_HOOK_HOME/.aport/gemini-cli"
+mkdir -p "$GEMINI_HOOK_PROJECT/.gemini/aport" "$GEMINI_HOOK_STATE/aport"
+cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$GEMINI_HOOK_STATE/aport/passport.json"
+cat > "$GEMINI_HOOK_PROJECT/.gemini/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+APORT_ENFORCEMENT_MODE=warn
+EOF
+cat > "$GEMINI_HOOK_STATE/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+APORT_ENFORCEMENT_MODE=warn
+EOF
+cat > "$GEMINI_HOOK_PROJECT/.gemini/settings.json" << EOF
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "APORT_GEMINI_CLI_CONFIG_DIR='$GEMINI_HOOK_STATE' '$REPO_ROOT/bin/aport-gemini-cli-hook.sh'",
+            "__aport_hook": true
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+(
+    cd "$GEMINI_HOOK_PROJECT"
+    HOME="$GEMINI_HOOK_HOME" "$MODE_HELPER" gemini --enforcement=enforce
+) > "$TEST_DIR/gemini-hook-state.out"
+grep -q '^APORT_ENFORCEMENT=enforce$' "$GEMINI_HOOK_STATE/aport/guardrail-mode.env" || {
+    echo "FAIL: gemini set-mode should update the installed hook state directory" >&2
+    cat "$GEMINI_HOOK_STATE/aport/guardrail-mode.env" >&2
+    cat "$TEST_DIR/gemini-hook-state.out" >&2
+    exit 1
+}
+grep -q '^APORT_ENFORCEMENT=warn$' "$GEMINI_HOOK_PROJECT/.gemini/aport/guardrail-mode.env" || {
+    echo "FAIL: gemini set-mode should not update incidental project-local state when hook uses shared state" >&2
+    cat "$GEMINI_HOOK_PROJECT/.gemini/aport/guardrail-mode.env" >&2
+    exit 1
+}
+set +e
+printf '%s' '{"hook_event_name":"BeforeTool","tool_name":"run_shell_command","tool_input":{"command":"rm -rf /tmp/x"}}' \
+    | HOME="$GEMINI_HOOK_HOME" APORT_GEMINI_CLI_CONFIG_DIR="$GEMINI_HOOK_STATE" "$REPO_ROOT/bin/aport-gemini-cli-hook.sh" > "$TEST_DIR/gemini-hook-state-hook.out" 2> "$TEST_DIR/gemini-hook-state-hook.err"
+GEMINI_HOOK_STATUS=$?
+set -e
+if [[ "$GEMINI_HOOK_STATUS" -ne 0 ]]; then
+    echo "FAIL: gemini hook should return structured JSON" >&2
+    cat "$TEST_DIR/gemini-hook-state-hook.err" >&2
+    exit 1
+fi
+jq -e '.decision == "deny"' "$TEST_DIR/gemini-hook-state-hook.out" > /dev/null || {
+    echo "FAIL: gemini installed hook state should now enforce denials" >&2
+    cat "$TEST_DIR/gemini-hook-state-hook.out" >&2
+    cat "$TEST_DIR/gemini-hook-state-hook.err" >&2
+    exit 1
+}
+
+GEMINI_QUOTED_PROJECT="$TEST_DIR/gemini-quoted-hook-project"
+GEMINI_QUOTED_HOME="$TEST_DIR/gemini-quoted-hook-home"
+GEMINI_QUOTED_STATE="$TEST_DIR/gemini owner's-state"
+mkdir -p "$GEMINI_QUOTED_PROJECT/.gemini" "$GEMINI_QUOTED_HOME" "$GEMINI_QUOTED_STATE/aport"
+cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$GEMINI_QUOTED_STATE/aport/passport.json"
+cat > "$GEMINI_QUOTED_STATE/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+APORT_ENFORCEMENT_MODE=warn
+EOF
+GEMINI_QUOTED_COMMAND="APORT_GEMINI_CLI_CONFIG_DIR=$(shell_quote_value "$GEMINI_QUOTED_STATE") $(shell_quote_value "$REPO_ROOT/bin/aport-gemini-cli-hook.sh")"
+jq -n --arg cmd "$GEMINI_QUOTED_COMMAND" \
+    '{hooks:{BeforeTool:[{matcher:".*",hooks:[{type:"command",command:$cmd,__aport_hook:true}]}]}}' \
+    > "$GEMINI_QUOTED_PROJECT/.gemini/settings.json"
+(
+    cd "$GEMINI_QUOTED_PROJECT"
+    HOME="$GEMINI_QUOTED_HOME" "$MODE_HELPER" gemini --enforcement=enforce
+) > "$TEST_DIR/gemini-quoted-hook-state.out"
+grep -q '^APORT_ENFORCEMENT=enforce$' "$GEMINI_QUOTED_STATE/aport/guardrail-mode.env" || {
+    echo "FAIL: gemini set-mode should use discovered quoted hook state for passport validation and updates" >&2
+    cat "$GEMINI_QUOTED_STATE/aport/guardrail-mode.env" >&2
+    cat "$TEST_DIR/gemini-quoted-hook-state.out" >&2
+    exit 1
+}
+if [[ -e "$GEMINI_QUOTED_HOME/.aport/gemini-cli/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: gemini quoted hook state discovery should not write inactive default state" >&2
+    cat "$GEMINI_QUOTED_HOME/.aport/gemini-cli/aport/guardrail-mode.env" >&2
+    exit 1
+fi
+
+GEMINI_HOOKS_OVERRIDE_DIR="$TEST_DIR/gemini-hooks-dir-override"
+GEMINI_HOOKS_OVERRIDE_HOME="$TEST_DIR/gemini-hooks-dir-home"
+GEMINI_HOOKS_OVERRIDE_STATE="$TEST_DIR/gemini-hooks-dir-state"
+mkdir -p "$GEMINI_HOOKS_OVERRIDE_DIR" "$GEMINI_HOOKS_OVERRIDE_HOME" "$GEMINI_HOOKS_OVERRIDE_STATE/aport"
+cp "$REPO_ROOT/tests/fixtures/passport.oap-v1.json" "$GEMINI_HOOKS_OVERRIDE_STATE/aport/passport.json"
+cat > "$GEMINI_HOOKS_OVERRIDE_STATE/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+APORT_ENFORCEMENT_MODE=warn
+EOF
+GEMINI_HOOKS_OVERRIDE_COMMAND="APORT_GEMINI_CLI_CONFIG_DIR=$(shell_quote_value "$GEMINI_HOOKS_OVERRIDE_STATE") $(shell_quote_value "$REPO_ROOT/bin/aport-gemini-cli-hook.sh")"
+jq -n --arg cmd "$GEMINI_HOOKS_OVERRIDE_COMMAND" \
+    '{hooks:{BeforeTool:[{matcher:".*",hooks:[{type:"command",command:$cmd,__aport_hook:true}]}]}}' \
+    > "$GEMINI_HOOKS_OVERRIDE_DIR/settings.json"
+(
+    cd "$TEST_DIR"
+    HOME="$GEMINI_HOOKS_OVERRIDE_HOME" APORT_GEMINI_CLI_HOOKS_DIR="$GEMINI_HOOKS_OVERRIDE_DIR" "$MODE_HELPER" gemini --enforcement=enforce
+) > "$TEST_DIR/gemini-hooks-dir-override.out"
+grep -q '^APORT_ENFORCEMENT=enforce$' "$GEMINI_HOOKS_OVERRIDE_STATE/aport/guardrail-mode.env" || {
+    echo "FAIL: gemini set-mode should discover state from APORT_GEMINI_CLI_HOOKS_DIR" >&2
+    cat "$GEMINI_HOOKS_OVERRIDE_STATE/aport/guardrail-mode.env" >&2
+    cat "$TEST_DIR/gemini-hooks-dir-override.out" >&2
+    exit 1
+}
 
 cat > "$LANGCHAIN_DIR/passport.json" << 'EOF'
 {"agent_id":"ap_local_langchain_test","capabilities":[],"limits":{}}
@@ -413,6 +800,31 @@ if (cfg.plugins.entries["openclaw-aport"]) process.exit(1);
     cat "$OPENCLAW_EMPTY_DIR/openclaw.json" >&2
     exit 1
 }
+
+SYMLINK_TARGET_DIR="$TEST_DIR/set-mode-symlink-target"
+SYMLINK_CONFIG_DIR="$TEST_DIR/set-mode-symlink-config"
+mkdir -p "$SYMLINK_TARGET_DIR"
+ln -s "$SYMLINK_TARGET_DIR" "$SYMLINK_CONFIG_DIR"
+set +e
+APORT_CODEX_CONFIG_DIR="$SYMLINK_CONFIG_DIR" "$MODE_HELPER" codex --enforcement=warn > "$TEST_DIR/set-mode-symlink.out" 2> "$TEST_DIR/set-mode-symlink.err"
+SYMLINK_SET_MODE_EXIT=$?
+set -e
+if [[ "$SYMLINK_SET_MODE_EXIT" -eq 0 ]]; then
+    echo "FAIL: set-mode should reject symlinked config directories" >&2
+    cat "$TEST_DIR/set-mode-symlink.out" >&2 || true
+    cat "$TEST_DIR/set-mode-symlink.err" >&2 || true
+    exit 1
+fi
+grep -q "Refusing to write through symlink" "$TEST_DIR/set-mode-symlink.err" || {
+    echo "FAIL: set-mode should explain symlink rejection" >&2
+    cat "$TEST_DIR/set-mode-symlink.out" >&2 || true
+    cat "$TEST_DIR/set-mode-symlink.err" >&2 || true
+    exit 1
+}
+if [[ -e "$SYMLINK_TARGET_DIR/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: set-mode should not write through rejected symlink target" >&2
+    exit 1
+fi
 
 echo "  ✅ set-mode preserves passports and updates enforcement"
 echo ""

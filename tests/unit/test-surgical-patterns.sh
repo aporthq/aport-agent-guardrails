@@ -34,7 +34,6 @@ cat > "$PASSPORT_FILE" << 'EOF'
   "limits": {
     "system.command.execute": {
       "allowed_commands": ["*"],
-      "max_execution_time": 300,
       "blocked_patterns": []
     }
   }

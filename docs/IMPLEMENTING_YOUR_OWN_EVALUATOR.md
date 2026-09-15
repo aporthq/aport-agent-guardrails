@@ -139,6 +139,8 @@ You don't need APort tools to create an OAP passport. A passport is a JSON file 
 }
 ```
 
+Local evaluators should fail closed when a configured limit needs evidence that the harness did not provide. For example, a `max_execution_time` limit requires a trusted timeout value in the command context.
+
 **Resources for creating passports:**
 
 - **JSON Schema:** [`passport-schema.json`](https://github.com/aporthq/aport-spec/blob/main/oap/passport-schema.json) -- validate your passport against this

@@ -2,6 +2,13 @@
 
 **APort Agent Guardrails** provides deterministic pre-action authorization for AI agents. This document explains what APort protects, how it works, and the security model for both local and hosted modes.
 
+Current enforcement surfaces:
+
+- **GitHub Repository Guard**: GitHub Action with OIDC-backed hosted OAP decisions for pull requests, merges, releases, and protected-branch pushes.
+- **Runtime hooks**: Claude Code, Cursor, Codex CLI, Gemini CLI, Goose, and OpenClaw pre-action hooks.
+- **Framework adapters**: LangChain, CrewAI, DeerFlow, and generic local/API providers.
+- **Setup-only/gated integrations**: n8n setup support and opencode gated until installed-version plugin smoke tests validate the runtime API.
+
 ---
 
 ## What APort Protects Against
@@ -22,11 +29,11 @@ APort operates as a **pre-action authorization layer** that enforces policies **
 - Only explicitly allowed actions execute
 - Result: Unauthorized tools blocked before execution
 
-**Third-party skill attacks:**
-- Malicious or compromised OpenClaw skill tries to exfiltrate data
-- Cisco's research documented silent data exfiltration risk ([link](https://blogs.cisco.com/ai/personal-ai-agents-like-openclaw-are-a-security-nightmare))
-- APort validates every tool call from every skill
-- Result: Data exfiltration attempts blocked (e.g., messaging to unauthorized recipients, file access outside allowed paths)
+**Third-party tool, skill, and plugin attacks:**
+- Malicious or compromised tools in Claude Code, Cursor, Codex CLI, Gemini CLI, Goose, OpenClaw, or MCP try to exfiltrate data.
+- Cisco's OpenClaw research documented silent data exfiltration risk ([link](https://blogs.cisco.com/ai/personal-ai-agents-like-openclaw-are-a-security-nightmare)); the same risk pattern applies to any agent runtime that can read files, execute commands, call MCP tools, or make network requests.
+- APort validates mapped tool calls before execution where the host exposes a blocking pre-action hook.
+- Result: Data exfiltration attempts can be blocked before execution (e.g., messaging to unauthorized recipients, file access outside allowed paths, unapproved MCP tools).
 
 **Unauthorized tool usage:**
 - Agent tries to execute commands not in allowlist
@@ -83,7 +90,7 @@ User Request → Agent Decision → APort Check → [ALLOW/DENY] → Tool Execut
 
 1. **User makes request** (e.g., "Deploy to production")
 2. **Agent decides to use a tool** (e.g., `exec.run` with `git push origin main`)
-3. **Platform hook fires** (`before_tool_call` in OpenClaw, `on_tool_start` in LangChain)
+3. **Platform hook fires** (GitHub Action, Claude/Cursor/Codex/Gemini/Goose command hook, OpenClaw `before_tool_call`, or LangChain/CrewAI adapter)
 4. **APort evaluates:**
    - Load passport (identity, capabilities, limits)
    - Map tool to policy (exec → system.command.execute.v1)
@@ -91,7 +98,7 @@ User Request → Agent Decision → APort Check → [ALLOW/DENY] → Tool Execut
 5. **Decision:** ALLOW (tool executes) or DENY (tool blocked, reason returned)
 6. **Audit:** Decision logged with timestamp, tool, policy, allow/deny
 
-**Agent cannot bypass this.** The hook is registered by the platform, not controlled by the agent or prompt.
+**Agent cannot bypass this by prompt.** The hook is registered by the host platform, not controlled by the agent response. If an attacker can edit the host's hook configuration, replace binaries, or compromise the OS/user account, that is outside APort's application-layer trust boundary and must be handled with filesystem permissions, branch protection, device management, or sandboxing.
 
 ---
 
@@ -227,7 +234,8 @@ APort's three-layer security model:
 
 **All modes:**
 
-1. **The framework/runtime** (OpenClaw, LangChain, etc.)
+1. **The framework/runtime** (GitHub Actions, Claude Code, Cursor, Codex CLI,
+   Gemini CLI, Goose, OpenClaw, LangChain, CrewAI, etc.)
    - Hooks execute as designed
    - Tools cannot bypass hooks
    - Event data is accurate
@@ -294,7 +302,7 @@ APort uses secure defaults out of the box:
 
 ✅ `failClosed: true` - Block tools on errors (security over availability)
 ✅ `fail_open_on_api_error: false` - API infrastructure errors (4xx/5xx, network) also fail closed by default
-✅ Strict mode available - set `allowUnmappedTools: false` to block unmapped OpenClaw tools
+✅ Unknown effectful tools fail closed by default in runtime hooks/plugins
 ✅ API mode recommended for production
 ✅ Passport status checked first (suspended/revoked → deny all)
 

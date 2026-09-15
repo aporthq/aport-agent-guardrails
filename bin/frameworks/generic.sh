@@ -17,6 +17,8 @@ source "$LIB/passport.sh"
 source "$LIB/runtime.sh"
 # shellcheck source=../lib/config.sh
 source "$LIB/config.sh"
+# shellcheck source=../lib/framework-setup.sh
+source "$LIB/framework-setup.sh"
 # shellcheck source=../lib/guardrail-mode.sh
 source "$LIB/guardrail-mode.sh"
 # shellcheck source=../lib/quick-hosted.sh
@@ -29,7 +31,7 @@ hosted_agent_id=""
 parse_guardrail_mode_args "$@"
 FORWARD_ARGS=()
 if [[ -n "${APORT_FRAMEWORK_ARGS+x}" ]]; then
-    remaining_args=("${APORT_FRAMEWORK_ARGS[@]}")
+    remaining_args=(${APORT_FRAMEWORK_ARGS[@]+"${APORT_FRAMEWORK_ARGS[@]}"})
 else
     remaining_args=()
 fi
@@ -187,7 +189,7 @@ run_setup() {
         run_passport_wizard
     fi
     # Harden permissions on passport (contains policy/capabilities)
-    [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
+    secure_framework_passport_file_if_present "$config_dir"
     log_info "Local runtime installed at: $config_dir/aport/runtime"
     select_guardrail_mode "$framework" "$hosted_agent_id"
     select_guardrail_api_url "$APORT_SELECTED_GUARDRAIL_MODE"
