@@ -177,6 +177,9 @@ elif [ -n "$TOOL_NAME" ]; then
     case "$TOOL_NORM" in
         shell | bash | runterminalcmd | run_terminal_cmd | runcommand | run_command | terminal | terminalcommand | terminal_command)
             GUARDRAIL_TOOL="bash"
+            if aport_hook_payload_has_malformed_shell_command_aliases "$INPUT"; then
+                deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell command aliases must be strings"
+            fi
             if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
                 deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
             fi
@@ -264,6 +267,9 @@ elif [ -n "$TOOL_NAME" ]; then
 elif echo "$INPUT" | jq -e '.command' &> /dev/null; then
     # beforeShellExecution: { "command": "..." }
     GUARDRAIL_TOOL="bash"
+    if aport_hook_payload_has_malformed_shell_command_aliases "$INPUT"; then
+        deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell command aliases must be strings"
+    fi
     if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
         deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell hook supplied conflicting command aliases"
     fi
@@ -279,6 +285,9 @@ elif echo "$INPUT" | jq -e '.command' &> /dev/null; then
 elif echo "$INPUT" | jq -e '.tool // .input.command' &> /dev/null; then
     # Legacy Copilot-style: { "tool": "runTerminalCommand", "input": { "command": "..." } }
     GUARDRAIL_TOOL="bash"
+    if aport_hook_payload_has_malformed_shell_command_aliases "$INPUT"; then
+        deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell command aliases must be strings"
+    fi
     if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
         deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
     fi
@@ -302,6 +311,12 @@ if [ -n "$HOOK_DECISION_FILE" ]; then
     HOOK_DECISION_FILE="${HOOK_DECISION_FILE%.json}-$$.json"
     export APORT_DECISION_FILE="$HOOK_DECISION_FILE"
     export OPENCLAW_DECISION_FILE="$HOOK_DECISION_FILE"
+    if [ -e "$HOOK_DECISION_FILE" ] && [ ! -f "$HOOK_DECISION_FILE" ]; then
+        deny_or_warn "hook.runtime" "oap.decision_state_unavailable" "APort decision state path is not a regular file" "hard"
+    fi
+    if ! rm -f "$HOOK_DECISION_FILE" 2> /dev/null; then
+        deny_or_warn "hook.runtime" "oap.decision_state_unavailable" "APort decision state path could not be reset before evaluation" "hard"
+    fi
 fi
 
 # Read tools: send only file_path to the evaluator (Cursor may attach large file bodies in tool_input).

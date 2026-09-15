@@ -575,6 +575,7 @@ web_rate_state_marker_path() {
 
 state_target_is_regular_or_absent() {
     local state_file="$1"
+    [ -L "$state_file" ] && return 1
     [ ! -e "$state_file" ] || [ -f "$state_file" ]
 }
 
@@ -1178,7 +1179,7 @@ enforce_agent_session_concurrency() {
 }
 
 enforce_web_fetch_rate_limit() {
-    local max_requests_raw max_requests state_file marker_file state_dir lock_dir now current_state next_state allowed_count tmp
+    local max_requests_raw max_requests state_file marker_file state_dir lock_dir now current_state next_state allowed_count tmp marker_tmp
 
     max_requests_raw="$(echo "$LIMITS" | jq -c 'if has("max_requests_per_min") then .max_requests_per_min elif has("max_requests_per_minute") then .max_requests_per_minute else empty end' 2> /dev/null || true)"
     [ -n "$max_requests_raw" ] || return 0
@@ -1262,7 +1263,9 @@ enforce_web_fetch_rate_limit() {
         write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state could not be written"
     fi
     chmod 600 "$state_file" 2> /dev/null || true
-    if ! { : > "$marker_file" && chmod 600 "$marker_file"; } 2> /dev/null; then
+    marker_tmp="$(mktemp "${state_dir}/web-rate-marker.XXXXXX" 2> /dev/null || true)"
+    if [ -z "$marker_tmp" ] || ! : > "$marker_tmp" 2> /dev/null || ! chmod 600 "$marker_tmp" 2> /dev/null || ! state_target_is_regular_or_absent "$marker_file" || ! mv "$marker_tmp" "$marker_file" 2> /dev/null; then
+        [ -n "$marker_tmp" ] && rm -f "$marker_tmp" 2> /dev/null || true
         release_session_state_lock "$lock_dir"
         write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit marker could not be written"
     fi
@@ -1551,10 +1554,25 @@ is_private_ipv4_destination() {
     if [ "$first" -eq 192 ] 2> /dev/null && [ "$second" -eq 168 ] 2> /dev/null; then
         return 0
     fi
+    if [ "$first" -eq 192 ] 2> /dev/null && [ "$second" -eq 0 ] 2> /dev/null && { [ "$third" -eq 0 ] 2> /dev/null || [ "$third" -eq 2 ] 2> /dev/null; }; then
+        return 0
+    fi
+    if [ "$first" -eq 192 ] 2> /dev/null && [ "$second" -eq 88 ] 2> /dev/null && [ "$third" -eq 99 ] 2> /dev/null; then
+        return 0
+    fi
     if [ "$first" -eq 100 ] 2> /dev/null && [ "$second" -ge 64 ] 2> /dev/null && [ "$second" -le 127 ] 2> /dev/null; then
         return 0
     fi
     if [ "$first" -eq 198 ] 2> /dev/null && { [ "$second" -eq 18 ] 2> /dev/null || [ "$second" -eq 19 ] 2> /dev/null; }; then
+        return 0
+    fi
+    if [ "$first" -eq 198 ] 2> /dev/null && [ "$second" -eq 51 ] 2> /dev/null && [ "$third" -eq 100 ] 2> /dev/null; then
+        return 0
+    fi
+    if [ "$first" -eq 203 ] 2> /dev/null && [ "$second" -eq 0 ] 2> /dev/null && [ "$third" -eq 113 ] 2> /dev/null; then
+        return 0
+    fi
+    if [ "$first" -ge 224 ] 2> /dev/null; then
         return 0
     fi
 
@@ -1706,11 +1724,11 @@ if address.version != 6:
 
 mapped = address.ipv4_mapped
 if mapped is not None:
-    if mapped.is_loopback or mapped.is_private or mapped.is_link_local or mapped.is_reserved:
+    if not mapped.is_global:
         sys.exit(0)
     sys.exit(1)
 
-if address.is_loopback or address.is_link_local or address.is_private:
+if not address.is_global:
     sys.exit(0)
 
 sys.exit(1)
@@ -1746,7 +1764,7 @@ is_private_network_destination() {
     host="${host%.}"
 
     case "$host" in
-        "" | localhost | *.localhost | ::1 | 0:0:0:0:0:0:0:1 | fe80:* | fc*:* | fd*:*)
+        "" | localhost | *.localhost | ::1 | 0:0:0:0:0:0:0:1 | fe80:* | fc*:* | fd*:* | ff*:*)
             return 0
             ;;
     esac
@@ -2118,6 +2136,14 @@ if [[ "$POLICY_ID" == "code.release.publish"* ]]; then
 fi
 
 if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
+    if echo "$CONTEXT_JSON" | jq -e '
+        (has("command") and (.command | type) != "string") or
+        (has("cmd") and (.cmd | type) != "string") or
+        (has("args") and (.args | type) != "array") or
+        ((.args | type) == "array" and (.args | length) > 0 and (.args[0] | type) != "string")
+    ' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_tool_arguments" "Shell command context must use string command fields"
+    fi
     COMMAND=$(echo "$CONTEXT_JSON" | jq -r '.command // .cmd // ""')
     if [ -z "$COMMAND" ]; then
         # Try to extract from args
@@ -2369,7 +2395,10 @@ if [[ "$POLICY_ID" == "data.file.read.v1" ]]; then
         if is_default_sensitive_read_path "$FILE_PATH" || is_default_sensitive_read_path "$FILE_PATH_CANON"; then
             write_decision false "$POLICY_ID" "oap.blocked_pattern" "File path matches default sensitive read pattern"
         fi
-        if [ -n "$MAX_FILE_SIZE_BYTES" ] && [ -f "$FILE_PATH_CANON" ]; then
+        if [ -n "$MAX_FILE_SIZE_BYTES" ]; then
+            if [ ! -f "$FILE_PATH_CANON" ]; then
+                write_decision false "$POLICY_ID" "oap.missing_required_context" "File size cannot be safely measured for non-regular read targets"
+            fi
             FILE_SIZE_BYTES="$(portable_file_size_bytes "$FILE_PATH_CANON" || true)"
             if [ -z "$FILE_SIZE_BYTES" ]; then
                 write_decision false "$POLICY_ID" "oap.missing_required_context" "File size could not be measured for max_file_size enforcement"
