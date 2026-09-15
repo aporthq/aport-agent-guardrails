@@ -223,6 +223,11 @@ run_hook "Codex PermissionRequest without tool name fails closed" \
     '{"hook_event_name":"PermissionRequest","tool_input":{"command":"sudo reboot"}}' \
     '.hookSpecificOutput.hookEventName == "PermissionRequest" and .hookSpecificOutput.decision.behavior == "deny" and (.hookSpecificOutput.decision.message | contains("oap.missing_tool_name"))'
 
+run_hook "Codex rejects unknown hook event names" \
+    codex "$CODEX" \
+    '{"hook_event_name":"BeforePrompt","tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_hook_event"))'
+
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
@@ -524,8 +529,8 @@ if grep -q 'password\|token=secret\|user:' "$TEST_DIR/aport/session-decisions.js
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 fi
-jq -e '.guardrail_tool == "mcp.tool" and .context.mcp_server == "https://github/tools" and .context.mcp_tool == "issues.list"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
-    echo "FAIL: MCP URL routing should strip secrets while preserving endpoint scope" >&2
+jq -e '.guardrail_tool == "mcp.tool" and .context.mcp_server == "https://github" and .context.mcp_tool == "issues.list"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: MCP URL routing should strip secrets while preserving only the URL origin" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 }
@@ -674,10 +679,10 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "never_expires": true
 }
 EOF
-run_hook "Gemini MCP URL allowlist treats trailing slash scope as directory" \
+run_hook "Gemini MCP URL path-scoped allowlist fails closed after path redaction" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"https://example.com:8443/trusted/issues","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
-    '.decision == "allow"'
+    '.decision == "deny" and (.reason | contains("oap.mcp_server_not_allowed"))'
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {
@@ -698,10 +703,10 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "never_expires": true
 }
 EOF
-run_hook "Gemini MCP scoped scheme allowlist permits matching path" \
+run_hook "Gemini MCP scoped scheme allowlist fails closed after path redaction" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"mcp://github/trusted/issues","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
-    '.decision == "allow"'
+    '.decision == "deny" and (.reason | contains("oap.mcp_server_not_allowed"))'
 run_hook "Gemini MCP scoped scheme allowlist rejects bare server fallback" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"mcp__github__issues.list","tool_input":{"id":"x"}}' \
@@ -928,6 +933,16 @@ run_hook "Codex generic MCP wrapper preserves routing server" \
     '{"hook_event_name":"PreToolUse","tool_name":"CallMcpTool","tool_input":{"server":"github","mcp_tool":"issues.list","id":"x"}}' \
     '. == {}'
 
+run_hook "Codex generic MCP wrapper rejects conflicting routing containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"CallMcpTool","tool_input":{"server":"evil","tool":"issues.list","id":"x"},"input":{"server":"github","tool":"issues.list"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex generic MCP wrapper permits URL parameters as tool data" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"CallMcpTool","mcp_context":{"server_name":"github","tool_name":"issues.list"},"tool_input":{"url":"https://docs.example.com/search?q=aport","id":"x"}}' \
+    '. == {}'
+
 run_hook "Goose MCP denies server spoofed through tool input" \
     goose "$GOOSE" \
     '{"hook_event_name":"PreToolUse","tool_name":"evil__issues_list","tool_input":{"server":"github","tool":"issues.list","id":"x"}}' \
@@ -961,10 +976,10 @@ run_hook "Gemini MCP bare allowlist permits unscoped mcp URL identifier" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"mcp://github","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
     '.decision == "allow"'
-run_hook "Gemini MCP bare allowlist rejects scoped mcp URL identifier" \
+run_hook "Gemini MCP bare allowlist permits scoped mcp URL after path redaction" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"mcp://github/tools","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
-    '.decision == "deny" and (.reason | contains("oap.mcp_server_not_allowed"))'
+    '.decision == "allow"'
 
 run_hook "Codex MCP resource read uses routing server instead of URI authority" \
     codex "$CODEX" \
@@ -1129,6 +1144,11 @@ run_hook "Gemini web_fetch rejects domain spoofing when URL is present" \
 run_hook "Gemini web_fetch rejects conflicting URL containers" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://169.254.169.254/latest/meta-data"},"input":{"url":"https://example.com/"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Gemini web_fetch rejects conflicting method containers" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/resource","method":"DELETE"},"input":{"url":"https://example.com/resource","method":"GET"}}' \
     '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
 
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
@@ -1878,6 +1898,17 @@ run_hook "Codex session recovers stale local lock" \
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
 rm -rf "$TEST_DIR/aport/session-state.json.lock"
 echo "  ✅ Codex session stale lock recovery works"
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+rm -rf "$TEST_DIR/aport/session-state.json.lock" "$TEST_DIR/aport/session-state.json.lock.recover"
+mkdir "$TEST_DIR/aport/session-state.json.lock"
+printf '%s 1\n' "$$" > "$TEST_DIR/aport/session-state.json.lock/owner"
+APORT_SESSION_LOCK_STALE_SECONDS=0 run_hook "Codex session recovers stale local lock when PID was reused" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"stale-reused-pid-lock-call","tool_input":{"id":"stale-reused-pid-child","prompt":"review this","agent_type":"reviewer"}}' \
+    '. == {}'
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+rm -rf "$TEST_DIR/aport/session-state.json.lock" "$TEST_DIR/aport/session-state.json.lock.recover"
+echo "  ✅ Codex session stale lock recovery handles PID reuse"
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
 rm -rf "$TEST_DIR/aport/session-state.json.lock" "$TEST_DIR/aport/session-state.json.lock.recover"
 mkdir "$TEST_DIR/aport/session-state.json.lock"

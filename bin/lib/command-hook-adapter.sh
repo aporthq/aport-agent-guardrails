@@ -171,7 +171,7 @@ if [ "$FRAMEWORK" = "codex" ]; then
     case "$HOOK_EVENT" in
         PermissionRequest | PreToolUse | PostToolUse) ;;
         "") HOOK_EVENT="PreToolUse" ;;
-        *) HOOK_EVENT="PreToolUse" ;;
+        *) emit_response "deny" "hook.input" "oap.unknown_hook_event" "Unsupported Codex hook event: $HOOK_EVENT" ;;
     esac
     export APORT_CODEX_HOOK_EVENT_NAME="$HOOK_EVENT"
 fi
@@ -513,6 +513,9 @@ map_web() {
 }
 
 map_mcp() {
+    if aport_hook_payload_has_conflicting_mcp_routing_aliases "$INPUT"; then
+        emit_response "deny" "mcp.tool.execute" "oap.invalid_tool_arguments" "MCP tool supplied conflicting server or tool aliases"
+    fi
     GUARDRAIL_TOOL="mcp.tool"
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$ORIGINAL_TOOL")"
     if [ "$(printf '%s' "$CONTEXT_JSON" | jq -r 'if .invalid_server == true then "true" else "false" end' 2> /dev/null || echo false)" = "true" ]; then

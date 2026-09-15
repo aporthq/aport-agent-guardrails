@@ -146,6 +146,7 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
         end;
       def str(v): if v == null then "" else (v | tostring) end;
       def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
+      def methodish(v): if (v | type) == "string" and (v | length) > 0 then (v | ascii_upcase) else "" end;
       def url_host(v):
         str(v) as $s |
         if ($s | contains("\\") or test("[[:cntrl:]]")) then
@@ -185,7 +186,71 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
         $root.domain,
         ($root | argument_containers[] | .url, .uri, .href, (if urlish(.source) then .source else null end), .domain)
       ] | map(select(type == "string" and length > 0)) | map(url_host(.)) | map(select(. != "")) | unique) as $hosts |
-      ($hosts | length) > 1
+      ([
+        methodish($root.method),
+        methodish($root.http_method),
+        methodish($root.request_method),
+        ($root | argument_containers[] | methodish(.method), methodish(.http_method), methodish(.request_method))
+      ] | map(select(. != "")) | unique) as $methods |
+      (($hosts | length) > 1) or (($methods | length) > 1)
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_conflicting_mcp_routing_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def str(v): if v == null then "" else (v | tostring) end;
+      def route(v):
+        str(v) as $s |
+        if ($s | contains("\\") or test("[[:cntrl:]]")) then
+          ""
+        elif ($s | test("^[A-Za-z][A-Za-z0-9+.-]*://")) then
+          (try (
+            ($s | capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<authority>[^/?#]*)").authority | sub("^.*@"; "") | ascii_downcase)
+          ) catch "")
+        else
+          $s
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      (obj($root.mcp_context)) as $mcp |
+      (($root.hook_event_name // $root.event // "") | ascii_downcase) as $event |
+      ([
+        $mcp.mcp_server,
+        $mcp.mcp_server_name,
+        $mcp.server,
+        $mcp.server_name,
+        $mcp.url,
+        $root.mcp_server,
+        $root.mcp_server_name,
+        (if $event == "beforemcpexecution" then $root.server else null end),
+        (if $event == "beforemcpexecution" then $root.url else null end),
+        ($root | argument_containers[] | .mcp_server, .mcp_server_name, .server, .server_name)
+      ] | map(select(type == "string" and length > 0)) | map(route(.)) | map(select(. != "")) | unique) as $servers |
+      ([
+        $mcp.mcp_tool,
+        $mcp.tool,
+        $mcp.tool_name,
+        $root.mcp_tool,
+        ($root | argument_containers[] | .mcp_tool, .tool, .name, .operation)
+      ] | map(select(type == "string" and length > 0)) | unique) as $tools |
+      (($servers | length) > 1) or (($tools | length) > 1)
     ' <<< "$payload" > /dev/null 2>&1
 }
 
@@ -250,8 +315,7 @@ aport_hook_context_from_payload() {
           (try (
             ($s | capture("^(?<scheme>[A-Za-z][A-Za-z0-9+.-]*)://(?<authority>[^/?#]*)(?<tail>.*)$")) as $u |
             ($u.authority | sub("^.*@"; "")) as $authority |
-            (($u.tail | split("?") | .[0] // "") | split("#") | .[0] // "") as $path |
-            (($u.scheme | ascii_downcase) + "://" + ($authority | ascii_downcase) + $path)
+            (($u.scheme | ascii_downcase) + "://" + ($authority | ascii_downcase))
           ) catch "")
           end
         else
