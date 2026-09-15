@@ -380,6 +380,9 @@ map_shell() {
 }
 
 map_file_read() {
+    if aport_hook_payload_has_malformed_file_target_aliases "$INPUT"; then
+        emit_response "deny" "data.file.read" "oap.invalid_tool_arguments" "File read path aliases must be strings"
+    fi
     if aport_hook_payload_has_conflicting_file_target_aliases "$INPUT"; then
         emit_response "deny" "data.file.read" "oap.invalid_tool_arguments" "File read tool supplied conflicting path aliases"
     fi
@@ -435,6 +438,9 @@ map_image_read() {
 }
 
 map_file_write() {
+    if aport_hook_payload_has_malformed_file_target_aliases "$INPUT"; then
+        emit_response "deny" "data.file.write" "oap.invalid_tool_arguments" "File write path aliases must be strings"
+    fi
     if aport_hook_payload_has_conflicting_file_target_aliases "$INPUT"; then
         emit_response "deny" "data.file.write" "oap.invalid_tool_arguments" "File write tool supplied conflicting path aliases"
     fi
@@ -499,6 +505,9 @@ map_file_write() {
 }
 
 map_web() {
+    if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
+        emit_response "deny" "web.fetch" "oap.invalid_tool_arguments" "Web tool supplied conflicting URL or domain aliases"
+    fi
     GUARDRAIL_TOOL="websearch"
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
 }

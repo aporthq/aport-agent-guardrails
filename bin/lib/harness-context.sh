@@ -95,6 +95,100 @@ aport_hook_payload_has_conflicting_file_target_aliases() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_payload_has_malformed_file_target_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
+      def malformed_path(v):
+        if v == null then false
+        elif (v | type) == "string" then false
+        elif (v | type) == "array" then any(v[]; type != "string")
+        else true
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      [
+        $root.file_path,
+        $root.path,
+        $root.dir_path,
+        (if urlish($root.source) then null else $root.source end),
+        $root.matcher_context,
+        ($root | argument_containers[] | .file_path, .path, .dir_path, .absolute_path, .notebook_path, .notebookPath, .matcher_context, (if urlish(.source) then null else .source end)),
+        ($root | argument_containers[] | .paths, .include)
+      ]
+      | any(malformed_path(.))
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_conflicting_web_target_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def str(v): if v == null then "" else (v | tostring) end;
+      def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
+      def url_host(v):
+        str(v) as $s |
+        if ($s | contains("\\") or test("[[:cntrl:]]")) then
+          ""
+        else
+          if ($s | test("^[A-Za-z][A-Za-z0-9+.-]*://")) then
+            (try (
+              ($s | capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<authority>[^/?#]*)").authority | sub("^.*@"; "")) as $authority |
+              if ($authority | startswith("[")) then
+                ($authority | capture("^\\[(?<host>[^\\]]+)\\]").host)
+              else
+                ($authority | split(":")[0])
+              end
+            ) catch "")
+          else
+            $s
+          end
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      ([
+        $root.url,
+        $root.uri,
+        $root.href,
+        (if urlish($root.source) then $root.source else null end),
+        $root.domain,
+        ($root | argument_containers[] | .url, .uri, .href, (if urlish(.source) then .source else null end), .domain)
+      ] | map(select(type == "string" and length > 0)) | map(url_host(.)) | map(select(. != "")) | unique) as $hosts |
+      ($hosts | length) > 1
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
 aport_hook_context_from_payload() {
     local payload="$1"
     local kind="$2"
@@ -112,6 +206,7 @@ aport_hook_context_from_payload() {
       def keys_or_empty(v): if (v | type) == "object" then (v | keys | sort) else [] end;
       def first_target(v): (arr(v) | map(select(type == "string" and . != "")) | .[0] // null);
       def target_count(v): (arr(v) | map(select(type == "string" and . != "")) | length);
+      def first_string(v): (v | map(select(type == "string" and . != "")) | .[0] // "");
       def positive_int(v):
         if (v | type) == "number" and v > 0 then (v | floor)
         elif (v | type) == "string" and (v | test("^[0-9]+$")) and (v | tonumber) > 0 then (v | tonumber)
@@ -169,7 +264,12 @@ aport_hook_context_from_payload() {
         str(v) as $s |
         if $s == "" then ""
         elif ($s | contains("\\") or test("[[:cntrl:]]") or (test("^https?://"; "i") | not)) then ""
-        else clean_server($s)
+        else
+          (try (
+            ($s | capture("^(?<scheme>[A-Za-z][A-Za-z0-9+.-]*)://(?<authority>[^/?#]*).*$")) as $u |
+            ($u.authority | sub("^.*@"; "")) as $authority |
+            (($u.scheme | ascii_downcase) + "://" + ($authority | ascii_downcase))
+          ) catch "")
         end;
       def strip_functions_prefix(v):
         (v | tostring) as $original |
@@ -228,12 +328,12 @@ aport_hook_context_from_payload() {
         } + (if $command_timeout == null then {} else {timeout: $command_timeout} end))
       elif $kind == "file_read" then
         {
-          file_path: (
+          file_path: first_string([
             .file_path // .path // $ti.file_path // $ti.path // $ti.absolute_path //
             (if urlish($ti.source) then null else $ti.source end) //
             $ti.dir_path // first_target($ti.paths) // first_target($ti.include) //
-            .matcher_context // ""
-          ),
+            .matcher_context
+          ]),
           read_target_count: (
             ([
               (if ($ti.dir_path // "") != "" then 1 else 0 end),
@@ -272,9 +372,9 @@ aport_hook_context_from_payload() {
           end
         ) as $old_bytes |
         {
-          file_path: (
+          file_path: first_string([
             .file_path // .path // $ti.file_path // $ti.notebook_path // $ti.notebookPath // $ti.path // $ti.args.file_path // $ti.args.path // $ti.absolute_path // .matcher_context // ""
-          ),
+          ]),
           content_length: ([$direct_new_bytes, $edit_new_bytes] | max),
           old_content_length: $old_bytes,
           write_operation: $write_operation,

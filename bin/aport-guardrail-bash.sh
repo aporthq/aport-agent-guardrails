@@ -533,9 +533,11 @@ portable_file_size_bytes() {
     local path="$1"
     local size=""
     size="$(stat -f %z "$path" 2> /dev/null || true)"
+    case "$size" in "" | *[!0-9]*) size="" ;; esac
     if [ -z "$size" ]; then
         size="$(stat -c %s "$path" 2> /dev/null || true)"
     fi
+    case "$size" in "" | *[!0-9]*) size="" ;; esac
     if [ -z "$size" ]; then
         size="$(wc -c < "$path" 2> /dev/null | tr -d '[:space:]' || true)"
     fi
