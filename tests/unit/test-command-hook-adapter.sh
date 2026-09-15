@@ -413,6 +413,38 @@ run_hook "Gemini file read enforces configured max file size" \
     "{\"hook_event_name\":\"BeforeTool\",\"tool_name\":\"read_file\",\"tool_input\":{\"file_path\":\"$READ_TOO_LARGE_FILE\"}}" \
     '.decision == "deny" and (.reason | contains("oap.file_too_large"))'
 
+FAKE_STAT_DIR="$TEST_DIR/fake-stat"
+mkdir -p "$FAKE_STAT_DIR"
+cat > "$FAKE_STAT_DIR/stat" << 'EOF'
+#!/bin/sh
+if [ "$1" = "-f" ]; then
+    printf '  File: "%s"\n' "${3:-}"
+    exit 1
+fi
+if [ "$1" = "-c" ]; then
+    wc -c < "${3:-}"
+    exit $?
+fi
+command -p stat "$@"
+EOF
+chmod +x "$FAKE_STAT_DIR/stat"
+ORIGINAL_PATH="$PATH"
+PATH="$FAKE_STAT_DIR:$PATH" run_hook "Gemini file read ignores nonnumeric BSD stat fallback output" \
+    gemini "$GEMINI" \
+    "{\"hook_event_name\":\"BeforeTool\",\"tool_name\":\"read_file\",\"tool_input\":{\"file_path\":\"$READ_TOO_LARGE_FILE\"}}" \
+    '.decision == "deny" and (.reason | contains("oap.file_too_large"))'
+PATH="$ORIGINAL_PATH"
+
+run_hook "Gemini file read rejects non-string file_path" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"read_file","tool_input":{"file_path":123}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Gemini file write rejects non-string file_path" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"write_file","tool_input":{"file_path":123,"content":"x"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {
   "passport_id": "ap_read_bad_limits",
@@ -1092,7 +1124,29 @@ echo "  ✅ Domain-only web fetch records normalized host"
 run_hook "Gemini web_fetch rejects domain spoofing when URL is present" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://evil.test/collect","domain":"example.com","method":"GET"}}' \
-    '.decision == "deny" and (.reason | contains("oap.domain_mismatch"))'
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Gemini web_fetch rejects conflicting URL containers" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://169.254.169.254/latest/meta-data"},"input":{"url":"https://example.com/"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Gemini web_fetch strips credential-bearing URL paths before recording" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://hooks.slack.com/services/T000/B000/SECRET?signature=hidden","method":"POST"}}' \
+    '.decision == "allow"'
+if grep -Eq 'SECRET|signature=hidden|/services/' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: web context must not persist credential-bearing URL paths, query tokens, or fragments" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '.guardrail_tool == "websearch" and .decision.policy_id == "web.fetch.v1" and .context.url == "https://hooks.slack.com" and .context.domain == "hooks.slack.com"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: web context should record only URL origin and normalized host" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Web fetch strips credential-bearing paths before audit"
 
 run_hook "Gemini web_fetch denies disallowed local method" \
     gemini "$GEMINI" \
@@ -1328,7 +1382,7 @@ run_hook "Goose read_image URL source maps to web access" \
     goose "$GOOSE" \
     '{"hook_event_name":"PreToolUse","tool_name":"developer__read_image","tool_input":{"source":"https://example.com/diagram.png"}}' \
     'empty'
-jq -e '.guardrail_tool == "websearch" and .decision.policy_id == "web.fetch.v1" and .context.url == "https://example.com/diagram.png"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+jq -e '.guardrail_tool == "websearch" and .decision.policy_id == "web.fetch.v1" and .context.url == "https://example.com" and .context.domain == "example.com"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
     echo "FAIL: Goose URL read_image should map source to web context" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
@@ -1345,7 +1399,7 @@ if grep -Eq 'password|token=secret|#frag' "$TEST_DIR/aport/session-decisions.jso
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 fi
-jq -e '.guardrail_tool == "websearch" and .decision.policy_id == "web.fetch.v1" and .context.url == "https://example.com/file" and .context.domain == "example.com"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+jq -e '.guardrail_tool == "websearch" and .decision.policy_id == "web.fetch.v1" and .context.url == "https://example.com" and .context.domain == "example.com"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
     echo "FAIL: Goose web fetch should record sanitized URL context" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
