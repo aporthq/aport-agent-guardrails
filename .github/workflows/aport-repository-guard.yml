@@ -91,15 +91,7 @@ jobs:
           block-protected-paths: true
           protected-paths: >-
             .github/workflows/**,
-            .aport/**,
-            bin/**,
-            packages/**,
-            python/**,
-            scripts/**,
-            extensions/openclaw-aport/**,
-            external/**,
-            package.json,
-            package-lock.json
+            .aport/**
 
       - name: Enforce APort repository guard
         if: >-
