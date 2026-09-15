@@ -34,15 +34,27 @@ Use this on the machine where the agent or coding tool runs:
 npx @aporthq/aport-agent-guardrails
 ```
 
-Choose a framework when prompted: `cursor`, `claude-code`, `openclaw`,
-`langchain`, `crewai`, `deerflow`, or `n8n`.
+Choose a runtime target when prompted: `cursor`, `claude`/`claude-code`,
+`openclaw`, `langchain`, `crewai`, `deerflow`, or beta command-hook targets:
+`codex`, `gemini`, and `goose`. `n8n` is setup-only today; runtime node
+enforcement ships separately.
+
+Alias note: Claude Code users run Anthropic's `claude` CLI, so both `claude`
+and `claude-code` are accepted. Gemini CLI users can use `gemini`; `gemini-cli`
+is kept as a compatibility alias. opencode is intentionally gated until an
+installed-version plugin smoke test validates enforcement.
 
 Direct examples:
 
 ```bash
 npx @aporthq/aport-agent-guardrails cursor
-npx @aporthq/aport-agent-guardrails claude-code
+npx @aporthq/aport-agent-guardrails claude
 npx @aporthq/aport-agent-guardrails openclaw
+
+# beta command-hook harnesses
+npx @aporthq/aport-agent-guardrails codex
+npx @aporthq/aport-agent-guardrails gemini
+npx @aporthq/aport-agent-guardrails goose
 ```
 
 When prompted for passport setup:
@@ -72,15 +84,21 @@ explicitly choose an audit rollout:
 ```bash
 npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=warn
 npx @aporthq/aport-agent-guardrails mode cursor --enforcement=enforce
+npx @aporthq/aport-agent-guardrails mode codex --enforcement=warn
+npx @aporthq/aport-agent-guardrails mode gemini --enforcement=enforce
+npx @aporthq/aport-agent-guardrails mode goose --enforcement=enforce
 ```
 
 The `mode` command preserves the existing hosted passport, setup key, API URL,
 and local passport path. It only changes mode/enforcement settings.
 
-Warn-mode visibility depends on the host. Claude Code shows an APort `systemMessage`
-warning. Cursor returns warning fields as best-effort context but may not display
-allow warnings in the UI, so check `bin/aport-status.sh` or the audit log for the
-recorded report-only decision.
+Warn mode downgrades completed policy denials only. Malformed hook input, missing
+dependencies, invalid mode files, unmapped effectful tools, and evaluator integrity
+failures still fail closed because APort cannot prove what would have been
+authorized. Warn-mode visibility depends on the host. Claude Code shows an APort
+`systemMessage` warning. Cursor returns warning fields as best-effort context but
+may not display allow warnings in the UI, so check `bin/aport-status.sh` or the
+audit log for the recorded report-only decision.
 
 ## 4. Enterprise device rollout
 
@@ -355,7 +373,7 @@ Should see `"allow": true` now.
 
 ## Step 7: Integrate with Your OpenClaw Instance (5 minutes)
 
-### Option A: Add to AGENTS.md (Recommended)
+### Option A: Add to AGENTS.md (Best-effort)
 
 **1. Locate your OpenClaw AGENTS.md:**
 ```bash
@@ -372,6 +390,8 @@ cat docs/AGENTS.md.example >> ~/.openclaw/AGENTS.md
 ```bash
 cat ~/.openclaw/AGENTS.md | grep "Pre-Action Authorization"
 ```
+
+AGENTS.md is repository-controlled instruction text, not the trusted runtime identity source. Runtime hooks use machine-scoped config by default. Set `APORT_TRUST_REPO_POLICY=1` only if you intentionally want a trusted repository to select its own APort passport.
 
 ---
 
@@ -530,6 +550,8 @@ chmod +x ~/.openclaw/.skills/aport-guardrail.sh
 
 ## Resources
 
+- [GitHub Protection](GITHUB_PROTECTION.md) — Repository Guard setup for PR, merge, and push evidence
+- [Claude Code](frameworks/claude-code.md), [Cursor](frameworks/cursor.md), [Codex](frameworks/codex.md), [Gemini CLI](frameworks/gemini-cli.md), and [Goose](frameworks/goose.md) — runtime hook setup
 - [OpenClaw Local Integration](OPENCLAW_LOCAL_INTEGRATION.md) — Full OpenClaw + API setup
 - [QuickStart: OpenClaw Plugin](QUICKSTART_OPENCLAW_PLUGIN.md) — Plugin setup
 - [Tool / Policy Mapping](TOOL_POLICY_MAPPING.md)
@@ -541,7 +563,7 @@ chmod +x ~/.openclaw/.skills/aport-guardrail.sh
 
 - **GitHub Issues:** https://github.com/aporthq/aport-agent-guardrails/issues
 - **Discussions:** https://github.com/aporthq/aport-agent-guardrails/discussions
-- **Email:** uchi@aport.io
+- **Security reports:** security@aport.io
 
 ---
 

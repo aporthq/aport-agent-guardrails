@@ -88,6 +88,15 @@ For blocking enforcement, switch to explicit hosted mode after the org has revie
 
 Explicit `hosted` mode fails the workflow when hosted verification cannot return a valid signed decision, returns `allow: false`, or reports a high/error structural finding. `block-protected-paths: true` escalates protected-path changes from warning to high severity; leave it off during first rollout if you only want visibility.
 
+Avoid marking the entire repository as blocking protected paths on day one. Start
+with the actual control plane, such as `.github/workflows/**`, `.aport/**`, and
+release/package metadata, then expand only after the team has a review path for
+those changes. For APort-owned repositories, the `aport-control-plane-approved`
+label prefix is the maintainer break-glass path for reviewed guard workflow or
+policy changes. The actual label must include the reviewed head SHA prefix, for
+example `aport-control-plane-approved-4dfbf5cdc1a2`; the action still runs and
+records its denial/audit output, and a later push invalidates the override.
+
 ## Passport Requirements
 
 For repository workflows, the passport should include only the capabilities that match the workflow being protected.

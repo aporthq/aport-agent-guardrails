@@ -74,6 +74,8 @@ Create `~/.openclaw/passport.json`:
 }
 ```
 
+If `max_execution_time` is configured, local verification requires the harness to supply trusted timeout evidence in the tool context. If your harness cannot provide that value, omit the limit locally or use hosted verification.
+
 ---
 
 ### Step 3: Create Policy Files

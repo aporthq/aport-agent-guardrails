@@ -56,6 +56,22 @@ fi
 assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
 assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.unknown_capability" "reasons[0].code"
 
+if "$GUARDRAIL" git.push '{"repository":"aporthq/repo","action":"repo.push","branch":"main","files_changed":["src/app.ts"]}' 2> /dev/null; then
+    echo "FAIL: repo.push should DENY without repo.push" >&2
+    exit 1
+fi
+assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
+assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.unknown_capability" "reasons[0].code"
+
+echo '{"passport_id":"repo-push-action","kind":"template","spec_version":"oap/1.0","owner_id":"u","owner_type":"user","assurance_level":"L2","status":"active","capabilities":[{"id":"repo.push"}],"limits":{"code.repository.merge":{"max_pr_size_kb":500,"allowed_repos":["aporthq/*"],"allowed_base_branches":["main"],"allowed_paths":["src/**"]}},"regions":["US"],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","version":"1.0.0"}' > "$OPENCLAW_PASSPORT_FILE"
+if ! "$GUARDRAIL" git.push '{"repository":"aporthq/repo","action":"repo.push","branch":"main","files_changed":["src/app.ts"]}'; then
+    echo "FAIL: repo.push should ALLOW with repo.push" >&2
+    exit 1
+fi
+assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "true" "decision.allow"
+
+echo '{"passport_id":"repo-action","kind":"template","spec_version":"oap/1.0","owner_id":"u","owner_type":"user","assurance_level":"L2","status":"active","capabilities":[{"id":"repo.pr.create"}],"limits":{"code.repository.merge":{"max_pr_size_kb":500,"allowed_repos":["aporthq/*"],"allowed_base_branches":["main"],"allowed_paths":["src/**"]}},"regions":["US"],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","version":"1.0.0"}' > "$OPENCLAW_PASSPORT_FILE"
+
 if "$GUARDRAIL" git.create_pr '{"repository":"aporthq/repo","action":"pr.update","branch":"feature/x","base_branch":"main","files_changed":["scripts/install.sh"]}' 2> /dev/null; then
     echo "FAIL: pr.update should DENY changed path outside allowed_paths" >&2
     exit 1
@@ -160,14 +176,15 @@ echo "  Guardrail: system.command.execute (allow)..."
 assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "true" "system command allow"
 assert_json_eq "$OPENCLAW_DECISION_FILE" "policy_id" "system.command.execute.v1" "policy_id"
 
-echo "  Guardrail: system.command.execute (deny blocked pattern)..."
-# Use a command that matches allowlist (npm) but contains blocked pattern so we get oap.blocked_pattern
+echo "  Guardrail: system.command.execute (deny chained blocked command)..."
+# With a restrictive command allowlist, a chained command must fail before prefix
+# allowlist matching can authorize only the first executable segment.
 if "$GUARDRAIL" exec.run '{"command":"npm run build && rm -rf /tmp/x"}' 2> /dev/null; then
-    echo "FAIL: guardrail should DENY blocked pattern" >&2
+    echo "FAIL: guardrail should DENY chained blocked command" >&2
     exit 1
 fi
 assert_json_eq "$OPENCLAW_DECISION_FILE" "allow" "false" "decision.allow"
-assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.blocked_pattern" "reasons[0].code"
+assert_json_eq "$OPENCLAW_DECISION_FILE" "reasons[0].code" "oap.command_chain_unsupported" "reasons[0].code"
 
 echo "  Guardrail: unknown tool denied..."
 if "$GUARDRAIL" unknown.tool '{}' 2> /dev/null; then

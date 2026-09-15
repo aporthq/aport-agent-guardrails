@@ -16,10 +16,18 @@ aport_hook_known_config_owner() {
     case "$config_dir" in
         "$HOME/.claude" | "$HOME/.claude/"*) echo "claude-code" ;;
         "$HOME/.cursor" | "$HOME/.cursor/"*) echo "cursor" ;;
+        "$HOME/.codex" | "$HOME/.codex/"*) echo "codex" ;;
+        "$HOME/.gemini" | "$HOME/.gemini/"*) echo "gemini-cli" ;;
+        "$HOME/.config/opencode" | "$HOME/.config/opencode/"*) echo "opencode" ;;
+        */.codex | */.codex/*) echo "codex" ;;
+        */.gemini | */.gemini/*) echo "gemini-cli" ;;
         "$HOME/.openclaw" | "$HOME/.openclaw/"*) echo "openclaw" ;;
         "$HOME/.aport/langchain" | "$HOME/.aport/langchain/"*) echo "langchain" ;;
         "$HOME/.aport/crewai" | "$HOME/.aport/crewai/"*) echo "crewai" ;;
         "$HOME/.aport/deerflow" | "$HOME/.aport/deerflow/"*) echo "deerflow" ;;
+        "$HOME/.aport/goose" | "$HOME/.aport/goose/"*) echo "goose" ;;
+        "$HOME/.aport/codex" | "$HOME/.aport/codex/"*) echo "codex" ;;
+        "$HOME/.aport/gemini-cli" | "$HOME/.aport/gemini-cli/"*) echo "gemini-cli" ;;
         "$HOME/.n8n" | "$HOME/.n8n/"*) echo "n8n" ;;
         *) echo "" ;;
     esac

@@ -9,7 +9,7 @@
 You have two options when using APort guardrails with supported runtime frameworks:
 
 1. **Hosted Passport** (recommended): Create or select a passport in APort → use `agent_id` only, no local passport JSON needed.
-2. **Local Passport**: Create a passport with the CLI wizard → store it in the framework config directory.
+2. **Local Passport**: Create a passport with the CLI wizard → store it in the APort framework state directory.
 
 **Why Hosted?**
 - ✅ **Global Kill Switch**: Suspend passport instantly from dashboard (all agents stop < 15s)

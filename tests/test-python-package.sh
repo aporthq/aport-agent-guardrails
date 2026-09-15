@@ -102,6 +102,15 @@ assert (site_pkg / "core" / "tool-pack-mapping.json").is_file(), "tool-pack-mapp
 assert (site_pkg / "core" / "default-passport-paths.json").is_file(), "default-passport-paths.json missing from wheel"
 assert (site_pkg / "runtime-bundle" / "manifest.txt").is_file(), "runtime manifest missing from wheel"
 assert (site_pkg / "runtime-bundle" / "bin" / "aport-create-passport.sh").is_file(), "wizard script missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "aport-claude-code-hook.sh").is_file(), "Claude Code hook missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "aport-cursor-hook.sh").is_file(), "Cursor hook missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "aport-codex-hook.sh").is_file(), "Codex hook missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "aport-gemini-cli-hook.sh").is_file(), "Gemini CLI hook missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "aport-goose-hook.sh").is_file(), "Goose hook missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "lib" / "command-hook-adapter.sh").is_file(), "command hook adapter missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "lib" / "framework-hook-paths.sh").is_file(), "framework hook paths helper missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "lib" / "guardrail-mode.sh").is_file(), "guardrail mode helper missing from wheel"
+assert (site_pkg / "runtime-bundle" / "bin" / "lib" / "hook-runtime.sh").is_file(), "hook runtime helper missing from wheel"
 assert (site_pkg / "runtime-bundle" / "external" / "aport-policies").is_dir(), "policy bundle missing from wheel"
 
 provider = OAPGuardrailProvider(

@@ -15,8 +15,12 @@ get_config_dir() {
         crewai) echo "${APORT_CREWAI_CONFIG_DIR:-$HOME/.aport/crewai}" ;;
         n8n) echo "${APORT_N8N_CONFIG_DIR:-$HOME/.n8n}" ;;
         cursor) echo "${APORT_CURSOR_CONFIG_DIR:-$HOME/.cursor}" ;;
-        claude-code) echo "${APORT_CLAUDE_CODE_CONFIG_DIR:-$HOME/.claude}" ;;
+        claude-code | claude) echo "${APORT_CLAUDE_CODE_CONFIG_DIR:-$HOME/.claude}" ;;
         deerflow) echo "${APORT_DEERFLOW_CONFIG_DIR:-$HOME/.aport/deerflow}" ;;
+        goose) echo "${APORT_GOOSE_CONFIG_DIR:-$HOME/.aport/goose}" ;;
+        codex) echo "${APORT_CODEX_CONFIG_DIR:-$HOME/.aport/codex}" ;;
+        gemini-cli | gemini) echo "${APORT_GEMINI_CLI_CONFIG_DIR:-$HOME/.aport/gemini-cli}" ;;
+        opencode) echo "${APORT_OPENCODE_CONFIG_DIR:-$HOME/.config/opencode}" ;;
         *) echo "${APORT_CONFIG_DIR:-$HOME/.aport}" ;;
     esac
 }

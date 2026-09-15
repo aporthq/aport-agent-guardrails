@@ -19,6 +19,10 @@ _CONFIG_DIRS = {
     "n8n": "~/.n8n",
     "cursor": "~/.cursor",
     "claude-code": "~/.claude",
+    "codex": "~/.aport/codex",
+    "gemini-cli": "~/.aport/gemini-cli",
+    "goose": "~/.aport/goose",
+    "opencode": "~/.config/opencode",
 }
 
 

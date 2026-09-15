@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.33] - 2026-09-12
+
+### Added
+- **Codex CLI, Gemini CLI, and Goose beta harnesses:** Shipped command-hook setup targets with stable runtime bundling, shared tool-to-policy mapping, host preflight warnings, and framework docs/tests.
+
+### Changed
+- **Runtime hook safety:** Warn mode now downgrades only completed APort policy denials; malformed hook input, missing dependencies, invalid configuration, unmapped effectful tools, and evaluator failures remain fail-closed.
+- **Claude Code and Cursor context minimization:** Hook audit records now preserve useful metadata without persisting raw prompts or MCP parameter payloads.
+
 ## [1.0.32] - 2026-09-05
 
 ### Changed

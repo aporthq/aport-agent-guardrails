@@ -12,8 +12,10 @@ source "$LIB/common.sh"
 source "$LIB/config.sh"
 # shellcheck source=lib/guardrail-mode.sh
 source "$LIB/guardrail-mode.sh"
+# shellcheck source=lib/framework-setup.sh
+source "$LIB/framework-setup.sh"
 
-SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code deerflow n8n)
+SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n)
 
 usage() {
     cat << 'EOF'
@@ -22,6 +24,8 @@ Usage:
 
 Examples:
   aport-agent-guardrails mode claude-code --enforcement=warn
+  aport-agent-guardrails mode codex --enforcement=warn
+  aport-agent-guardrails mode gemini --mode=api --api-url=https://api.aport.io
   aport-agent-guardrails mode cursor --enforcement=enforce
   aport-agent-guardrails mode langchain --mode=api --api-url=https://api.aport.io
 
@@ -37,6 +41,10 @@ if [[ -z "$framework" || "$framework" == "--help" || "$framework" == "-h" ]]; th
 fi
 shift
 framework="$(printf '%s' "$framework" | tr '[:upper:]' '[:lower:]')"
+case "$framework" in
+    claude) framework="claude-code" ;;
+    gemini) framework="gemini-cli" ;;
+esac
 
 is_supported=false
 for supported in "${SUPPORTED_FRAMEWORKS[@]}"; do
@@ -63,18 +71,38 @@ if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -gt 0 ]]; then
 fi
 
 has_explicit_config_dir_override() {
+    [[ -n "${APORT_CONFIG_DIR:-}" ]] && return 0
+
     case "$framework" in
+        openclaw)
+            [[ -n "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}" ]]
+            ;;
+        cursor)
+            [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" ]]
+            ;;
+        claude-code)
+            [[ -n "${APORT_CLAUDE_CODE_CONFIG_DIR:-}" ]]
+            ;;
+        codex)
+            [[ -n "${APORT_CODEX_CONFIG_DIR:-}" ]]
+            ;;
+        gemini-cli)
+            [[ -n "${APORT_GEMINI_CLI_CONFIG_DIR:-}" ]]
+            ;;
+        goose)
+            [[ -n "${APORT_GOOSE_CONFIG_DIR:-}" ]]
+            ;;
         langchain)
-            [[ -n "${APORT_CONFIG_DIR:-${APORT_LANGCHAIN_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_LANGCHAIN_CONFIG_DIR:-}" ]]
             ;;
         crewai)
-            [[ -n "${APORT_CONFIG_DIR:-${APORT_CREWAI_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_CREWAI_CONFIG_DIR:-}" ]]
             ;;
         deerflow)
-            [[ -n "${APORT_CONFIG_DIR:-${APORT_DEERFLOW_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_DEERFLOW_CONFIG_DIR:-}" ]]
             ;;
         n8n)
-            [[ -n "${APORT_CONFIG_DIR:-${APORT_N8N_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_N8N_CONFIG_DIR:-}" ]]
             ;;
         *)
             return 1
@@ -82,8 +110,217 @@ has_explicit_config_dir_override() {
     esac
 }
 
-resolve_set_mode_config_dir() {
+framework_specific_config_dir_override() {
     case "$framework" in
+        openclaw)
+            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+            ;;
+        cursor)
+            printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}"
+            ;;
+        claude-code)
+            printf '%s' "${APORT_CLAUDE_CODE_CONFIG_DIR:-}"
+            ;;
+        codex)
+            printf '%s' "${APORT_CODEX_CONFIG_DIR:-}"
+            ;;
+        gemini-cli)
+            printf '%s' "${APORT_GEMINI_CLI_CONFIG_DIR:-}"
+            ;;
+        goose)
+            printf '%s' "${APORT_GOOSE_CONFIG_DIR:-}"
+            ;;
+        langchain)
+            printf '%s' "${APORT_LANGCHAIN_CONFIG_DIR:-}"
+            ;;
+        crewai)
+            printf '%s' "${APORT_CREWAI_CONFIG_DIR:-}"
+            ;;
+        deerflow)
+            printf '%s' "${APORT_DEERFLOW_CONFIG_DIR:-}"
+            ;;
+        n8n)
+            printf '%s' "${APORT_N8N_CONFIG_DIR:-}"
+            ;;
+        *)
+            printf ''
+            ;;
+    esac
+}
+
+read_hook_config_dir_from_file() {
+    local file="$1"
+    local env_name="$2"
+    local hook_name="${3:-}"
+    [[ -f "$file" ]] || return 0
+    command -v node > /dev/null 2>&1 || return 0
+    node - "$file" "$env_name" "$hook_name" << 'NODE'
+const fs = require("node:fs");
+const [file, envName, hookName] = process.argv.slice(2);
+const input = fs.readFileSync(file, "utf8");
+
+const commands = [];
+const visit = (value) => {
+  if (!value) return;
+  if (typeof value === "string") return;
+  if (Array.isArray(value)) {
+    for (const item of value) visit(item);
+    return;
+  }
+  if (typeof value !== "object") return;
+  if (typeof value.command === "string" && value.command.includes(hookName)) {
+    commands.push(value.command);
+  }
+  for (const child of Object.values(value)) visit(child);
+};
+try {
+  visit(JSON.parse(input));
+} catch {
+  for (const line of input.split(/\r?\n/)) {
+    if (!hookName || line.includes(hookName) || line.includes(`${envName}=`)) {
+      commands.push(line);
+    }
+  }
+}
+
+const readAssignment = (command) => {
+  const needle = `${envName}=`;
+  const start = command.indexOf(needle);
+  if (start < 0) return "";
+  const rest = command.slice(start + needle.length);
+  let value = "";
+  let quote = "";
+  for (let i = 0; i < rest.length; i += 1) {
+    const ch = rest[i];
+    if (quote === "'") {
+      if (ch === "'") quote = "";
+      else value += ch;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"') {
+        quote = "";
+      } else if (ch === "\\" && i + 1 < rest.length) {
+        value += rest[i + 1];
+        i += 1;
+      } else {
+        value += ch;
+      }
+      continue;
+    }
+    if (/\s/.test(ch)) break;
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < rest.length) {
+      value += rest[i + 1];
+      i += 1;
+      continue;
+    }
+    value += ch;
+  }
+  return quote ? "" : value;
+};
+
+for (const command of commands) {
+  const value = readAssignment(command);
+  if (value) {
+    process.stdout.write(value);
+    process.exit(0);
+  }
+}
+NODE
+}
+
+read_command_hook_config_dir() {
+    read_hook_config_dir_from_file "$1" "$2" "$3"
+}
+
+resolve_command_hook_state_dir() {
+    local env_name="$1"
+    local hook_name="$2"
+    local project_file="$3"
+    local global_file="$4"
+    local state_dir
+
+    state_dir="$(read_command_hook_config_dir "$project_file" "$env_name" "$hook_name")"
+    if [[ -n "$state_dir" ]]; then
+        printf '%s' "${state_dir/#\~/$HOME}"
+        return 0
+    fi
+    state_dir="$(read_command_hook_config_dir "$global_file" "$env_name" "$hook_name")"
+    if [[ -n "$state_dir" ]]; then
+        printf '%s' "${state_dir/#\~/$HOME}"
+        return 0
+    fi
+    return 1
+}
+
+resolve_goose_plugin_state_dir() {
+    local state_dir
+    local custom_plugin_dir="${APORT_GOOSE_PLUGIN_DIR:-}"
+    local plugin_scripts=()
+
+    if [[ -n "$custom_plugin_dir" ]]; then
+        plugin_scripts+=("${custom_plugin_dir/#\~/$HOME}/scripts/aport-goose-hook.sh")
+    fi
+    plugin_scripts+=("$PWD/.agents/plugins/aport-guardrail/scripts/aport-goose-hook.sh")
+    plugin_scripts+=("$HOME/.agents/plugins/aport-guardrail/scripts/aport-goose-hook.sh")
+
+    for wrapper in "${plugin_scripts[@]}"; do
+        state_dir="$(read_hook_config_dir_from_file "$wrapper" "APORT_GOOSE_CONFIG_DIR")"
+        if [[ -n "$state_dir" ]]; then
+            printf '%s' "${state_dir/#\~/$HOME}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+resolve_set_mode_config_dir() {
+    local framework_override
+    framework_override="$(framework_specific_config_dir_override)"
+    if [[ -n "$framework_override" ]]; then
+        printf '%s' "$framework_override"
+        return 0
+    fi
+
+    if [[ -n "${APORT_CONFIG_DIR:-}" ]]; then
+        printf '%s' "$APORT_CONFIG_DIR"
+        return 0
+    fi
+
+    case "$framework" in
+        codex)
+            if [[ -n "${APORT_CODEX_HOOKS_DIR:-}" ]] && config_from_hook="$(read_command_hook_config_dir "${APORT_CODEX_HOOKS_DIR/#\~/$HOME}/hooks.json" "APORT_CODEX_CONFIG_DIR" "aport-codex-hook.sh")" && [[ -n "$config_from_hook" ]]; then
+                printf '%s' "${config_from_hook/#\~/$HOME}"
+                return 0
+            fi
+            local codex_home="${CODEX_HOME:-$HOME/.codex}"
+            codex_home="${codex_home/#\~/$HOME}"
+            if config_from_hook="$(resolve_command_hook_state_dir "APORT_CODEX_CONFIG_DIR" "aport-codex-hook.sh" "$PWD/.codex/hooks.json" "$codex_home/hooks.json" "$HOME/.codex/hooks.json")"; then
+                printf '%s' "$config_from_hook"
+                return 0
+            fi
+            ;;
+        gemini-cli)
+            if [[ -n "${APORT_GEMINI_CLI_HOOKS_DIR:-}" ]] && config_from_hook="$(read_command_hook_config_dir "${APORT_GEMINI_CLI_HOOKS_DIR/#\~/$HOME}/settings.json" "APORT_GEMINI_CLI_CONFIG_DIR" "aport-gemini-cli-hook.sh")" && [[ -n "$config_from_hook" ]]; then
+                printf '%s' "${config_from_hook/#\~/$HOME}"
+                return 0
+            fi
+            if config_from_hook="$(resolve_command_hook_state_dir "APORT_GEMINI_CLI_CONFIG_DIR" "aport-gemini-cli-hook.sh" "$PWD/.gemini/settings.json" "$HOME/.gemini/settings.json")"; then
+                printf '%s' "$config_from_hook"
+                return 0
+            fi
+            ;;
+        goose)
+            if config_from_hook="$(resolve_goose_plugin_state_dir)"; then
+                printf '%s' "$config_from_hook"
+                return 0
+            fi
+            ;;
         langchain | crewai | deerflow | n8n)
             if ! has_explicit_config_dir_override && [[ -f "$PWD/.aport/config.yaml" ]]; then
                 printf '%s/.aport' "$PWD"
@@ -97,6 +334,9 @@ resolve_set_mode_config_dir() {
 
 config_dir="$(resolve_set_mode_config_dir)"
 config_dir="${config_dir/#\~/$HOME}"
+refuse_symlink_path "$config_dir" || exit 1
+refuse_symlink_path "$config_dir/aport" || exit 1
+refuse_symlink_path "$config_dir/aport/guardrail-mode.env" || exit 1
 mkdir -p "$config_dir/aport"
 chmod 700 "$config_dir/aport" 2> /dev/null || true
 
@@ -271,7 +511,7 @@ if ! selected_enforcement="$(normalize_aport_enforcement "$selected_enforcement_
     exit 1
 fi
 
-default_passport_file="$(get_default_passport_path "$framework")"
+default_passport_file="$config_dir/aport/passport.json"
 local_passport_file="$(expand_user_path "${existing_config_passport_file:-$default_passport_file}")"
 guardrail_script="$SCRIPT_DIR/aport-guardrail-bash.sh"
 
