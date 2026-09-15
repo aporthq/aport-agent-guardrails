@@ -10,6 +10,35 @@ source "$(dirname "${BASH_SOURCE[0]:-.}")/common.sh"
 
 MANIFEST_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)/runtime-manifest.txt"
 
+_runtime_refuse_existing_symlink() {
+    local path="$1"
+    local anchor="${2:-}"
+    local current="$path"
+
+    while [[ -n "$current" && "$current" != "." && "$current" != "/" ]]; do
+        [[ -n "$anchor" && "$current" = "$anchor" ]] && break
+        if [[ -L "$current" ]]; then
+            log_error "Refusing to install APort runtime through symlink: $current"
+            exit 1
+        fi
+        current="$(dirname "$current")"
+    done
+}
+
+_runtime_refuse_descendant_symlink() {
+    local runtime_dir="$1"
+    local path="$2"
+    local current="$path"
+
+    while [[ "$current" = "$runtime_dir"/* && "$current" != "$runtime_dir" ]]; do
+        if [[ -L "$current" ]]; then
+            log_error "Refusing to install APort runtime through symlink: $current"
+            exit 1
+        fi
+        current="$(dirname "$current")"
+    done
+}
+
 _runtime_copy_file() {
     local runtime_dir="$1"
     local rel_path="$2"
@@ -21,6 +50,7 @@ _runtime_copy_file() {
         exit 1
     fi
 
+    _runtime_refuse_descendant_symlink "$runtime_dir" "$dest"
     mkdir -p "$(dirname "$dest")"
     cp "$src" "$dest"
     chmod +x "$dest" 2> /dev/null || true
@@ -37,6 +67,7 @@ _runtime_copy_tree() {
         exit 1
     fi
 
+    _runtime_refuse_descendant_symlink "$runtime_dir" "$dest"
     rm -rf "$dest"
     mkdir -p "$(dirname "$dest")"
     cp -R "$src" "$dest"
@@ -48,6 +79,8 @@ install_runtime_tree() {
     local kind=""
     local rel_path=""
 
+    _runtime_refuse_existing_symlink "$config_dir/aport" "$config_dir"
+    _runtime_refuse_existing_symlink "$runtime_dir" "$config_dir"
     mkdir -p "$runtime_dir"
 
     if [[ ! -f "$MANIFEST_FILE" ]]; then
@@ -66,6 +99,7 @@ install_runtime_tree() {
                 _runtime_copy_tree "$runtime_dir" "$rel_path"
                 ;;
             mkdir)
+                _runtime_refuse_descendant_symlink "$runtime_dir" "$runtime_dir/$rel_path"
                 mkdir -p "$runtime_dir/$rel_path"
                 ;;
             *)

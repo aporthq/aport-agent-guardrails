@@ -18,11 +18,63 @@ case "$FRAMEWORK" in
 esac
 [ "$FRAMEWORK" = "gemini" ] && FRAMEWORK="gemini-cli"
 
+aport_adapter_json_escape() {
+    local value="${1:-}"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\r'/ }"
+    value="${value//$'\n'/ }"
+    printf '%s' "$value"
+}
+
+aport_adapter_fail_closed() {
+    local policy="${1:-hook.runtime}"
+    local code="${2:-oap.hook_error}"
+    local message="${3:-APort hook runtime failed before policy evaluation}"
+    local reason escaped_reason event
+
+    reason="APort denied this tool call. Policy: $policy. Reason: $code. Detail: $message"
+    escaped_reason="$(aport_adapter_json_escape "$reason")"
+    case "$FRAMEWORK" in
+        codex)
+            event="$(aport_adapter_json_escape "${APORT_CODEX_HOOK_EVENT_NAME:-PreToolUse}")"
+            printf '{"hookSpecificOutput":{"hookEventName":"%s","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$event" "$escaped_reason"
+            ;;
+        goose)
+            printf '{"decision":"block","reason":"%s"}\n' "$escaped_reason"
+            ;;
+        gemini-cli | gemini)
+            printf '{"decision":"deny","reason":"%s"}\n' "$escaped_reason"
+            ;;
+        *)
+            printf '{"decision":"deny","reason":"%s"}\n' "$escaped_reason"
+            ;;
+    esac
+    exit 0
+}
+
+# shellcheck disable=SC2317
+aport_adapter_early_crash_deny() {
+    local exit_code="$?"
+    local line_no="${1:-unknown}"
+    aport_adapter_fail_closed "hook.runtime" "oap.hook_error" "command-hook-adapter.sh:${line_no} exited ${exit_code}"
+}
+trap 'aport_adapter_early_crash_deny "$LINENO"' ERR
+
+aport_adapter_source() {
+    local source_path="$1"
+    if [ ! -r "$source_path" ]; then
+        aport_adapter_fail_closed "hook.runtime" "oap.missing_dependency" "Required APort runtime file is missing"
+    fi
+    # shellcheck disable=SC1090
+    . "$source_path" || aport_adapter_fail_closed "hook.runtime" "oap.hook_error" "Required APort runtime file failed to load"
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # shellcheck source=bin/lib/framework-hook-paths.sh
-. "$ROOT_DIR/bin/lib/framework-hook-paths.sh"
+aport_adapter_source "$ROOT_DIR/bin/lib/framework-hook-paths.sh"
 case "$FRAMEWORK" in
     codex)
         aport_hook_prepare_framework_paths "codex" "${APORT_CODEX_CONFIG_DIR:-}" "$HOME/.aport/codex"
@@ -36,13 +88,13 @@ case "$FRAMEWORK" in
 esac
 
 # shellcheck source=bin/aport-resolve-paths.sh
-. "$ROOT_DIR/bin/aport-resolve-paths.sh"
+aport_adapter_source "$ROOT_DIR/bin/aport-resolve-paths.sh"
 # shellcheck source=bin/lib/guardrail-mode.sh
-. "$ROOT_DIR/bin/lib/guardrail-mode.sh"
+aport_adapter_source "$ROOT_DIR/bin/lib/guardrail-mode.sh"
 # shellcheck source=bin/lib/hook-runtime.sh
-. "$ROOT_DIR/bin/lib/hook-runtime.sh"
+aport_adapter_source "$ROOT_DIR/bin/lib/hook-runtime.sh"
 # shellcheck source=bin/lib/harness-context.sh
-. "$ROOT_DIR/bin/lib/harness-context.sh"
+aport_adapter_source "$ROOT_DIR/bin/lib/harness-context.sh"
 
 emit_response() {
     local disposition="$1"
@@ -108,6 +160,10 @@ if ! printf '%s' "$INPUT" | jq -e . > /dev/null 2>&1; then
     emit_response "deny" "hook.input" "oap.invalid_json" "Invalid hook JSON"
 fi
 
+if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then
+    emit_response "deny" "hook.input" "oap.invalid_tool_arguments" "Hook tool arguments must be a JSON object"
+fi
+
 HOOK_EVENT="$(printf '%s' "$INPUT" | jq -r '.hook_event_name // .event // ""' 2> /dev/null || true)"
 ORIGINAL_TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // .tool // .name // ""' 2> /dev/null || true)"
 TOOL_NORM="$(aport_hook_tool_name_normalize "$ORIGINAL_TOOL")"
@@ -152,6 +208,35 @@ codex_post_tool_succeeded() {
 	' > /dev/null 2>&1
 }
 
+codex_post_tool_has_explicit_failure() {
+    printf '%s' "$INPUT" | jq -e '
+	  def obj(v):
+	    if (v | type) == "object" then v
+	    elif (v | type) == "string" then (try (v | fromjson) catch {})
+	    else {}
+	    end;
+	  def failed(v):
+	    (obj(v).success == false) or
+	    (obj(v).ok == false) or
+	    (obj(v).status == "error") or
+	    (obj(v).status == "failed") or
+	    (obj(v).error? != null) or
+	    (obj(v).tool_error? != null);
+	  (
+	    .success == false or
+	    .ok == false or
+	    .status == "error" or
+	    .status == "failed" or
+	    failed(.tool_response) or
+	    failed(.tool_output) or
+	    failed(.result) or
+	    failed(.output) or
+	    (.tool_error? != null) or
+	    (.error? != null)
+	  )
+	' > /dev/null 2>&1
+}
+
 codex_post_tool_has_explicit_success() {
     printf '%s' "$INPUT" | jq -e '
 	  def obj(v):
@@ -162,9 +247,11 @@ codex_post_tool_has_explicit_success() {
 	  def successful(v):
 	    (obj(v).success == true) or
 	    (obj(v).ok == true) or
-	    (obj(v).status == "success");
+	    (obj(v).status == "success") or
+	    (obj(v) | has("previous_status"));
 	  (
 	    .success == true or
+	    has("previous_status") or
 	    successful(.tool_response) or
 	    successful(.tool_output) or
 	    successful(.result) or
@@ -174,7 +261,7 @@ codex_post_tool_has_explicit_success() {
 }
 
 apply_codex_post_tool_session_lifecycle() {
-    local post_context session_id session_call_id operation lifecycle_decision_file lifecycle_context
+    local post_context session_id session_call_id operation lifecycle_decision_file lifecycle_context lifecycle_should_deny
 
     [ "${APORT_GUARDRAIL_MODE:-local}" = "local" ] || return 0
     is_session_tool "$TOOL_NORM" || return 0
@@ -204,7 +291,7 @@ apply_codex_post_tool_session_lifecycle() {
     )"
     [ -n "$session_id" ] || session_id="$(printf '%s' "$post_context" | jq -r '.session_id // ""' 2> /dev/null || true)"
 
-    if ! codex_post_tool_succeeded; then
+    if codex_post_tool_has_explicit_failure; then
         if { [ "$operation" = "create" ] || [ "$operation" = "resume" ]; } && [ -n "$session_call_id" ]; then
             lifecycle_context="$(jq -n -c --arg sid "$session_id" --arg call "$session_call_id" '{session_tracking:"persistent",hook_event:"PostToolUse",session_operation:"release_failed_create",session_id:$sid,session_call_id:$call}')"
         else
@@ -213,13 +300,17 @@ apply_codex_post_tool_session_lifecycle() {
     else
         lifecycle_context=""
     fi
+    lifecycle_should_deny=0
 
     if [ -z "$lifecycle_context" ]; then
         case "$operation" in
             create | resume)
                 [ -n "$session_call_id" ] || return 0
                 if [ -z "$session_id" ]; then
-                    lifecycle_context="$(jq -n -c --arg call "$session_call_id" '{session_tracking:"persistent",hook_event:"PostToolUse",session_operation:"release_failed_create",session_id:"",session_call_id:$call}')"
+                    CODEX_LIFECYCLE_REASON_CODE="oap.missing_required_context"
+                    CODEX_LIFECYCLE_REASON_MESSAGE="Codex PostToolUse did not provide a session id or explicit failure; preserving provisional session lease"
+                    lifecycle_context="$(jq -n -c --arg call "$session_call_id" '{session_tracking:"persistent",hook_event:"PostToolUse",session_operation:"mark_unresolved",session_id:"",session_call_id:$call}')"
+                    lifecycle_should_deny=1
                 else
                     lifecycle_context="$(jq -n -c --arg sid "$session_id" --arg call "$session_call_id" '{session_tracking:"persistent",hook_event:"PostToolUse",session_operation:"reconcile",session_id:$sid,session_call_id:$call}')"
                 fi
@@ -248,6 +339,10 @@ apply_codex_post_tool_session_lifecycle() {
         fi
         rm -f "$lifecycle_decision_file" 2> /dev/null || true
     fi
+
+    if [ "$lifecycle_should_deny" -eq 1 ]; then
+        return 1
+    fi
 }
 
 if [ "$FRAMEWORK" = "codex" ] && [ "$HOOK_EVENT" = "PostToolUse" ]; then
@@ -266,11 +361,18 @@ CONTEXT_JSON="{}"
 
 map_shell() {
     GUARDRAIL_TOOL="bash"
+    if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
+        emit_response "deny" "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
+    fi
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" shell)"
-    local command_text
+    local command_text shell_override
     command_text="$(printf '%s' "$CONTEXT_JSON" | jq -r '.command // ""' 2> /dev/null || true)"
+    shell_override="$(printf '%s' "$CONTEXT_JSON" | jq -r '.shell // ""' 2> /dev/null || true)"
     if [ -z "$command_text" ]; then
         emit_response "deny" "system.command.execute" "oap.missing_command" "Shell tool did not provide a command that APort can evaluate"
+    fi
+    if ! aport_hook_shell_override_is_trusted "$shell_override"; then
+        emit_response "deny" "system.command.execute" "oap.shell_not_allowed" "Shell override is not a trusted interpreter"
     fi
     if aport_is_reentrant_guardrail_command "$command_text" "$ROOT_DIR"; then
         emit_response "allow" "" "" ""
@@ -278,6 +380,9 @@ map_shell() {
 }
 
 map_file_read() {
+    if aport_hook_payload_has_conflicting_file_target_aliases "$INPUT"; then
+        emit_response "deny" "data.file.read" "oap.invalid_tool_arguments" "File read tool supplied conflicting path aliases"
+    fi
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" file_read)"
     local file_path read_target_count read_has_glob has_directory_context is_search_tool is_directory_enumeration_tool
     file_path="$(printf '%s' "$CONTEXT_JSON" | jq -r '.file_path // ""' 2> /dev/null || true)"
@@ -290,12 +395,12 @@ map_file_read() {
         grep | grepsearch | grep_search) is_search_tool=true ;;
     esac
     case "$TOOL_NORM" in
-        list_directory | listdirectory | developer__tree | tree) is_directory_enumeration_tool=true ;;
+        glob | list_directory | listdirectory | developer__tree | tree) is_directory_enumeration_tool=true ;;
     esac
     case "$read_target_count" in
         "" | *[!0-9]*) read_target_count=0 ;;
     esac
-    if [ "$is_directory_enumeration_tool" = true ] && { [ "$has_directory_context" = "true" ] || [ -d "$file_path" ] || [[ "$file_path" == */ ]]; }; then
+    if [ "$is_directory_enumeration_tool" = true ]; then
         emit_response "deny" "data.file.read" "oap.metadata_enumeration_unsupported" "This hook cannot safely authorize directory enumeration; use an explicit file-read tool instead"
     fi
     if [ "$is_search_tool" = true ] && { [ "$has_directory_context" = "true" ] || [ -d "$file_path" ] || [[ "$file_path" == */ ]]; }; then
@@ -309,6 +414,9 @@ map_file_read() {
     fi
     if [ -z "$file_path" ]; then
         emit_response "deny" "data.file.read" "oap.missing_file_path" "File read tool did not provide a path that APort can evaluate"
+    fi
+    if [ -d "$file_path" ] || [[ "$file_path" == */ ]]; then
+        emit_response "deny" "data.file.read" "oap.metadata_enumeration_unsupported" "This hook cannot safely authorize directory reads; use an explicit file-read tool instead"
     fi
     GUARDRAIL_TOOL="read"
 }
@@ -327,8 +435,11 @@ map_image_read() {
 }
 
 map_file_write() {
+    if aport_hook_payload_has_conflicting_file_target_aliases "$INPUT"; then
+        emit_response "deny" "data.file.write" "oap.invalid_tool_arguments" "File write tool supplied conflicting path aliases"
+    fi
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" file_write)"
-    local file_path patch_paths patch_path_count
+    local file_path patch_paths patch_path_count patch_text patch_operation patch_content_length patch_size_line patch_add_bytes patch_delete_bytes patch_current_size patch_resulting_size
     file_path="$(printf '%s' "$CONTEXT_JSON" | jq -r '.file_path // ""' 2> /dev/null || true)"
     if [ "$TOOL_NORM" = "applypatch" ] || [ "$TOOL_NORM" = "apply_patch" ]; then
         patch_paths="$(aport_hook_extract_patch_paths "$INPUT")"
@@ -341,7 +452,44 @@ map_file_write() {
         fi
         if [ "$patch_path_count" -eq 1 ]; then
             file_path="$(printf '%s' "$patch_paths" | jq -r '.[0]' 2> /dev/null || true)"
-            CONTEXT_JSON="$(jq -n -c --arg path "$file_path" '{file_path:$path, content_length:0, patch:true}')"
+            patch_text="$(printf '%s' "$INPUT" | jq -r '(.tool_input.command // .tool_input.patch // .command // .patch // "") | tostring' 2> /dev/null || true)"
+            patch_operation="$(printf '%s\n' "$patch_text" | sed -n -E 's/^\*\*\* (Add|Update|Delete) File: .*/\1/p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+            patch_content_length="$(printf '%s' "$patch_text" | LC_ALL=C wc -c | tr -d '[:space:]')"
+            case "$patch_content_length" in
+                "" | *[!0-9]*) patch_content_length=0 ;;
+            esac
+            patch_size_line="$(printf '%s\n' "$patch_text" | LC_ALL=C awk '
+              BEGIN { add = 0; del = 0 }
+              /^\+/ { add += length(substr($0, 2)) + 1; next }
+              /^-/ { del += length(substr($0, 2)) + 1; next }
+              END { printf "%d %d", add, del }
+            ')"
+            patch_add_bytes="${patch_size_line%% *}"
+            patch_delete_bytes="${patch_size_line#* }"
+            case "$patch_add_bytes" in "" | *[!0-9]*) patch_add_bytes=0 ;; esac
+            case "$patch_delete_bytes" in "" | *[!0-9]*) patch_delete_bytes=0 ;; esac
+            patch_resulting_size=""
+            case "$patch_operation" in
+                add)
+                    patch_resulting_size="$patch_add_bytes"
+                    ;;
+                update)
+                    patch_current_size="$(wc -c < "$file_path" 2> /dev/null | tr -d '[:space:]' || true)"
+                    case "$patch_current_size" in "" | *[!0-9]*) patch_current_size="" ;; esac
+                    if [ -n "$patch_current_size" ]; then
+                        patch_resulting_size=$((patch_current_size + patch_add_bytes))
+                        [ "$patch_resulting_size" -ge 0 ] 2> /dev/null || patch_resulting_size=""
+                    fi
+                    ;;
+                delete)
+                    patch_resulting_size=0
+                    ;;
+            esac
+            if [ -n "$patch_resulting_size" ]; then
+                CONTEXT_JSON="$(jq -n -c --arg path "$file_path" --arg operation "$patch_operation" --argjson content_length "$patch_add_bytes" --argjson resulting_content_length "$patch_resulting_size" '{file_path:$path, content_length:$content_length, resulting_content_length:$resulting_content_length, patch:true, patch_operation:$operation}')"
+            else
+                CONTEXT_JSON="$(jq -n -c --arg path "$file_path" --arg operation "$patch_operation" --argjson content_length "$patch_content_length" '{file_path:$path, content_length:$content_length, patch:true, patch_operation:$operation}')"
+            fi
         fi
     fi
     if [ -z "$(printf '%s' "$CONTEXT_JSON" | jq -r '.file_path // ""' 2> /dev/null || true)" ]; then
@@ -368,22 +516,34 @@ map_session() {
 map_metadata_or_path_read() {
     local metadata_path
     metadata_path="$(printf '%s' "$INPUT" | jq -r '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
       def has_targets(v):
-        if (v | type) == "array" then (v | length > 0)
+        if (v | type) == "array" then (v | map(select(type == "string" and length > 0)) | length > 0)
+        elif (v | type) == "string" then (v | length > 0)
         elif v == null then false
         else true
         end;
-      .tool_input.file_path // .tool_input.path // .tool_input.dir_path //
-      .input.file_path // .input.path // .input.dir_path //
-      .args.file_path // .args.path // .args.dir_path //
-      (if has_targets(.tool_input.paths) then "__paths__" else null end) //
-      (if has_targets(.tool_input.include) then "__include__" else null end) //
-      .tool_input.pattern // .input.pattern // .args.pattern // ""
+      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
+      [
+        $ti.file_path,
+        $ti.path,
+        $ti.dir_path,
+        (if has_targets($ti.paths) then "__paths__" else null end),
+        (if has_targets($ti.include) then "__include__" else null end),
+        $ti.pattern,
+        $ti.include_pattern
+      ]
+      | map(select(type == "string" and length > 0))
+      | .[0] // ""
     ' 2> /dev/null || true)"
     if [ -n "$metadata_path" ]; then
         emit_response "deny" "data.file.read" "oap.metadata_enumeration_unsupported" "This hook cannot safely authorize path-scoped metadata enumeration; use an explicit file-read tool instead"
     else
-        emit_response "allow" "" "" ""
+        emit_response "deny" "data.file.read" "oap.missing_file_path" "Metadata tool did not provide a path that APort can evaluate"
     fi
 }
 
@@ -559,11 +719,8 @@ aport_append_local_session_decision "$HOOK_DECISION_FILE" "$FRAMEWORK" "$INPUT" 
 if [ "$HAS_DECISION_FILE" -ne 1 ]; then
     emit_response "deny" "$GUARDRAIL_TOOL" "oap.evaluator_failed" "$REASON_MESSAGE" "hard"
 fi
-case "$REASON_CODE" in
-    oap.evaluator_crash | oap.evaluation_error | oap.evaluator_failed | oap.missing_dependency | oap.passport_not_found | oap.passport_invalid | oap.passport_suspended | oap.passport_version_mismatch | oap.invalid_tool_name | oap.context_too_large | oap.session_state_unavailable)
-        emit_response "deny" "$GUARDRAIL_TOOL" "$REASON_CODE" "$REASON_MESSAGE" "hard"
-        ;;
-    *)
-        emit_response "deny" "$GUARDRAIL_TOOL" "$REASON_CODE" "$REASON_MESSAGE" "policy"
-        ;;
-esac
+if aport_hook_is_hard_failure_reason "$REASON_CODE"; then
+    emit_response "deny" "$GUARDRAIL_TOOL" "$REASON_CODE" "$REASON_MESSAGE" "hard"
+else
+    emit_response "deny" "$GUARDRAIL_TOOL" "$REASON_CODE" "$REASON_MESSAGE" "policy"
+fi

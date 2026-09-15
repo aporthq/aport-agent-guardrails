@@ -61,7 +61,52 @@ has_project_aport_gemini_config() {
     [[ -f "$dir/settings.json" ]] && grep -Eq '__aport_hook|aport-gemini-cli-hook\.sh' "$dir/settings.json" 2> /dev/null
 }
 
+framework_specific_config_dir_override() {
+    case "$framework" in
+        openclaw)
+            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+            ;;
+        cursor)
+            printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}"
+            ;;
+        claude-code)
+            printf '%s' "${APORT_CLAUDE_CODE_CONFIG_DIR:-}"
+            ;;
+        codex)
+            printf '%s' "${APORT_CODEX_CONFIG_DIR:-}"
+            ;;
+        gemini-cli)
+            printf '%s' "${APORT_GEMINI_CLI_CONFIG_DIR:-}"
+            ;;
+        goose)
+            printf '%s' "${APORT_GOOSE_CONFIG_DIR:-}"
+            ;;
+        langchain)
+            printf '%s' "${APORT_LANGCHAIN_CONFIG_DIR:-}"
+            ;;
+        crewai)
+            printf '%s' "${APORT_CREWAI_CONFIG_DIR:-}"
+            ;;
+        deerflow)
+            printf '%s' "${APORT_DEERFLOW_CONFIG_DIR:-}"
+            ;;
+        n8n)
+            printf '%s' "${APORT_N8N_CONFIG_DIR:-}"
+            ;;
+        *)
+            printf ''
+            ;;
+    esac
+}
+
 resolve_reset_config_dir() {
+    local framework_override
+    framework_override="$(framework_specific_config_dir_override)"
+    if [[ -n "$framework_override" ]]; then
+        printf '%s' "${framework_override/#\~/$HOME}"
+        return 0
+    fi
+
     if [[ -n "${APORT_CONFIG_DIR:-}" ]]; then
         printf '%s' "${APORT_CONFIG_DIR/#\~/$HOME}"
         return 0
@@ -82,18 +127,20 @@ resolve_reset_config_dir() {
 }
 
 resolve_codex_hook_config_dir() {
+    local codex_home="${CODEX_HOME:-$HOME/.codex}"
+    codex_home="${codex_home/#\~/$HOME}"
     if [[ -n "${APORT_CODEX_HOOKS_DIR:-}" ]]; then
         printf '%s' "${APORT_CODEX_HOOKS_DIR/#\~/$HOME}"
     elif [[ "$reset_scope" = "project" ]]; then
         printf '%s/.codex' "$PWD"
     elif [[ "$reset_scope" = "global" ]]; then
-        printf '%s/.codex' "$HOME"
+        printf '%s' "$codex_home"
     elif [[ -n "${APORT_CODEX_CONFIG_DIR:-}" && -f "${APORT_CODEX_CONFIG_DIR/#\~/$HOME}/hooks.json" ]]; then
         printf '%s' "${APORT_CODEX_CONFIG_DIR/#\~/$HOME}"
     elif has_project_aport_codex_config; then
         printf '%s/.codex' "$PWD"
     else
-        printf '%s/.codex' "$HOME"
+        printf '%s' "$codex_home"
     fi
 }
 
@@ -438,7 +485,7 @@ cleanup_goose() {
     }
 
     cleanup_goose_state_if_unreferenced() {
-        if [[ "$selected_scope" = "project" || "$selected_scope" = "global" ]] || goose_plugin_exists_after_cleanup; then
+        if [[ "$selected_scope" = "project" || "$selected_scope" = "global" || "$selected_scope" = "custom" ]] || goose_plugin_exists_after_cleanup; then
             echo "  ✅ Preserved shared APort Goose state at $config_dir/aport"
         else
             remove_dir_if_exists "$config_dir/aport"
@@ -480,16 +527,134 @@ cleanup_goose() {
     esac
 }
 
+command_hook_selected_config_exists() {
+    local framework_name="$1"
+    local hook_config_dir="$2"
+    local config_name
+
+    case "$framework_name" in
+        Codex)
+            config_name="hooks.json"
+            ;;
+        "Gemini CLI")
+            config_name="settings.json"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    [[ -f "$hook_config_dir/$config_name" ]]
+}
+
+command_hook_config_file_name() {
+    local framework_name="$1"
+    case "$framework_name" in
+        Codex)
+            printf 'hooks.json'
+            ;;
+        "Gemini CLI")
+            printf 'settings.json'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+command_hook_config_references_state_dir() {
+    local file="$1"
+    local state_dir="$2"
+
+    [[ -f "$file" ]] || return 1
+    command -v jq > /dev/null 2>&1 || return 1
+    jq -e --arg state "$state_dir" '
+      [
+        .. | objects | .command? |
+        select(type == "string" and contains($state))
+      ] | length > 0
+    ' "$file" > /dev/null 2>&1
+}
+
+command_hook_file_references_state_dir() {
+    local file="$1"
+    local state_dir="$2"
+
+    [[ -f "$file" ]] || return 1
+    if command_hook_config_references_state_dir "$file" "$state_dir"; then
+        return 0
+    fi
+    grep -F -- "$state_dir" "$file" > /dev/null 2>&1
+}
+
+preserve_command_hook_state_if_referenced() {
+    local framework_name="$1"
+    local state_dir="$2"
+    local label="${3:-shared}"
+
+    if command_hook_any_state_has_remaining_reference "$state_dir"; then
+        echo "  ✅ Preserved ${label} APort $framework_name state at $state_dir/aport"
+        return 0
+    fi
+    return 1
+}
+
+command_hook_any_state_has_remaining_reference() {
+    local shared_state_dir="$1"
+    local candidate_file
+    local candidate_files=()
+
+    candidate_files+=("$PWD/.codex/hooks.json" "$HOME/.codex/hooks.json")
+    candidate_files+=("$PWD/.gemini/settings.json" "$HOME/.gemini/settings.json")
+    candidate_files+=("$PWD/.claude/settings.json" "$HOME/.claude/settings.json")
+    candidate_files+=("$PWD/.cursor/hooks.json" "$HOME/.cursor/hooks.json")
+    candidate_files+=("$PWD/.agents/plugins/aport-guardrail/scripts/aport-goose-hook.sh")
+    candidate_files+=("$HOME/.agents/plugins/aport-guardrail/scripts/aport-goose-hook.sh")
+    [[ -n "${CODEX_HOME:-}" ]] && candidate_files+=("${CODEX_HOME/#\~/$HOME}/hooks.json")
+    [[ -n "${APORT_CODEX_HOOKS_DIR:-}" ]] && candidate_files+=("${APORT_CODEX_HOOKS_DIR/#\~/$HOME}/hooks.json")
+    [[ -n "${APORT_GEMINI_CLI_HOOKS_DIR:-}" ]] && candidate_files+=("${APORT_GEMINI_CLI_HOOKS_DIR/#\~/$HOME}/settings.json")
+    [[ -n "${APORT_CLAUDE_CODE_CONFIG_DIR:-}" ]] && candidate_files+=("${APORT_CLAUDE_CODE_CONFIG_DIR/#\~/$HOME}/settings.json")
+    [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" ]] && candidate_files+=("${APORT_CURSOR_CONFIG_DIR/#\~/$HOME}/hooks.json")
+    [[ -n "${APORT_GOOSE_PLUGIN_DIR:-}" ]] && candidate_files+=("${APORT_GOOSE_PLUGIN_DIR/#\~/$HOME}/scripts/aport-goose-hook.sh")
+
+    for candidate_file in "${candidate_files[@]}"; do
+        [[ -n "$candidate_file" ]] || continue
+        if command_hook_file_references_state_dir "$candidate_file" "$shared_state_dir"; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 cleanup_command_hook_state() {
     local framework_name="$1"
     local hook_config_dir="$2"
     local project_config_dir="$3"
     local shared_state_dir="$4"
 
-    if [[ "$reset_scope" != "global" ]]; then
-        remove_dir_if_exists "$project_config_dir/aport"
+    if preserve_command_hook_state_if_referenced "$framework_name" "$shared_state_dir" "shared"; then
+        return 0
+    fi
+    if [[ "$reset_scope" != "global" && "$hook_config_dir" = "$project_config_dir" ]]; then
+        if ! preserve_command_hook_state_if_referenced "$framework_name" "$project_config_dir" "project-local"; then
+            remove_dir_if_exists "$project_config_dir/aport"
+        fi
     fi
     if [[ "$shared_state_dir" != "$project_config_dir" && ("$hook_config_dir" = "$project_config_dir" || "$reset_scope" = "project") ]]; then
+        echo "  ✅ Preserved shared APort $framework_name state at $shared_state_dir/aport"
+        return 0
+    fi
+    if [[ -n "${APORT_CONFIG_DIR:-}" && "$shared_state_dir" != "$project_config_dir" && "$shared_state_dir" != "$hook_config_dir" ]] \
+        && command_hook_selected_config_exists "$framework_name" "$hook_config_dir"; then
+        echo "  ✅ Preserved explicitly shared APort $framework_name state at $shared_state_dir/aport"
+        return 0
+    fi
+    if [[ -z "${APORT_CONFIG_DIR:-}" && "$shared_state_dir" != "$project_config_dir" && "$shared_state_dir" != "$hook_config_dir" && "$hook_config_dir" != "$project_config_dir" && "$reset_scope" != "project" ]]; then
+        echo "  ✅ Preserved shared APort $framework_name state at $shared_state_dir/aport"
+        return 0
+    fi
+    if [[ "$reset_scope" = "global" && "$shared_state_dir" = "$hook_config_dir" && "$project_config_dir" != "$hook_config_dir" ]]; then
         echo "  ✅ Preserved shared APort $framework_name state at $shared_state_dir/aport"
         return 0
     fi

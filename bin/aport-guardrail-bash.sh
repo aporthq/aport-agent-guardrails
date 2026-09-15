@@ -341,15 +341,15 @@ fi
 POLICY_BASE=$(echo "$POLICY_ID" | sed 's/\.v[0-9]*$//')
 # Messaging: API/verifier use flat keys at limits top level; accept nested limits["messaging.message.send"] or flat
 if [[ "$POLICY_ID" == "messaging.message.send"* ]]; then
-    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["messaging.message.send"] then .["messaging.message.send"] else {msgs_per_min, msgs_per_day, allowed_recipients, approval_required} end')
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["messaging.message.send"] then .["messaging.message.send"] else ({msgs_per_min, msgs_per_day, allowed_recipients, approval_required} | with_entries(select(.value != null))) end')
 elif [[ "$POLICY_ID" == "code.repository.merge"* ]]; then
-    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["code.repository.merge"] then .["code.repository.merge"] else {max_prs_per_day, max_merges_per_day, max_pr_size_kb, allowed_repos, allowed_base_branches, allowed_paths, require_review, daily_repo_pushes} end')
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["code.repository.merge"] then .["code.repository.merge"] else ({max_prs_per_day, max_merges_per_day, max_pr_size_kb, allowed_repos, allowed_base_branches, allowed_paths, require_review, daily_repo_pushes} | with_entries(select(.value != null))) end')
 elif [[ "$POLICY_ID" == "code.release.publish"* ]]; then
-    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["code.release.publish"] then .["code.release.publish"] else {allowed_repos, allowed_extensions} end')
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["code.release.publish"] then .["code.release.publish"] else ({allowed_repos, allowed_extensions} | with_entries(select(.value != null))) end')
 elif [[ "$POLICY_ID" == "mcp.tool.execute"* ]]; then
-    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["mcp.tool.execute"] then .["mcp.tool.execute"] else {allowed_servers, allowed_tools, allowed_tool_prefixes, max_timeout} end')
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["mcp.tool.execute"] then .["mcp.tool.execute"] else ({allowed_servers, allowed_tools, allowed_tool_prefixes, max_timeout} | with_entries(select(.value != null))) end')
 elif [[ "$POLICY_ID" == "web.fetch"* ]]; then
-    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["web.fetch"] then .["web.fetch"] else {allowed_domains, blocked_domains, allowed_methods} end')
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["web.fetch"] then .["web.fetch"] else ({allowed_domains, blocked_domains, allowed_methods, max_requests_per_min, max_requests_per_minute} | with_entries(select(.value != null))) end')
 else
     LIMITS=$(echo "$PASSPORT" | jq ".limits.\"$POLICY_BASE\" // {}")
 fi
@@ -373,9 +373,12 @@ safe_glob_match_full() {
     [ "$pattern" = "*" ] && return 0
     [ -z "$pattern" ] && return 1
     [ -z "$value" ] && return 1
+    if contains_control_chars "$pattern" || contains_control_chars "$value"; then
+        return 1
+    fi
 
     regex="$(glob_to_regex "$pattern")"
-    printf '%s\n' "$value" | grep -qE "^${regex}$"
+    printf '%s' "$value" | grep -qE "^${regex}$"
 }
 
 repo_allowed_by_patterns() {
@@ -486,12 +489,50 @@ session_state_file_path() {
     printf '%s' "${APORT_SESSION_STATE_FILE:-$data_dir/session-state.json}"
 }
 
+web_rate_state_file_path() {
+    local data_dir
+    data_dir="$(dirname "$DECISION_FILE")"
+    printf '%s' "${APORT_WEB_RATE_STATE_FILE:-$data_dir/web-rate-state.json}"
+}
+
+state_target_is_regular_or_absent() {
+    local state_file="$1"
+    [ ! -e "$state_file" ] || [ -f "$state_file" ]
+}
+
 prune_session_state() {
     local state_json="$1"
     local now="$2"
     printf '%s' "$state_json" | jq -c --argjson now "$now" '
-        {leases: ((.leases // []) | map(select((.expires_at_epoch // 0) > $now)))}
+        {
+          leases: ((.leases // []) | map(select(
+            ((.synthetic // false) == false) or ((.expires_at_epoch // 0) > $now)
+          )))
+        }
     '
+}
+
+validate_session_state_json() {
+    local state_json="$1"
+    printf '%s' "$state_json" | jq -e '
+      (.leases | type) == "array" and
+      all(.leases[]; (
+        (.session_id | type) == "string" and (.session_id | length) > 0 and
+        (.expires_at_epoch | type) == "number" and
+        ((.created_at_epoch // 0) | type) == "number" and
+        ((.synthetic // false) | type) == "boolean" and
+        ((.session_call_id // "") | type) == "string" and
+        ((.parent_session_id // "") | type) == "string"
+      ))
+    ' > /dev/null 2>&1
+}
+
+validate_web_rate_state_json() {
+    local state_json="$1"
+    printf '%s' "$state_json" | jq -e '
+      (.requests | type) == "array" and
+      all(.requests[]; (type == "number"))
+    ' > /dev/null 2>&1
 }
 
 portable_file_mtime_epoch() {
@@ -520,6 +561,13 @@ process_id_is_absent() {
         return 1
     fi
     return 0
+}
+
+is_lock_timestamp() {
+    case "${1:-}" in
+        "" | *[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
 }
 
 acquire_session_state_lock() {
@@ -558,7 +606,8 @@ acquire_session_state_lock() {
                 owner_pid=""
                 owner_time=""
                 read -r owner_pid owner_time < "$lock_dir/owner" 2> /dev/null || true
-                age=$((now - ${owner_time:-0}))
+                is_lock_timestamp "$owner_time" || return 1
+                age=$((now - owner_time))
                 if process_id_is_absent "$owner_pid" || { [ -z "${owner_pid:-}" ] && [ "$age" -ge "$stale_after" ] 2> /dev/null; }; then
                     rm -f "$lock_dir/owner" 2> /dev/null || true
                     if rmdir "$lock_dir" 2> /dev/null; then
@@ -567,7 +616,8 @@ acquire_session_state_lock() {
                 fi
             elif [ -d "$lock_dir" ]; then
                 lock_mtime="$(portable_file_mtime_epoch "$lock_dir" || printf '%s' "$now")"
-                age=$((now - ${lock_mtime:-$now}))
+                is_lock_timestamp "$lock_mtime" || return 1
+                age=$((now - lock_mtime))
                 if [ "$age" -ge "$ownerless_stale_after" ] 2> /dev/null; then
                     if rmdir "$lock_dir" 2> /dev/null; then
                         recovered_lock=1
@@ -586,14 +636,16 @@ acquire_session_state_lock() {
                 recovery_pid=""
                 recovery_time=""
                 read -r recovery_pid recovery_time < "$recovery_lock/owner" 2> /dev/null || true
-                recovery_age=$((now - ${recovery_time:-0}))
+                is_lock_timestamp "$recovery_time" || return 1
+                recovery_age=$((now - recovery_time))
                 if process_id_is_absent "$recovery_pid" || { [ -z "${recovery_pid:-}" ] && [ "$recovery_age" -ge "$stale_after" ] 2> /dev/null; }; then
                     rm -f "$recovery_lock/owner" 2> /dev/null || true
                     rmdir "$recovery_lock" 2> /dev/null || true
                 fi
             else
                 lock_mtime="$(portable_file_mtime_epoch "$recovery_lock" || printf '%s' "$now")"
-                recovery_age=$((now - ${lock_mtime:-$now}))
+                is_lock_timestamp "$lock_mtime" || return 1
+                recovery_age=$((now - lock_mtime))
                 if [ "$recovery_age" -ge "$ownerless_stale_after" ] 2> /dev/null; then
                     rmdir "$recovery_lock" 2> /dev/null || true
                 fi
@@ -602,7 +654,9 @@ acquire_session_state_lock() {
         if [ -f "$lock_dir/owner" ]; then
             read -r owner_pid owner_time < "$lock_dir/owner" 2> /dev/null || true
             if process_id_is_absent "$owner_pid"; then
-                continue
+                # Another process may currently hold the recovery lock. Count
+                # this attempt so a live recovery owner cannot make hooks hang.
+                :
             fi
         fi
         attempt=$((attempt + 1))
@@ -618,6 +672,18 @@ release_session_state_lock() {
     rmdir "$lock_dir" 2> /dev/null || true
 }
 
+read_session_state_for_update() {
+    local state_file="$1"
+    local state_json
+    if [ -f "$state_file" ]; then
+        state_json="$(jq -c 'if (.leases | type) == "array" then {leases:.leases} else error("invalid session state") end' "$state_file" 2> /dev/null)" || return 1
+    else
+        state_json='{"leases":[]}'
+    fi
+    validate_session_state_json "$state_json" || return 1
+    printf '%s' "$state_json"
+}
+
 cleanup_closed_session_lease() {
     local session_id="$1"
     local close_call_id="${2:-}"
@@ -631,7 +697,10 @@ cleanup_closed_session_lease() {
 
     mkdir -p "$state_dir" 2> /dev/null || return 1
     acquire_session_state_lock "$lock_dir" || return 1
-    current_state="$(jq -c '{leases:(.leases // [])}' "$state_file" 2> /dev/null || printf '{"leases":[]}')"
+    if ! current_state="$(read_session_state_for_update "$state_file")"; then
+        release_session_state_lock "$lock_dir"
+        return 1
+    fi
     next_state="$(
         printf '%s' "$current_state" | jq -c --arg id "$session_id" --arg call "$close_call_id" '
           {
@@ -673,7 +742,10 @@ mark_closing_session_lease() {
     mkdir -p "$state_dir" 2> /dev/null || return 1
     acquire_session_state_lock "$lock_dir" || return 1
     now="$(date +%s)"
-    current_state="$(jq -c '{leases:(.leases // [])}' "$state_file" 2> /dev/null || printf '{"leases":[]}')"
+    if ! current_state="$(read_session_state_for_update "$state_file")"; then
+        release_session_state_lock "$lock_dir"
+        return 1
+    fi
     next_state="$(
         printf '%s' "$current_state" | jq -c --arg id "$session_id" --arg call "$close_call_id" --argjson now "$now" '
           {
@@ -714,7 +786,10 @@ cleanup_failed_session_lease() {
 
     mkdir -p "$state_dir" 2> /dev/null || return 1
     acquire_session_state_lock "$lock_dir" || return 1
-    current_state="$(jq -c '{leases:(.leases // [])}' "$state_file" 2> /dev/null || printf '{"leases":[]}')"
+    if ! current_state="$(read_session_state_for_update "$state_file")"; then
+        release_session_state_lock "$lock_dir"
+        return 1
+    fi
     next_state="$(
         printf '%s' "$current_state" | jq -c --arg id "$session_id" --arg call "$session_call_id" '
 		  {
@@ -754,7 +829,10 @@ reconcile_session_lease() {
 
     mkdir -p "$state_dir" 2> /dev/null || return 1
     acquire_session_state_lock "$lock_dir" || return 1
-    current_state="$(jq -c '{leases:(.leases // [])}' "$state_file" 2> /dev/null || printf '{"leases":[]}')"
+    if ! current_state="$(read_session_state_for_update "$state_file")"; then
+        release_session_state_lock "$lock_dir"
+        return 1
+    fi
     next_state="$(
         printf '%s' "$current_state" | jq -c --arg id "$session_id" --arg call "$session_call_id" '
           {
@@ -786,15 +864,68 @@ reconcile_session_lease() {
     release_session_state_lock "$lock_dir"
 }
 
+mark_unresolved_session_lease() {
+    local session_call_id="$1"
+    local state_file state_dir lock_dir current_state next_state tmp
+
+    [ -n "$session_call_id" ] || return 0
+    state_file="$(session_state_file_path)"
+    [ -f "$state_file" ] || return 0
+    state_dir="$(dirname "$state_file")"
+    lock_dir="${state_file}.lock"
+
+    mkdir -p "$state_dir" 2> /dev/null || return 1
+    acquire_session_state_lock "$lock_dir" || return 1
+    if ! current_state="$(read_session_state_for_update "$state_file")"; then
+        release_session_state_lock "$lock_dir"
+        return 1
+    fi
+    next_state="$(
+        printf '%s' "$current_state" | jq -c --arg call "$session_call_id" '
+          {
+            leases: ((.leases // []) | map(
+              if ((.session_call_id // "") == $call or (.session_id // "") == ("call:" + $call)) then
+                (. + {
+                  session_call_id: (if $call == "" then (.session_call_id // null) else $call end),
+                  synthetic: false,
+                  unresolved: true
+                } | del(.closing_call_id, .closing_at_epoch))
+              else
+                .
+              end
+            ))
+          }
+        ' 2> /dev/null || printf '%s' "$current_state"
+    )"
+    tmp="$(mktemp "${state_dir}/session-state.XXXXXX" 2> /dev/null || true)"
+    if [ -z "$tmp" ]; then
+        release_session_state_lock "$lock_dir"
+        return 1
+    fi
+    if ! { printf '%s\n' "$next_state" > "$tmp" 2> /dev/null && mv "$tmp" "$state_file" 2> /dev/null; }; then
+        rm -f "$tmp" 2> /dev/null || true
+        release_session_state_lock "$lock_dir"
+        return 1
+    fi
+    chmod 600 "$state_file" 2> /dev/null || true
+    release_session_state_lock "$lock_dir"
+}
+
 enforce_agent_session_concurrency() {
-    local max_concurrent session_operation session_tracking hook_event active_count session_id parent_session_id state_file state_dir lock_dir synthetic_lease
+    local max_concurrent_raw max_concurrent session_operation session_tracking hook_event active_count session_id parent_session_id state_file state_dir lock_dir synthetic_lease
     local session_call_id now ttl current_state pruned_state lease_count has_existing expires_at next_state tmp
 
-    max_concurrent="$(echo "$LIMITS" | jq -r '(.max_concurrent // .max_concurrent_sessions // empty) | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)"
-    case "$max_concurrent" in
-        "" | *[!0-9]*) return 0 ;;
-    esac
-    [ "$max_concurrent" -gt 0 ] 2> /dev/null || return 0
+    max_concurrent_raw="$(echo "$LIMITS" | jq -c 'if has("max_concurrent") then .max_concurrent elif has("max_concurrent_sessions") then .max_concurrent_sessions else empty end' 2> /dev/null || true)"
+    [ -n "$max_concurrent_raw" ] || return 0
+    if ! jq -en --argjson max "$max_concurrent_raw" '
+        if ($max | type) == "number" then ($max > 0 and ($max | floor) == $max)
+        elif ($max | type) == "string" then ($max | test("^[1-9][0-9]*$"))
+        else false
+        end
+    ' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "max_concurrent must be a positive integer when configured"
+    fi
+    max_concurrent="$(jq -nr --argjson max "$max_concurrent_raw" 'if ($max | type) == "number" then ($max | floor | tostring) else $max end')"
 
     session_operation="$(echo "$CONTEXT_JSON" | jq -r '.session_operation // "create"' 2> /dev/null || echo "create")"
     session_tracking="$(echo "$CONTEXT_JSON" | jq -r '.session_tracking // "host_active_count"' 2> /dev/null || echo "host_active_count")"
@@ -813,6 +944,12 @@ enforce_agent_session_concurrency() {
             [ "$session_tracking" = "persistent" ] || return 0
             reconcile_session_lease "$session_id" "$session_call_id" \
                 || write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state could not reconcile session lease"
+            return 0
+            ;;
+        mark_unresolved)
+            [ "$session_tracking" = "persistent" ] || return 0
+            mark_unresolved_session_lease "$session_call_id" \
+                || write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state could not preserve unresolved session lease"
             return 0
             ;;
         close | stop | delete)
@@ -834,7 +971,11 @@ enforce_agent_session_concurrency() {
 
     active_count="$(echo "$CONTEXT_JSON" | jq -r '.active_session_count // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)"
     case "$active_count" in
-        "" | *[!0-9]*) ;;
+        "" | *[!0-9]*)
+            if [ "$session_tracking" != "persistent" ]; then
+                write_decision false "$POLICY_ID" "oap.missing_required_context" "Active session count is required when max_concurrent is configured"
+            fi
+            ;;
         *)
             if [ "$active_count" -ge "$max_concurrent" ] 2> /dev/null; then
                 write_decision false "$POLICY_ID" "oap.concurrent_limit_exceeded" "Active session count $active_count exceeds max_concurrent $max_concurrent"
@@ -843,9 +984,19 @@ enforce_agent_session_concurrency() {
     esac
 
     [ "$session_tracking" = "persistent" ] || return 0
+    case "$session_operation" in
+        create | resume)
+            if [ -z "$session_call_id" ]; then
+                write_decision false "$POLICY_ID" "oap.missing_required_context" "Persistent session tracking requires a per-call tool identifier when max_concurrent is configured"
+            fi
+            ;;
+    esac
 
     state_file="$(session_state_file_path)"
     state_dir="$(dirname "$state_file")"
+    if ! state_target_is_regular_or_absent "$state_file"; then
+        write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state path is not a regular file"
+    fi
     if ! mkdir -p "$state_dir" 2> /dev/null; then
         write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state cannot be created"
     fi
@@ -854,6 +1005,10 @@ enforce_agent_session_concurrency() {
     lock_dir="${state_file}.lock"
     if ! acquire_session_state_lock "$lock_dir"; then
         write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state is locked"
+    fi
+    if ! state_target_is_regular_or_absent "$state_file"; then
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state path is not a regular file"
     fi
 
     now="$(date +%s)"
@@ -868,12 +1023,16 @@ enforce_agent_session_concurrency() {
     expires_at=$((now + ttl))
 
     if [ -f "$state_file" ]; then
-        if ! current_state="$(jq -c '{leases:(.leases // [])}' "$state_file" 2> /dev/null)"; then
+        if ! current_state="$(jq -c 'if (.leases | type) == "array" then {leases:.leases} else error("invalid session state") end' "$state_file" 2> /dev/null)"; then
             release_session_state_lock "$lock_dir"
             write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state is invalid"
         fi
     else
         current_state='{"leases":[]}'
+    fi
+    if ! validate_session_state_json "$current_state"; then
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state contains malformed leases"
     fi
     if ! pruned_state="$(prune_session_state "$current_state" "$now" 2> /dev/null)"; then
         release_session_state_lock "$lock_dir"
@@ -893,12 +1052,12 @@ enforce_agent_session_concurrency() {
 
     has_existing="$(printf '%s' "$pruned_state" | jq -r --arg id "$session_id" '.leases | any(.session_id == $id)' 2> /dev/null || echo false)"
     if [ "$has_existing" = "true" ]; then
-        next_state="$(printf '%s' "$pruned_state" | jq -c --arg id "$session_id" --arg call "$session_call_id" --argjson expires "$expires_at" '{
+        next_state="$(printf '%s' "$pruned_state" | jq -c --arg id "$session_id" --arg call "$session_call_id" --arg operation "$session_operation" --argjson expires "$expires_at" '{
           leases: (.leases | map(
             if .session_id == $id then
               (. + {
                 expires_at_epoch:$expires,
-                session_call_id: (if $call == "" then (.session_call_id // null) else $call end),
+                session_call_id: (if $operation == "resume" or $call == "" then (.session_call_id // null) else $call end),
                 synthetic:false
               } | del(.closing_call_id, .closing_at_epoch))
             else
@@ -926,10 +1085,90 @@ enforce_agent_session_concurrency() {
     fi
 
     tmp="$(mktemp "${state_dir}/session-state.XXXXXX" 2> /dev/null || true)"
-    if [ -z "$tmp" ] || ! printf '%s\n' "$next_state" > "$tmp" 2> /dev/null || ! mv "$tmp" "$state_file" 2> /dev/null; then
+    if [ -z "$tmp" ] || ! printf '%s\n' "$next_state" > "$tmp" 2> /dev/null || ! state_target_is_regular_or_absent "$state_file" || ! mv "$tmp" "$state_file" 2> /dev/null; then
         [ -n "$tmp" ] && rm -f "$tmp" 2> /dev/null || true
         release_session_state_lock "$lock_dir"
         write_decision false "$POLICY_ID" "oap.session_state_unavailable" "Local session limit state could not be written"
+    fi
+    chmod 600 "$state_file" 2> /dev/null || true
+    release_session_state_lock "$lock_dir"
+}
+
+enforce_web_fetch_rate_limit() {
+    local max_requests_raw max_requests state_file state_dir lock_dir now current_state next_state allowed_count tmp
+
+    max_requests_raw="$(echo "$LIMITS" | jq -c 'if has("max_requests_per_min") then .max_requests_per_min elif has("max_requests_per_minute") then .max_requests_per_minute else empty end' 2> /dev/null || true)"
+    [ -n "$max_requests_raw" ] || return 0
+    if ! jq -en --argjson max "$max_requests_raw" '
+        if ($max | type) == "number" then ($max > 0 and ($max | floor) == $max)
+        elif ($max | type) == "string" then ($max | test("^[1-9][0-9]*$"))
+        else false
+        end
+    ' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "max_requests_per_min must be a positive integer when configured"
+    fi
+    max_requests="$(jq -nr --argjson max "$max_requests_raw" 'if ($max | type) == "number" then ($max | floor | tostring) else $max end')"
+
+    state_file="$(web_rate_state_file_path)"
+    state_dir="$(dirname "$state_file")"
+    if ! state_target_is_regular_or_absent "$state_file"; then
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state path is not a regular file"
+    fi
+    if ! mkdir -p "$state_dir" 2> /dev/null; then
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state cannot be created"
+    fi
+    chmod 700 "$state_dir" 2> /dev/null || true
+
+    lock_dir="${state_file}.lock"
+    if ! acquire_session_state_lock "$lock_dir"; then
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state is locked"
+    fi
+    if ! state_target_is_regular_or_absent "$state_file"; then
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state path is not a regular file"
+    fi
+
+    now="$(date +%s)"
+    if [ -f "$state_file" ]; then
+        if ! current_state="$(jq -c 'if (.requests | type) == "array" then {requests:.requests} else error("invalid web rate state") end' "$state_file" 2> /dev/null)"; then
+            release_session_state_lock "$lock_dir"
+            write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state is invalid"
+        fi
+    else
+        current_state='{"requests":[]}'
+    fi
+    if ! validate_web_rate_state_json "$current_state"; then
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state contains malformed entries"
+    fi
+
+    next_state="$(
+        printf '%s' "$current_state" | jq -c --argjson now "$now" --argjson max "$max_requests" '
+          ((.requests // []) | map(select((type == "number") and (. > ($now - 60))))) as $recent
+          | if ($recent | length) >= $max then
+              {allowed:false, count:($recent | length), requests:$recent}
+            else
+              {allowed:true, count:(($recent | length) + 1), requests:($recent + [$now])}
+            end
+        ' 2> /dev/null
+    )" || next_state=""
+
+    if [ -z "$next_state" ]; then
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state could not be evaluated"
+    fi
+
+    if [ "$(printf '%s' "$next_state" | jq -r '.allowed')" != "true" ]; then
+        allowed_count="$(printf '%s' "$next_state" | jq -r '.count // 0')"
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.rate_limit_exceeded" "Web fetch rate limit exceeded: $allowed_count requests in the last minute, max $max_requests"
+    fi
+
+    tmp="$(mktemp "${state_dir}/web-rate-state.XXXXXX" 2> /dev/null || true)"
+    if [ -z "$tmp" ] || ! printf '%s\n' "$next_state" | jq -c '{requests:.requests}' > "$tmp" 2> /dev/null || ! state_target_is_regular_or_absent "$state_file" || ! mv "$tmp" "$state_file" 2> /dev/null; then
+        [ -n "$tmp" ] && rm -f "$tmp" 2> /dev/null || true
+        release_session_state_lock "$lock_dir"
+        write_decision false "$POLICY_ID" "oap.rate_state_unavailable" "Local web rate-limit state could not be written"
     fi
     chmod 600 "$state_file" 2> /dev/null || true
     release_session_state_lock "$lock_dir"
@@ -1155,6 +1394,17 @@ url_authority_has_percent_escape() {
     [[ "$authority" == *%* ]]
 }
 
+url_authority_has_non_ascii() {
+    local value="${1:-}"
+    local rest authority
+    case "$value" in
+        *://*) rest="${value#*://}" ;;
+        *) rest="$value" ;;
+    esac
+    authority="${rest%%[/?#]*}"
+    LC_ALL=C printf '%s' "$authority" | grep -q '[^ -~]'
+}
+
 url_host() {
     local value="${1:-}"
     local authority
@@ -1166,6 +1416,10 @@ url_host() {
     value="${value#http://}"
     value="${value#https://}"
     authority="${value%%[/?#]*}"
+    if url_authority_has_non_ascii "$authority"; then
+        printf ''
+        return 0
+    fi
     authority="${authority##*@}"
     if [[ "$authority" == *%* ]]; then
         printf ''
@@ -1438,9 +1692,10 @@ canonical_policy_path() {
     local input="${1:-}"
     local path resolved dir suffix base
     [ -n "$input" ] || return 1
+    contains_control_chars "$input" && return 1
     case "$input" in
         "~") path="$HOME" ;;
-        "~/"*) path="$HOME/${input#~/}" ;;
+        "~/"*) path="$HOME/${input#\~/}" ;;
         *) path="$input" ;;
     esac
     case "$path" in
@@ -1478,9 +1733,10 @@ canonical_policy_path() {
 normalize_path_pattern_for_match() {
     local pattern="${1:-}"
     local normalized prefix suffix base_dir base_name canon_base i ch
+    contains_control_chars "$pattern" && return 1
     case "$pattern" in
         "~") normalized="$HOME" ;;
-        "~/"*) normalized="$HOME/${pattern#~/}" ;;
+        "~/"*) normalized="$HOME/${pattern#\~/}" ;;
         /*) normalized="$pattern" ;;
         *) normalized="$PWD/$pattern" ;;
     esac
@@ -1519,6 +1775,10 @@ normalize_path_pattern_for_match() {
 path_within_or_equal() {
     local target="$1"
     local base="$2"
+    if [ "$base" = "/" ]; then
+        [[ "$target" = /* ]]
+        return $?
+    fi
     [ "$target" = "$base" ] || [[ "$target" == "$base/"* ]]
 }
 
@@ -1528,6 +1788,9 @@ policy_path_matches() {
     local normalized_pattern base_canon
 
     [ "$pattern" = "*" ] && return 0
+    if contains_control_chars "$target_canon" || contains_control_chars "$pattern"; then
+        return 1
+    fi
     if path_has_glob_chars "$pattern"; then
         normalized_pattern="$(normalize_path_pattern_for_match "$pattern")"
         safe_glob_match_full "$normalized_pattern" "$target_canon"
@@ -1772,7 +2035,16 @@ if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
             write_decision false "$POLICY_ID" "oap.command_injection_detected" "Command contains potentially dangerous characters"
         fi
 
-        # Check allowed commands using safe prefix matching
+        # Check allowed commands using safe prefix matching. A restrictive
+        # allowlist can only authorize a single executable segment locally; for
+        # chained commands, hosted verification or an explicit wildcard is
+        # required so later segments cannot bypass the prefix check.
+        ALLOWED_COMMANDS_JSON=$(echo "$LIMITS" | jq -c '.allowed_commands // []' 2> /dev/null || echo "[]")
+        HAS_ALLOWED=$(pattern_count "$ALLOWED_COMMANDS_JSON")
+        if [ "${HAS_ALLOWED:-0}" -gt 0 ] 2> /dev/null && has_restrictive_limit_array "$ALLOWED_COMMANDS_JSON" && shell_command_has_unquoted_control_operator "$COMMAND"; then
+            write_decision false "$POLICY_ID" "oap.command_chain_unsupported" "Command contains shell control operators that cannot be safely authorized against a local command allowlist"
+        fi
+
         COMMAND_ALLOWED=false
         while IFS= read -r allowed_cmd; do
             [ -z "$allowed_cmd" ] && continue
@@ -1781,8 +2053,7 @@ if [[ "$POLICY_ID" == "system.command.execute"* ]]; then
                 COMMAND_ALLOWED=true
                 break
             fi
-        done < <(echo "$LIMITS" | jq -r '.allowed_commands[]? // empty')
-        HAS_ALLOWED=$(echo "$LIMITS" | jq -r '.allowed_commands | length')
+        done < <(echo "$ALLOWED_COMMANDS_JSON" | jq -r '.[]? // empty')
         if [ "$COMMAND_ALLOWED" = false ] && [ "${HAS_ALLOWED:-0}" -gt 0 ] 2> /dev/null; then
             write_decision false "$POLICY_ID" "oap.command_not_allowed" "Command '$COMMAND' is not in allowed list"
         fi
@@ -1849,11 +2120,23 @@ if [[ "$POLICY_ID" == "web.fetch.v1" ]]; then
     if [ "$DOMAIN_MISMATCH" = "true" ]; then
         write_decision false "$POLICY_ID" "oap.domain_mismatch" "Provided domain does not match URL host"
     fi
+    if [ -n "$URL" ]; then
+        case "$URL" in
+            http://* | https://*) ;;
+            *) write_decision false "$POLICY_ID" "oap.invalid_url" "URL must be an absolute http(s) URL" ;;
+        esac
+    fi
     if [ -n "$URL" ] && url_has_parser_hazards "$URL"; then
         write_decision false "$POLICY_ID" "oap.invalid_url" "URL contains ambiguous parser characters"
     fi
     if [ -n "$URL" ] && url_authority_has_percent_escape "$URL"; then
         write_decision false "$POLICY_ID" "oap.invalid_url" "URL authority contains percent escapes"
+    fi
+    if [ -n "$URL" ] && url_authority_has_non_ascii "$URL"; then
+        write_decision false "$POLICY_ID" "oap.invalid_url" "URL authority contains non-ASCII characters that require runtime-specific hostname normalization"
+    fi
+    if [ -n "$DOMAIN_INPUT" ] && url_authority_has_non_ascii "$DOMAIN_INPUT"; then
+        write_decision false "$POLICY_ID" "oap.invalid_url" "Domain contains non-ASCII characters that require runtime-specific hostname normalization"
     fi
     if [ -n "$URL" ]; then
         DOMAIN="$(url_host "$URL")"
@@ -1876,30 +2159,54 @@ if [[ "$POLICY_ID" == "web.fetch.v1" ]]; then
         write_decision false "$POLICY_ID" "oap.private_network_destination" "Private network destination '$DOMAIN' is blocked"
     fi
 
-    BLOCKED_DOMAINS_JSON=$(echo "$LIMITS" | jq -c '.blocked_domains // []' 2> /dev/null || echo "[]")
+    for limit_key in allowed_domains blocked_domains allowed_methods; do
+        if echo "$LIMITS" | jq -e --arg key "$limit_key" 'has($key) and ((.[$key] | type) != "array" or any(.[$key][]; type != "string"))' > /dev/null 2>&1; then
+            write_decision false "$POLICY_ID" "oap.invalid_limit" "$limit_key must be an array of strings when configured"
+        fi
+    done
+    BLOCKED_DOMAINS_JSON=$(echo "$LIMITS" | jq -c 'if (.blocked_domains | type) == "array" then .blocked_domains else [] end' 2> /dev/null || echo "[]")
     if domain_blocked_by_list "$DOMAIN" "$BLOCKED_DOMAINS_JSON"; then
         write_decision false "$POLICY_ID" "oap.domain_blocked" "Domain '$DOMAIN' is blocked"
     fi
 
-    ALLOWED_DOMAINS_JSON=$(echo "$LIMITS" | jq -c '.allowed_domains // []' 2> /dev/null || echo "[]")
+    ALLOWED_DOMAINS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_domains | type) == "array" then .allowed_domains else [] end' 2> /dev/null || echo "[]")
     if ! domain_allowed_by_list "$DOMAIN" "$ALLOWED_DOMAINS_JSON"; then
         write_decision false "$POLICY_ID" "oap.domain_not_allowed" "Domain '$DOMAIN' is not in allowed list"
     fi
 
-    ALLOWED_METHODS_JSON=$(echo "$LIMITS" | jq -c '.allowed_methods // []' 2> /dev/null || echo "[]")
+    ALLOWED_METHODS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_methods | type) == "array" then .allowed_methods else [] end' 2> /dev/null || echo "[]")
     if has_restrictive_limit_array "$ALLOWED_METHODS_JSON" && ! is_allowed_by_patterns "$METHOD" "$ALLOWED_METHODS_JSON"; then
         write_decision false "$POLICY_ID" "oap.method_not_allowed" "HTTP method '$METHOD' is not in allowed list"
     fi
+
+    enforce_web_fetch_rate_limit
 fi
 
 if [[ "$POLICY_ID" == "mcp.tool.execute.v1" ]]; then
     MCP_SERVER=$(echo "$CONTEXT_JSON" | jq -r '.server // .mcp_server // ""' 2> /dev/null || true)
     MCP_TOOL=$(echo "$CONTEXT_JSON" | jq -r '.tool // .mcp_tool // ""' 2> /dev/null || true)
     MCP_TIMEOUT=$(echo "$CONTEXT_JSON" | jq -r '.timeout // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
-    ALLOWED_SERVERS_JSON=$(echo "$LIMITS" | jq -c '.allowed_servers // []' 2> /dev/null || echo "[]")
-    ALLOWED_TOOLS_JSON=$(echo "$LIMITS" | jq -c '.allowed_tools // []' 2> /dev/null || echo "[]")
-    ALLOWED_TOOL_PREFIXES_JSON=$(echo "$LIMITS" | jq -c '.allowed_tool_prefixes // []' 2> /dev/null || echo "[]")
-    MAX_TIMEOUT=$(echo "$LIMITS" | jq -r '.max_timeout // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
+    for limit_key in allowed_servers allowed_tools allowed_tool_prefixes; do
+        if echo "$LIMITS" | jq -e --arg key "$limit_key" 'has($key) and ((.[$key] | type) != "array" or any(.[$key][]; type != "string"))' > /dev/null 2>&1; then
+            write_decision false "$POLICY_ID" "oap.invalid_limit" "$limit_key must be an array of strings when configured"
+        fi
+    done
+    ALLOWED_SERVERS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_servers | type) == "array" then .allowed_servers else [] end' 2> /dev/null || echo "[]")
+    ALLOWED_TOOLS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_tools | type) == "array" then .allowed_tools else [] end' 2> /dev/null || echo "[]")
+    ALLOWED_TOOL_PREFIXES_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_tool_prefixes | type) == "array" then .allowed_tool_prefixes else [] end' 2> /dev/null || echo "[]")
+    MAX_TIMEOUT_RAW=$(echo "$LIMITS" | jq -c 'if has("max_timeout") then .max_timeout else empty end' 2> /dev/null || true)
+    MAX_TIMEOUT=""
+    if [ -n "$MAX_TIMEOUT_RAW" ]; then
+        if ! jq -en --argjson max "$MAX_TIMEOUT_RAW" '
+            if ($max | type) == "number" then $max > 0
+            elif ($max | type) == "string" then ($max | test("^[0-9]+(\\.[0-9]+)?$") and ($max | tonumber) > 0)
+            else false
+            end
+        ' > /dev/null 2>&1; then
+            write_decision false "$POLICY_ID" "oap.invalid_limit" "max_timeout must be a positive number when configured"
+        fi
+        MAX_TIMEOUT="$(jq -nr --argjson max "$MAX_TIMEOUT_RAW" 'if ($max | type) == "number" then ($max | tostring) else $max end')"
+    fi
 
     if [ -z "$MCP_SERVER" ] && has_restrictive_limit_array "$ALLOWED_SERVERS_JSON"; then
         write_decision false "$POLICY_ID" "oap.missing_required_context" "MCP server is required when allowed_servers is restricted"
@@ -1913,7 +2220,10 @@ if [[ "$POLICY_ID" == "mcp.tool.execute.v1" ]]; then
     if [ -n "$MCP_TOOL" ] && ! mcp_tool_allowed "$MCP_TOOL" "$LIMITS"; then
         write_decision false "$POLICY_ID" "oap.mcp_tool_not_allowed" "MCP tool '$MCP_TOOL' is not in allowed list"
     fi
-    if [ -n "$MCP_TIMEOUT" ] && [ -n "$MAX_TIMEOUT" ]; then
+    if [ -n "$MAX_TIMEOUT" ]; then
+        if [ -z "$MCP_TIMEOUT" ]; then
+            write_decision false "$POLICY_ID" "oap.missing_required_context" "MCP timeout is required when max_timeout is configured"
+        fi
         if ! jq -en --arg timeout "$MCP_TIMEOUT" --arg max "$MAX_TIMEOUT" '($timeout | tonumber) <= ($max | tonumber)' > /dev/null 2>&1; then
             write_decision false "$POLICY_ID" "oap.timeout_exceeded" "MCP timeout exceeds max_timeout"
         fi
@@ -1927,8 +2237,16 @@ fi
 # File read policy evaluation
 if [[ "$POLICY_ID" == "data.file.read.v1" ]]; then
     FILE_PATH=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""')
+    if [ -z "$FILE_PATH" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_file_path" "File read context must include file_path"
+    fi
     if [ -n "$FILE_PATH" ]; then
-        FILE_PATH_CANON="$(canonical_policy_path "$FILE_PATH" 2> /dev/null || printf '%s' "$FILE_PATH")"
+        if [ -d "$FILE_PATH" ] || [[ "$FILE_PATH" == */ ]]; then
+            write_decision false "$POLICY_ID" "oap.metadata_enumeration_unsupported" "Directory reads cannot be safely authorized by the local file-read policy"
+        fi
+        if ! FILE_PATH_CANON="$(canonical_policy_path "$FILE_PATH" 2> /dev/null)"; then
+            write_decision false "$POLICY_ID" "oap.invalid_file_path" "File read path could not be safely canonicalized"
+        fi
         if is_default_sensitive_read_path "$FILE_PATH" || is_default_sensitive_read_path "$FILE_PATH_CANON"; then
             write_decision false "$POLICY_ID" "oap.blocked_pattern" "File path matches default sensitive read pattern"
         fi
@@ -1962,8 +2280,106 @@ fi
 # File write policy evaluation
 if [[ "$POLICY_ID" == "data.file.write.v1" ]]; then
     FILE_PATH=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""')
+    if [ -z "$FILE_PATH" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_file_path" "File write context must include file_path"
+    fi
     if [ -n "$FILE_PATH" ]; then
-        FILE_PATH_CANON="$(canonical_policy_path "$FILE_PATH" 2> /dev/null || printf '%s' "$FILE_PATH")"
+        if ! FILE_PATH_CANON="$(canonical_policy_path "$FILE_PATH" 2> /dev/null)"; then
+            write_decision false "$POLICY_ID" "oap.invalid_file_path" "File write path could not be safely canonicalized"
+        fi
+        CONTENT_LENGTH=$(echo "$CONTEXT_JSON" | jq -r '(.content_length // .content_size // empty) | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
+        OLD_CONTENT_LENGTH=$(echo "$CONTEXT_JSON" | jq -r '.old_content_length // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
+        RESULTING_CONTENT_LENGTH=$(echo "$CONTEXT_JSON" | jq -r '.resulting_content_length // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
+        PATCH_CONTEXT=$(echo "$CONTEXT_JSON" | jq -r 'if .patch == true then "true" else "false" end' 2> /dev/null || echo "false")
+        NOTEBOOK_CONTEXT=$(echo "$CONTEXT_JSON" | jq -r 'if .notebook == true then "true" else "false" end' 2> /dev/null || echo "false")
+        NOTEBOOK_SOURCE_LINE_COUNT=$(echo "$CONTEXT_JSON" | jq -r '.notebook_source_line_count // 0 | if type == "number" then tostring elif type == "string" then . else "0" end' 2> /dev/null || echo "0")
+        REPLACE_ALL=$(echo "$CONTEXT_JSON" | jq -r 'if .replace_all == true then "true" else "false" end' 2> /dev/null || echo "false")
+        WRITE_OPERATION=$(echo "$CONTEXT_JSON" | jq -r '.write_operation // "" | tostring | ascii_downcase' 2> /dev/null || true)
+        MAX_FILE_SIZE_BYTES_RAW="$(echo "$LIMITS" | jq -c 'if has("max_file_size_bytes") then .max_file_size_bytes elif has("max_size_bytes") then .max_size_bytes else empty end' 2> /dev/null || true)"
+        MAX_FILE_SIZE_MB_RAW="$(echo "$LIMITS" | jq -c 'if has("max_file_size_mb") then .max_file_size_mb elif has("max_size_mb") then .max_size_mb else empty end' 2> /dev/null || true)"
+        MAX_FILE_SIZE_BYTES=""
+        if [ -n "$MAX_FILE_SIZE_BYTES_RAW" ]; then
+            if ! jq -en --argjson max "$MAX_FILE_SIZE_BYTES_RAW" '
+                if ($max | type) == "number" then ($max > 0 and ($max | floor) == $max)
+                elif ($max | type) == "string" then ($max | test("^[1-9][0-9]*$"))
+                else false
+                end
+            ' > /dev/null 2>&1; then
+                write_decision false "$POLICY_ID" "oap.invalid_limit" "max_file_size_bytes must be a positive integer when configured"
+            fi
+            MAX_FILE_SIZE_BYTES="$(jq -nr --argjson max "$MAX_FILE_SIZE_BYTES_RAW" 'if ($max | type) == "number" then ($max | floor | tostring) else $max end')"
+        elif [ -n "$MAX_FILE_SIZE_MB_RAW" ]; then
+            if ! jq -en --argjson max "$MAX_FILE_SIZE_MB_RAW" '
+                if ($max | type) == "number" then $max > 0
+                elif ($max | type) == "string" then ($max | test("^[0-9]+(\\.[0-9]+)?$") and ($max | tonumber) > 0)
+                else false
+                end
+            ' > /dev/null 2>&1; then
+                write_decision false "$POLICY_ID" "oap.invalid_limit" "max_file_size_mb must be a positive number when configured"
+            fi
+            MAX_FILE_SIZE_BYTES="$(jq -nr --argjson max "$MAX_FILE_SIZE_MB_RAW" '($max | tonumber) * 1048576 | floor')"
+        fi
+        if [ -n "$MAX_FILE_SIZE_BYTES" ]; then
+            case "$CONTENT_LENGTH" in "" | *[!0-9]*) CONTENT_LENGTH="" ;; esac
+            case "$OLD_CONTENT_LENGTH" in "" | *[!0-9]*) OLD_CONTENT_LENGTH="" ;; esac
+            case "$RESULTING_CONTENT_LENGTH" in "" | *[!0-9]*) RESULTING_CONTENT_LENGTH="" ;; esac
+            case "$NOTEBOOK_SOURCE_LINE_COUNT" in "" | *[!0-9]*) NOTEBOOK_SOURCE_LINE_COUNT=0 ;; esac
+            if [ "$REPLACE_ALL" = "true" ] && [ -z "$RESULTING_CONTENT_LENGTH" ]; then
+                write_decision false "$POLICY_ID" "oap.missing_required_context" "replace_all file edits require resulting_content_length when max_file_size is configured"
+            fi
+            if [ "$PATCH_CONTEXT" = "true" ] && [ -z "$RESULTING_CONTENT_LENGTH" ]; then
+                write_decision false "$POLICY_ID" "oap.missing_required_context" "Patch updates require resulting_content_length when max_file_size is configured"
+            fi
+            if { [ "$WRITE_OPERATION" = "undo_edit" ] || [ "$WRITE_OPERATION" = "undoedit" ]; } && [ -z "$RESULTING_CONTENT_LENGTH" ]; then
+                write_decision false "$POLICY_ID" "oap.missing_required_context" "Undo edits require resulting_content_length when max_file_size is configured"
+            fi
+            if [ "$NOTEBOOK_CONTEXT" = "true" ] && [ -z "$RESULTING_CONTENT_LENGTH" ]; then
+                if { [ "$WRITE_OPERATION" = "delete" ] || [ "$WRITE_OPERATION" = "deletecell" ]; }; then
+                    CURRENT_FILE_SIZE="$(wc -c < "$FILE_PATH" 2> /dev/null | tr -d '[:space:]' || true)"
+                    case "$CURRENT_FILE_SIZE" in "" | *[!0-9]*) CURRENT_FILE_SIZE="" ;; esac
+                    if [ -n "$CURRENT_FILE_SIZE" ]; then
+                        RESULTING_CONTENT_LENGTH="$CURRENT_FILE_SIZE"
+                    else
+                        write_decision false "$POLICY_ID" "oap.missing_required_context" "Notebook delete edits require resulting_content_length or a readable notebook when max_file_size is configured"
+                    fi
+                else
+                    CURRENT_FILE_SIZE="$(wc -c < "$FILE_PATH" 2> /dev/null | tr -d '[:space:]' || true)"
+                    case "$CURRENT_FILE_SIZE" in "" | *[!0-9]*) CURRENT_FILE_SIZE="" ;; esac
+                    if [ -n "$CURRENT_FILE_SIZE" ] && [ -n "$CONTENT_LENGTH" ]; then
+                        RESULTING_CONTENT_LENGTH=$((CURRENT_FILE_SIZE + CONTENT_LENGTH + 2048 + NOTEBOOK_SOURCE_LINE_COUNT * 8))
+                    else
+                        write_decision false "$POLICY_ID" "oap.missing_required_context" "Notebook edits require resulting_content_length or a readable notebook when max_file_size is configured"
+                    fi
+                fi
+            fi
+            if [ -z "$RESULTING_CONTENT_LENGTH" ] && [ "$WRITE_OPERATION" = "insert" ] && [ -n "$CONTENT_LENGTH" ]; then
+                CURRENT_FILE_SIZE="$(wc -c < "$FILE_PATH" 2> /dev/null | tr -d '[:space:]' || true)"
+                case "$CURRENT_FILE_SIZE" in "" | *[!0-9]*) CURRENT_FILE_SIZE="" ;; esac
+                if [ -n "$CURRENT_FILE_SIZE" ]; then
+                    RESULTING_CONTENT_LENGTH=$((CURRENT_FILE_SIZE + CONTENT_LENGTH))
+                else
+                    write_decision false "$POLICY_ID" "oap.missing_required_context" "File insert context must include resulting_content_length when max_file_size is configured"
+                fi
+            fi
+            if [ -z "$RESULTING_CONTENT_LENGTH" ] && [ -n "$OLD_CONTENT_LENGTH" ]; then
+                CURRENT_FILE_SIZE="$(wc -c < "$FILE_PATH" 2> /dev/null | tr -d '[:space:]' || true)"
+                case "$CURRENT_FILE_SIZE" in "" | *[!0-9]*) CURRENT_FILE_SIZE="" ;; esac
+                if [ -n "$CURRENT_FILE_SIZE" ]; then
+                    RESULTING_CONTENT_LENGTH=$((CURRENT_FILE_SIZE - OLD_CONTENT_LENGTH + CONTENT_LENGTH))
+                    [ "$RESULTING_CONTENT_LENGTH" -ge 0 ] 2> /dev/null || RESULTING_CONTENT_LENGTH="$CONTENT_LENGTH"
+                else
+                    write_decision false "$POLICY_ID" "oap.missing_required_context" "File edit context must include resulting_content_length when max_file_size is configured"
+                fi
+            fi
+            EFFECTIVE_CONTENT_LENGTH="${RESULTING_CONTENT_LENGTH:-$CONTENT_LENGTH}"
+            if [ -z "$EFFECTIVE_CONTENT_LENGTH" ]; then
+                write_decision false "$POLICY_ID" "oap.missing_required_context" "File write context must include content_length when max_file_size is configured"
+            fi
+            if ! jq -en --arg size "$EFFECTIVE_CONTENT_LENGTH" --arg max "$MAX_FILE_SIZE_BYTES" '($size | tonumber) <= ($max | tonumber)' > /dev/null 2>&1; then
+                write_decision false "$POLICY_ID" "oap.file_too_large" "File write content exceeds max_file_size"
+            fi
+        fi
+
         # Check allowed paths
         PATH_ALLOWED=false
         while IFS= read -r allowed_path; do

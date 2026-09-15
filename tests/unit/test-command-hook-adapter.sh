@@ -68,6 +68,31 @@ CODEX="$REPO_ROOT/bin/aport-codex-hook.sh"
 GEMINI="$REPO_ROOT/bin/aport-gemini-cli-hook.sh"
 GOOSE="$REPO_ROOT/bin/aport-goose-hook.sh"
 
+INCOMPLETE_RUNTIME="$TEST_DIR/incomplete-runtime"
+mkdir -p "$INCOMPLETE_RUNTIME/bin/lib"
+cp "$REPO_ROOT/bin/aport-gemini-cli-hook.sh" "$INCOMPLETE_RUNTIME/bin/aport-gemini-cli-hook.sh"
+cp "$REPO_ROOT/bin/lib/command-hook-adapter.sh" "$INCOMPLETE_RUNTIME/bin/lib/command-hook-adapter.sh"
+INCOMPLETE_OUT="$TEST_DIR/incomplete-runtime-out.json"
+INCOMPLETE_ERR="$TEST_DIR/incomplete-runtime-err.txt"
+set +e
+printf '%s' '{"hook_event_name":"BeforeTool","tool_name":"run_shell_command","tool_input":{"command":"rm -rf /tmp/test"}}' \
+    | bash "$INCOMPLETE_RUNTIME/bin/aport-gemini-cli-hook.sh" > "$INCOMPLETE_OUT" 2> "$INCOMPLETE_ERR"
+INCOMPLETE_EXIT=$?
+set -e
+if [[ "$INCOMPLETE_EXIT" -ne 0 ]]; then
+    echo "FAIL: incomplete command-hook runtime must return structured deny, got exit $INCOMPLETE_EXIT" >&2
+    cat "$INCOMPLETE_OUT" >&2 || true
+    cat "$INCOMPLETE_ERR" >&2 || true
+    exit 1
+fi
+jq -e '.decision == "deny" and (.reason | contains("oap.missing_dependency"))' "$INCOMPLETE_OUT" > /dev/null || {
+    echo "FAIL: incomplete command-hook runtime should emit missing-dependency deny JSON" >&2
+    cat "$INCOMPLETE_OUT" >&2
+    cat "$INCOMPLETE_ERR" >&2
+    exit 1
+}
+echo "  ✅ Incomplete command-hook runtime fails closed with structured deny"
+
 run_hook "Codex Bash allow returns empty success JSON" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
@@ -77,6 +102,54 @@ run_hook "Codex exec_command maps to shell policy" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la"}}' \
     '. == {}'
+
+run_hook "Codex exec_command rejects untrusted shell override" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la","shell":"/tmp/untrusted-shell"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.shell_not_allowed"))'
+
+ALT_BASH_DIR="$TEST_DIR/alternate-bash"
+mkdir -p "$ALT_BASH_DIR"
+cat > "$ALT_BASH_DIR/bash" << 'EOF'
+#!/bin/sh
+exec /bin/bash "$@"
+EOF
+chmod +x "$ALT_BASH_DIR/bash"
+CODEX_SYSTEM_SHELL_OUT="$TEST_DIR/out-codex-system-shell.json"
+CODEX_SYSTEM_SHELL_ERR="$TEST_DIR/err-codex-system-shell.txt"
+set +e
+printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la","shell":"/bin/bash"}}' \
+    | PATH="$ALT_BASH_DIR:$PATH" "$CODEX" > "$CODEX_SYSTEM_SHELL_OUT" 2> "$CODEX_SYSTEM_SHELL_ERR"
+CODEX_SYSTEM_SHELL_EXIT=$?
+set -e
+if [[ "$CODEX_SYSTEM_SHELL_EXIT" -ne 0 ]]; then
+    echo "FAIL: Codex exec_command with explicit /bin/bash exited $CODEX_SYSTEM_SHELL_EXIT" >&2
+    cat "$CODEX_SYSTEM_SHELL_OUT" >&2 || true
+    cat "$CODEX_SYSTEM_SHELL_ERR" >&2 || true
+    exit 1
+fi
+jq -e '. == {}' "$CODEX_SYSTEM_SHELL_OUT" > /dev/null || {
+    echo "FAIL: Codex exec_command should allow explicit /bin/bash even when PATH has another bash first" >&2
+    cat "$CODEX_SYSTEM_SHELL_OUT" >&2
+    cat "$CODEX_SYSTEM_SHELL_ERR" >&2
+    exit 1
+}
+echo "  ✅ Codex exec_command trusts explicit system shell independent of PATH ordering"
+
+run_hook "Codex exec_command rejects unsupported fish shell override" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git (touch /tmp/aport-review-marker)","shell":"fish"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.shell_not_allowed"))'
+
+run_hook "Codex exec_command rejects conflicting command aliases" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"rm -rf /tmp/unauthorized-target","command":"ls"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex exec_command rejects conflicting command containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"command":"rm -rf /tmp/not-executed"},"input":{"command":"ls"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
 
 run_hook "Codex Bash deny uses PreToolUse permissionDecision" \
     codex "$CODEX" \
@@ -103,6 +176,43 @@ run_hook "Goose shell allowlist rejects prefixed executable names" \
     '{"hook_event_name":"PreToolUse","tool_name":"developer__shell","tool_input":{"command":"git-malware status"}}' \
     '.decision == "block" and (.reason | contains("oap.command_not_allowed"))'
 
+run_hook "Codex shell allowlist rejects chained commands" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status; unauthorized-command"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.command_chain_unsupported"))'
+
+reentrant_background_payload="$(jq -nc --arg cmd "$REPO_ROOT/bin/aport-guardrail-bash.sh & touch /tmp/aport-unauthorized" \
+    '{hook_event_name:"PreToolUse",tool_name:"exec_command",tool_input:{cmd:$cmd}}')"
+run_hook "Codex reentrant guardrail command rejects background chains" \
+    codex "$CODEX" \
+    "$reentrant_background_payload" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.command_chain_unsupported"))'
+
+run_hook "Gemini shell allowlist rejects newline command chains" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"run_shell_command","tool_input":{"command":"git status\nunauthorized-command"}}' \
+    '.decision == "deny" and (.reason | contains("oap.command_chain_unsupported"))'
+
+run_hook "Codex shell allowlist rejects quoted command substitution" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git \"$(unauthorized-command)\""}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.command_chain_unsupported"))'
+
+run_hook "Codex shell allowlist rejects ANSI-C quote chains" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git $'\''\\'\'''\''; unauthorized-command # '\''"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.command_chain_unsupported"))'
+
+run_hook "Codex shell allowlist rejects comment-hidden newline chains" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git # '\''\nwhoami\n# '\''"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.command_chain_unsupported"))'
+
+run_hook "Codex shell allowlist rejects unquoted parentheses" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git (touch /tmp/aport-review-marker)"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.command_chain_unsupported"))'
+
 run_hook "Codex PermissionRequest deny uses decision.behavior" \
     codex "$CODEX" \
     '{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"sudo reboot"}}' \
@@ -117,6 +227,11 @@ run_hook "Codex warn mode allows with additionalContext" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
     '.systemMessage and .hookSpecificOutput.additionalContext'
 
+run_hook "Codex warn mode keeps shell parser ambiguity blocking" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status; unauthorized-command"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.command_chain_unsupported"))'
+
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
@@ -130,6 +245,34 @@ run_hook "Gemini valid shell allow returns allow JSON" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"run_shell_command","tool_input":{"command":"ls -la"}}' \
     '.decision == "allow"'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_gemini_replace_size_limit",
+  "agent_id": "ap_gemini_replace_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_bytes": 15
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+GEMINI_REPLACE_FILE="$TEST_DIR/gemini-replace-size.txt"
+printf 'aa' > "$GEMINI_REPLACE_FILE"
+run_hook "Gemini replace expected_replacements contributes to resulting size" \
+    gemini "$GEMINI" \
+    "{\"hook_event_name\":\"BeforeTool\",\"tool_name\":\"replace\",\"tool_input\":{\"file_path\":\"$GEMINI_REPLACE_FILE\",\"old_string\":\"a\",\"new_string\":\"bbbbbbbbbb\",\"expected_replacements\":2}}" \
+    '.decision == "deny" and (.reason | contains("oap.file_too_large"))'
+
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
 run_hook "Gemini list_directory fails closed as metadata enumeration" \
     gemini "$GEMINI" \
@@ -146,20 +289,72 @@ run_hook "Gemini read_many_files denies multi-target reads" \
     '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"include":["README.md","docs/guide.md"]}}' \
     '.decision == "deny" and (.reason | contains("oap.multi_path_read_unsupported"))'
 
+run_hook "Gemini read_many_files rejects conflicting path aliases" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"paths":["/tmp/.ssh/id_rsa"],"file_path":"/tmp/readme.txt"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Gemini read_many_files rejects conflicting path containers" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"paths":["/tmp/.ssh/id_rsa"]},"input":{"file_path":"/tmp/readme.txt"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Gemini read_many_files rejects conflicting include aliases" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"path":"/tmp/allowed.txt","include":["/tmp/.env"]}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Gemini read_many_files rejects dir_path plus include targets" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"dir_path":"/tmp","include":["/etc/passwd","/tmp/.env"]}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
+
 run_hook "Gemini read_many_files denies glob-expanded single target" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"include":["/home/user/**"]}}' \
     '.decision == "deny" and (.reason | contains("oap.glob_read_unsupported"))'
+
+run_hook "Gemini read_many_files denies brace-expanded single target" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"include":["/tmp/{README.md,.env}"]}}' \
+    '.decision == "deny" and (.reason | contains("oap.glob_read_unsupported"))'
+
+run_hook "Gemini read_many_files allows include-only single target" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"include":["/tmp/test.txt"]}}' \
+    '.decision == "allow"'
 
 run_hook "Gemini grep_search denies recursive directory search" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"grep_search","tool_input":{"pattern":"SECRET","dir_path":"/tmp/project"}}' \
     '.decision == "deny" and (.reason | contains("oap.recursive_search_unsupported"))'
 
+run_hook "Gemini glob enumeration fails closed" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"glob","tool_input":{"path":"/tmp/not-yet-expanded","pattern":"**/.env*"}}' \
+    '.decision == "deny" and (.reason | contains("oap.metadata_enumeration_unsupported"))'
+
+run_hook "Codex glob with serialized tool_input fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"glob","tool_input":"{\"pattern\":\"**/*\",\"path\":\"/tmp/restricted\"}"}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.metadata_enumeration_unsupported"))'
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Gemini MCP shorthand routes to MCP policy" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"mcp_stripe_create_refund","tool_input":{"amount":1000}}' \
     '.decision == "allow"'
+jq -e '.guardrail_tool == "mcp.tool" and (.context | has("timeout") | not) and (.context.parameters | type == "object")' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: MCP calls without timeout must omit the optional timeout field" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Gemini MCP no-timeout context remains schema-compatible"
+
+run_hook "Gemini malformed serialized MCP args fail closed" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"mcp__github__issues_list","tool_input":"{broken"}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_tool_arguments"))'
 
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Gemini mcp_context routes to MCP policy before built-in names" \
@@ -416,8 +611,7 @@ write_restricted_local_hooks_passport() {
   "limits": {
     "mcp.tool.execute": {
       "allowed_servers": ["github"],
-      "allowed_tools": ["issues.*"],
-      "max_timeout": 30
+      "allowed_tools": ["issues.*"]
     },
     "web.fetch": {
       "allowed_domains": ["*"],
@@ -439,6 +633,29 @@ EOF
 
 write_restricted_local_hooks_passport
 
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_flat_mcp_limit_absent_keys",
+  "agent_id": "ap_flat_mcp_limit_absent_keys",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "allowed_servers": ["*"]
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Gemini MCP flat limits preserve absent optional keys" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"mcp__github__issues_list","tool_input":{"id":"x"}}' \
+    '.decision == "allow"'
+
+write_restricted_local_hooks_passport
+
 run_hook "Gemini MCP denies disallowed local server" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"evil__steal","mcp_context":{"server_name":"evil","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
@@ -449,10 +666,106 @@ run_hook "Gemini MCP denies disallowed local tool" \
     '{"hook_event_name":"BeforeTool","tool_name":"github__chat_postMessage","mcp_context":{"server_name":"github","tool_name":"chat.postMessage"},"tool_input":{"channel":"secrets"}}' \
     '.decision == "deny" and (.reason | contains("oap.mcp_tool_not_allowed"))'
 
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_mcp_timeout_limit",
+  "agent_id": "ap_mcp_timeout_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "mcp.tool.execute": {
+      "allowed_servers": ["github"],
+      "allowed_tools": ["issues.*"],
+      "max_timeout": 30
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Gemini MCP denies missing timeout when max is configured" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"github__issues.list","mcp_context":{"server_name":"github","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
+    '.decision == "deny" and (.reason | contains("oap.missing_required_context"))'
+
+run_hook "Gemini MCP denies malformed timeout when max is configured" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"github__issues.list","mcp_context":{"server_name":"github","tool_name":"issues.list"},"tool_input":{"timeout":"later","id":"x"}}' \
+    '.decision == "deny" and (.reason | contains("oap.missing_required_context"))'
+
 run_hook "Gemini MCP denies timeout above local max" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"github__issues.list","mcp_context":{"server_name":"github","tool_name":"issues.list"},"tool_input":{"timeout":60,"id":"x"}}' \
     '.decision == "deny" and (.reason | contains("oap.timeout_exceeded"))'
+
+run_hook "Gemini MCP allows timeout within local max" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"github__issues.list","mcp_context":{"server_name":"github","tool_name":"issues.list"},"tool_input":{"timeout":30,"id":"x"}}' \
+    '.decision == "allow"'
+
+run_hook "Codex MCP converts timeout_ms before max timeout enforcement" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"call_mcp_tool","tool_input":{"server":"github","tool":"issues.list","timeout_ms":1000}}' \
+    '. == {}'
+
+run_hook "Codex MCP converts timeoutMs before max timeout denial" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"call_mcp_tool","tool_input":{"server":"github","tool":"issues.list","timeoutMs":31000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.timeout_exceeded"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_mcp_malformed_allowlists",
+  "agent_id": "ap_mcp_malformed_allowlists",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "mcp.tool.execute": {
+      "allowed_servers": "github",
+      "allowed_tools": "issues.list"
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Gemini MCP rejects malformed configured allowlists" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"mcp__evil__delete_all","tool_input":{}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_limit"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_mcp_malformed_timeout",
+  "agent_id": "ap_mcp_malformed_timeout",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "mcp.tool.execute": {
+      "allowed_servers": ["github"],
+      "allowed_tools": ["issues.list"],
+      "max_timeout": false
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex MCP rejects malformed configured timeout limit" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"call_mcp_tool","tool_input":{"server":"github","tool":"issues.list","timeout":1}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_limit"))'
+
+write_restricted_local_hooks_passport
 
 run_hook "Codex MCP denies server spoofed through tool input" \
     codex "$CODEX" \
@@ -588,6 +901,23 @@ run_hook "Gemini web_fetch rejects percent-encoded URL authority" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://127%2e0%2e0%2e1/admin","method":"GET"}}' \
     '.decision == "deny" and (.reason | contains("oap.invalid_url"))'
 
+run_hook "Gemini web_fetch rejects Unicode-normalized loopback hostname" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://１２７.０.０.１/admin","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_url"))'
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Gemini web_fetch rejects malformed URL without recording secrets" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":" https://user:password@example.com/path?token=secret#private","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_url"))'
+if grep -Eq 'user:|password|token=secret|#private' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: malformed URL context must not persist credentials, query tokens, or fragments" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+echo "  ✅ Malformed web URL does not persist secrets"
+
 run_hook "Gemini web_fetch denies private metadata IP" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"http://169.254.169.254/latest/meta-data","method":"GET"}}' \
@@ -628,6 +958,23 @@ run_hook "Gemini web_fetch denies private IPv6 domain literal" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"domain":"fd00::1","method":"GET"}}' \
     '.decision == "deny" and (.reason | contains("oap.private_network_destination"))'
 
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Gemini domain-only web_fetch normalizes host before recording" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"domain":"https://user:password@example.com/path?token=secret#frag","method":"GET"}}' \
+    '.decision == "allow"'
+if grep -Eq 'user:|password|token=secret|#frag' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: domain-only web context must not persist credentials, query tokens, or fragments" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '.guardrail_tool == "websearch" and .decision.policy_id == "web.fetch.v1" and .context.url == "" and .context.domain == "example.com"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: domain-only web context should record only normalized host" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Domain-only web fetch records normalized host"
+
 run_hook "Gemini web_fetch rejects domain spoofing when URL is present" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://evil.test/collect","domain":"example.com","method":"GET"}}' \
@@ -637,6 +984,191 @@ run_hook "Gemini web_fetch denies disallowed local method" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/resource","method":"DELETE"}}' \
     '.decision == "deny" and (.reason | contains("oap.method_not_allowed"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_flat_web_limit_absent_keys",
+  "agent_id": "ap_flat_web_limit_absent_keys",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "web.fetch"}],
+  "limits": {
+    "allowed_domains": ["*"]
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Gemini web_fetch flat limits preserve absent optional keys" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/resource","method":"GET"}}' \
+    '.decision == "allow"'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_web_malformed_limits",
+  "agent_id": "ap_web_malformed_limits",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "web.fetch"}],
+  "limits": {
+    "web.fetch": {
+      "allowed_domains": "example.com",
+      "allowed_methods": "GET"
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Gemini web_fetch rejects malformed configured allowlists" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://evil.test/data","method":"DELETE"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_limit"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_web_rate_limit",
+  "agent_id": "ap_web_rate_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "web.fetch"}],
+  "limits": {
+    "web.fetch": {
+      "allowed_domains": ["example.com"],
+      "allowed_methods": ["GET"],
+      "max_requests_per_min": 1
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/web-rate-state.json"
+rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+run_hook "Gemini web_fetch first request respects local rate limit" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/first","method":"GET"}}' \
+    '.decision == "allow"'
+run_hook "Gemini web_fetch second request exceeds local rate limit" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/second","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_limit_exceeded"))'
+rm -f "$TEST_DIR/aport/web-rate-state.json"
+rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+printf 'not-json\n' > "$TEST_DIR/aport/web-rate-state.json"
+run_hook "Gemini web_fetch corrupt local rate state stays blocking in warn mode" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/corrupt-state","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
+printf '{}\n' > "$TEST_DIR/aport/web-rate-state.json"
+run_hook "Gemini web_fetch missing rate state schema stays blocking in warn mode" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/missing-state-schema","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
+printf '{"requests":["bad"]}\n' > "$TEST_DIR/aport/web-rate-state.json"
+run_hook "Gemini web_fetch malformed rate entries stay blocking in warn mode" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/malformed-rate-entry","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
+rm -f "$TEST_DIR/aport/web-rate-state.json" "$TEST_DIR/proof"
+rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+mkdir "$TEST_DIR/aport/web-rate-state.json.lock"
+printf '999999 x[$(touch %s/proof)]\n' "$TEST_DIR" > "$TEST_DIR/aport/web-rate-state.json.lock/owner"
+run_hook "Gemini web_fetch malformed rate lock owner fails closed without execution" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/malformed-lock","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
+if [[ -f "$TEST_DIR/proof" ]]; then
+    echo "FAIL: malformed rate lock timestamp must not execute shell substitutions" >&2
+    exit 1
+fi
+rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+mkdir "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+printf '99999999 %s\n' "$(date +%s)" > "$TEST_DIR/aport/web-rate-state.json.lock/owner"
+printf '%s %s\n' "$$" "$(date +%s)" > "$TEST_DIR/aport/web-rate-state.json.lock.recover/owner"
+APORT_SESSION_LOCK_RETRIES=0 APORT_SESSION_LOCK_RETRY_DELAY=0 run_hook "Gemini web_fetch live recovery lock fails closed without hanging" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/live-recovery-lock","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
+rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+rm -rf "$TEST_DIR/aport/web-rate-state.json"
+mkdir "$TEST_DIR/aport/web-rate-state.json"
+run_hook "Gemini web_fetch directory rate state path fails closed" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/directory-state","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.rate_state_unavailable"))'
+if find "$TEST_DIR/aport/web-rate-state.json" -mindepth 1 -print -quit | grep -q .; then
+    echo "FAIL: directory rate state target must not receive moved temporary state files" >&2
+    find "$TEST_DIR/aport/web-rate-state.json" -mindepth 1 -maxdepth 1 >&2
+    exit 1
+fi
+rm -rf "$TEST_DIR/aport/web-rate-state.json"
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_web_invalid_rate_limit",
+  "agent_id": "ap_web_invalid_rate_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "web.fetch"}],
+  "limits": {
+    "web.fetch": {
+      "allowed_domains": ["example.com"],
+      "allowed_methods": ["GET"],
+      "max_requests_per_min": 0
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/web-rate-state.json"
+rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
+run_hook "Gemini web_fetch rejects invalid configured local rate limit" \
+    gemini "$GEMINI" \
+    '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":"https://example.com/invalid-limit","method":"GET"}}' \
+    '.decision == "deny" and (.reason | contains("oap.invalid_limit"))'
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_web_rate_limit",
+  "agent_id": "ap_web_rate_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "web.fetch"}],
+  "limits": {
+    "web.fetch": {
+      "allowed_domains": ["example.com"],
+      "allowed_methods": ["GET"],
+      "max_requests_per_min": 1
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex web_fetch missing context stays blocking in warn mode" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+rm -f "$TEST_DIR/aport/web-rate-state.json"
+rm -rf "$TEST_DIR/aport/web-rate-state.json.lock" "$TEST_DIR/aport/web-rate-state.json.lock.recover"
 
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
@@ -672,6 +1204,11 @@ jq -e '.guardrail_tool == "read" and .decision.policy_id == "data.file.read.v1" 
 }
 echo "  ✅ Goose local read_image maps to file read"
 
+run_hook "Goose read_image rejects conflicting source and path" \
+    goose "$GOOSE" \
+    '{"hook_event_name":"PreToolUse","tool_name":"developer__read_image","tool_input":{"source":"/tmp/.env","path":"/tmp/public.png"}}' \
+    '.decision == "block" and (.reason | contains("oap.invalid_tool_arguments"))'
+
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Goose read_image URL source maps to web access" \
     goose "$GOOSE" \
@@ -706,6 +1243,11 @@ run_hook "Goose text_editor view routes through read policy" \
     '{"hook_event_name":"PreToolUse","tool_name":"developer__text_editor","tool_input":{"command":"view","path":"/tmp/.ssh/id_rsa"}}' \
     '.decision == "block" and (.reason | contains("oap.blocked_pattern"))'
 
+run_hook "Goose text_editor view rejects directory targets" \
+    goose "$GOOSE" \
+    "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"developer__text_editor\",\"tool_input\":{\"command\":\"view\",\"path\":\"$TEST_DIR\"}}" \
+    '.decision == "block" and (.reason | contains("oap.metadata_enumeration_unsupported"))'
+
 run_hook "Goose tree with broad root fails closed as metadata enumeration" \
     goose "$GOOSE" \
     "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"developer__tree\",\"tool_input\":{\"path\":\"$TEST_DIR\"}}" \
@@ -728,6 +1270,158 @@ run_hook "Goose warn mode allows with reason" \
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_goose_write_size_limit",
+  "agent_id": "ap_goose_write_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_bytes": 1000
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+GOOSE_REPLACE_FILE="$TEST_DIR/goose-replace-size.txt"
+GOOSE_INSERT_FILE="$TEST_DIR/goose-insert-size.txt"
+awk 'BEGIN { for (i = 0; i < 991; i++) printf "a" }' > "$GOOSE_REPLACE_FILE"
+awk 'BEGIN { for (i = 0; i < 995; i++) printf "a" }' > "$GOOSE_INSERT_FILE"
+GOOSE_LARGE_TEXT="$(awk 'BEGIN { for (i = 0; i < 1001; i++) printf "b" }')"
+GOOSE_WRITE_INPUT="$(jq -n -c --arg text "$GOOSE_LARGE_TEXT" '{hook_event_name:"PreToolUse",tool_name:"developer__text_editor",tool_input:{command:"write",path:"/tmp/goose-large.txt",file_text:$text}}')"
+run_hook "Goose text_editor write uses file_text size" \
+    goose "$GOOSE" \
+    "$GOOSE_WRITE_INPUT" \
+    '.decision == "block" and (.reason | contains("oap.file_too_large"))'
+
+run_hook "Goose text_editor str_replace uses new_str and old_str size" \
+    goose "$GOOSE" \
+    "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"developer__text_editor\",\"tool_input\":{\"command\":\"str_replace\",\"path\":\"$GOOSE_REPLACE_FILE\",\"old_str\":\"a\",\"new_str\":\"bbbbbbbbbbbbbbbbbbbb\"}}" \
+    '.decision == "block" and (.reason | contains("oap.file_too_large"))'
+
+run_hook "Goose text_editor insert computes resulting file size" \
+    goose "$GOOSE" \
+    "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"developer__text_editor\",\"tool_input\":{\"command\":\"insert\",\"path\":\"$GOOSE_INSERT_FILE\",\"new_str\":\"bbbbbbbbbb\"}}" \
+    '.decision == "block" and (.reason | contains("oap.file_too_large"))'
+
+run_hook "Goose text_editor undo_edit requires resulting size when limited" \
+    goose "$GOOSE" \
+    '{"hook_event_name":"PreToolUse","tool_name":"developer__text_editor","tool_input":{"command":"undo_edit","path":"/tmp/test.txt"}}' \
+    '.decision == "block" and (.reason | contains("oap.missing_required_context"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_root_path_block",
+  "agent_id": "ap_root_path_block",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "blocked_paths": ["/"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex write respects root blocked path" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write","tool_input":{"file_path":"/tmp/review.txt","content":"x"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.path_blocked"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_home_path_patterns",
+  "agent_id": "ap_home_path_patterns",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["~/aport-allowed"],
+      "blocked_paths": ["~/aport-blocked"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex write respects home-relative allowed path" \
+    codex "$CODEX" \
+    "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"write\",\"tool_input\":{\"file_path\":\"$HOME/aport-allowed/file.txt\",\"content\":\"x\"}}" \
+    '. == {}'
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_home_blocked_path_patterns",
+  "agent_id": "ap_home_blocked_path_patterns",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "blocked_paths": ["~/aport-blocked"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex write respects home-relative blocked path" \
+    codex "$CODEX" \
+    "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"write\",\"tool_input\":{\"file_path\":\"$HOME/aport-blocked/file.txt\",\"content\":\"x\"}}" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.path_blocked"))'
+newline_blocked_path_payload="$(jq -nc --arg file_path "$HOME/aport-blocked/file
+with-newline.txt" '{hook_event_name:"PreToolUse",tool_name:"write",tool_input:{file_path:$file_path,content:"x"}}')"
+run_hook "Codex write rejects control-char path before wildcard allow" \
+    codex "$CODEX" \
+    "$newline_blocked_path_payload" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_file_path"))'
+
+mkdir -p "$TEST_DIR/allowed"
+cat > "$TEST_DIR/aport/passport.json" << EOF
+{
+  "passport_id": "ap_control_char_path_patterns",
+  "agent_id": "ap_control_char_path_patterns",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["$TEST_DIR/allowed/**"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+newline_path_payload="$(jq -nc --arg file_path "$TEST_DIR/unapproved
+$TEST_DIR/allowed/note.txt" '{hook_event_name:"PreToolUse",tool_name:"write",tool_input:{file_path:$file_path,content:"x"}}')"
+run_hook "Codex write rejects newline path glob bypass" \
+    codex "$CODEX" \
+    "$newline_path_payload" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_file_path"))'
+
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex file write strips raw content from recorded context" \
     codex "$CODEX" \
@@ -745,6 +1439,146 @@ jq -e '.context.file_path == "/tmp/aport-test.txt" and (.context.content_length 
     exit 1
 }
 echo "  ✅ File-write context is minimized"
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_write_size_limit",
+  "agent_id": "ap_write_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_mb": 0.000001
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex file write enforces local max size" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/aport-large.txt","content":"abcdefghi"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.file_too_large"))'
+
+run_hook "Codex new file write under max size does not require existing file" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/aport-small.txt","content":"a"}}' \
+    '. == {}'
+
+printf '1234567890' > "$TEST_DIR/aport-existing-edit.txt"
+run_hook "Codex edit enforces resulting file size" \
+    codex "$CODEX" \
+    "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"edit\",\"tool_input\":{\"file_path\":\"$TEST_DIR/aport-existing-edit.txt\",\"old_string\":\"0\",\"new_string\":\"abcdefghij\"}}" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.file_too_large"))'
+
+run_hook "Codex file write enforces UTF-8 byte size" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/aport-emoji.txt","content":"😀"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.file_too_large"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_write_invalid_size_limit",
+  "agent_id": "ap_write_invalid_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_mb": "invalid"
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex file write rejects invalid configured max size" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/aport-invalid-size.txt","content":"abc"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_limit"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_write_size_limit",
+  "agent_id": "ap_write_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_mb": 0.000001
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex apply_patch enforces patch payload size" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Add File: /tmp/aport-large-patch.txt\n+abcdefghi\n*** End Patch"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.file_too_large"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_patch_update_size_limit",
+  "agent_id": "ap_patch_update_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.write"}],
+  "limits": {
+    "data.file.write": {
+      "allowed_paths": ["*"],
+      "max_file_size_bytes": 1000
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+PATCH_NEAR_LIMIT_FILE="$TEST_DIR/aport-near-limit-patch.txt"
+awk 'BEGIN { for (i = 0; i < 991; i++) printf "a" }' > "$PATCH_NEAR_LIMIT_FILE"
+PATCH_UPDATE_INPUT="$(
+    jq -n -c --arg patch "*** Begin Patch
+*** Update File: $PATCH_NEAR_LIMIT_FILE
+@@
++bbbbbbbbbbbbbbbbbbbb
+*** End Patch" \
+        '{hook_event_name:"PreToolUse",tool_name:"apply_patch",tool_input:{command:$patch}}'
+)"
+run_hook "Codex apply_patch update enforces resulting file size" \
+    codex "$CODEX" \
+    "$PATCH_UPDATE_INPUT" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.file_too_large"))'
+
+PATCH_TOLERANT_FILE="$TEST_DIR/aport-tolerant-patch.txt"
+printf 'abc\n' > "$PATCH_TOLERANT_FILE"
+PATCH_TOLERANT_DELETE_LINE="-abc$(printf '%100s' '')"
+PATCH_TOLERANT_ADD_LINE="+$(awk 'BEGIN { for (i = 0; i < 1000; i++) printf "x" }')"
+PATCH_TOLERANT_INPUT="$(
+    jq -n -c \
+        --arg path "$PATCH_TOLERANT_FILE" \
+        --arg delete_line "$PATCH_TOLERANT_DELETE_LINE" \
+        --arg add_line "$PATCH_TOLERANT_ADD_LINE" \
+        '{hook_event_name:"PreToolUse",tool_name:"apply_patch",tool_input:{patch:("*** Begin Patch\n*** Update File: " + $path + "\n@@\n" + $delete_line + "\n" + $add_line + "\n*** End Patch")}}'
+)"
+run_hook "Codex apply_patch update with deletions uses conservative resulting size" \
+    codex "$CODEX" \
+    "$PATCH_TOLERANT_INPUT" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.file_too_large"))'
+
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
 run_hook "Codex multi-file apply_patch fails closed" \
     codex "$CODEX" \
@@ -772,6 +1606,16 @@ run_hook "Codex Glob with broad allowed root still fails closed as metadata enum
     "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Glob\",\"tool_input\":{\"pattern\":\"**/.env\",\"path\":\"$TEST_DIR\"}}" \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.metadata_enumeration_unsupported"))'
 
+run_hook "Codex Glob with empty path still denies nonempty pattern enumeration" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Glob","tool_input":{"path":"","pattern":"**/.env"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.metadata_enumeration_unsupported"))'
+
+run_hook "Codex LS without target fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"LS","tool_input":{}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_file_path"))'
+
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex WebSearch without destination fails closed through web policy" \
     codex "$CODEX" \
@@ -787,7 +1631,7 @@ echo "  ✅ Codex WebSearch maps to web policy"
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex spawn_agent maps to session policy" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","tool_call_id":"map-spawn-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
     '. == {}'
 run_hook "Codex send_message maps to session update" \
     codex "$CODEX" \
@@ -801,7 +1645,7 @@ run_hook "Codex wait_agent maps to session status" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.wait_agent","tool_input":{"id":"child-1"}}' \
     '. == {}'
-run_hook "Codex interrupt_agent maps to session close" \
+run_hook "Codex interrupt_agent maps to session update" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.interrupt_agent","tool_input":{"id":"child-1"}}' \
     '. == {}'
@@ -811,6 +1655,30 @@ jq -e '.guardrail_tool == "session.create" and .decision.policy_id == "agent.ses
     exit 1
 }
 echo "  ✅ Codex collaboration tools map to session policy"
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_invalid_session_limit",
+  "agent_id": "ap_invalid_session_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "agent.session.create"}],
+  "limits": {
+    "agent.session.create": {
+      "max_concurrent": 0
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex session rejects invalid configured local concurrency limit" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"invalid-limit-child","prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_limit"))'
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {
@@ -837,7 +1705,7 @@ mkdir "$TEST_DIR/aport/session-state.json.lock"
 printf '999999 1\n' > "$TEST_DIR/aport/session-state.json.lock/owner"
 run_hook "Codex session recovers stale local lock" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"stale-lock-child","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"stale-lock-call","tool_input":{"id":"stale-lock-child","prompt":"review this","agent_type":"reviewer"}}' \
     '. == {}'
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
 rm -rf "$TEST_DIR/aport/session-state.json.lock"
@@ -847,7 +1715,7 @@ rm -rf "$TEST_DIR/aport/session-state.json.lock" "$TEST_DIR/aport/session-state.
 mkdir "$TEST_DIR/aport/session-state.json.lock"
 APORT_SESSION_LOCK_OWNERLESS_STALE_SECONDS=0 run_hook "Codex session recovers ownerless local lock" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"ownerless-lock-child","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"ownerless-lock-call","tool_input":{"id":"ownerless-lock-child","prompt":"review this","agent_type":"reviewer"}}' \
     '. == {}'
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
 rm -rf "$TEST_DIR/aport/session-state.json.lock" "$TEST_DIR/aport/session-state.json.lock.recover"
@@ -861,7 +1729,7 @@ export APORT_SESSION_LOCK_RETRIES=0
 export APORT_SESSION_LOCK_RETRY_DELAY=0
 run_hook "Codex session fails closed on live local lock" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"live-lock-child","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"live-lock-call","tool_input":{"id":"live-lock-child","prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.session_state_unavailable"))'
 unset APORT_SESSION_LOCK_RETRIES APORT_SESSION_LOCK_RETRY_DELAY
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
@@ -880,7 +1748,7 @@ export APORT_SESSION_LOCK_RETRIES=0
 export APORT_SESSION_LOCK_RETRY_DELAY=0
 run_hook "Codex session state failure remains blocking in warn mode" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"warn-lock-child","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"warn-lock-call","tool_input":{"id":"warn-lock-child","prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.session_state_unavailable"))'
 unset APORT_SESSION_LOCK_RETRIES APORT_SESSION_LOCK_RETRY_DELAY
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
@@ -901,6 +1769,54 @@ unset APORT_SESSION_LOCK_RETRIES APORT_SESSION_LOCK_RETRY_DELAY
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
 rm -rf "$TEST_DIR/aport/session-state.json.lock" "$TEST_DIR/aport/session-state.json.lock.recover"
 
+printf 'not-json\n' > "$TEST_DIR/aport/session-state.json"
+run_hook "Codex close fails closed when session state is corrupt" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.close_agent","session_id":"parent-session","tool_call_id":"corrupt-close-call","tool_input":{"id":"corrupt-child"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.session_state_unavailable"))'
+if [[ "$(cat "$TEST_DIR/aport/session-state.json")" != "not-json" ]]; then
+    echo "FAIL: corrupt session state must not be replaced with an empty lease list" >&2
+    cat "$TEST_DIR/aport/session-state.json" >&2
+    exit 1
+fi
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+
+printf '{}\n' > "$TEST_DIR/aport/session-state.json"
+run_hook "Codex missing session state schema fails closed before pruning" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_call_id":"missing-schema-call","tool_input":{"prompt":"review"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.session_state_unavailable"))'
+if [[ "$(cat "$TEST_DIR/aport/session-state.json")" != "{}" ]]; then
+    echo "FAIL: missing session state schema should be preserved for operator repair" >&2
+    cat "$TEST_DIR/aport/session-state.json" >&2
+    exit 1
+fi
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+
+printf '{"leases":[{"session_id":"still-running"}]}\n' > "$TEST_DIR/aport/session-state.json"
+run_hook "Codex malformed session lease fails closed before pruning" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_call_id":"malformed-lease-call","tool_input":{"prompt":"review"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.session_state_unavailable"))'
+if [[ "$(cat "$TEST_DIR/aport/session-state.json")" != '{"leases":[{"session_id":"still-running"}]}' ]]; then
+    echo "FAIL: malformed session state should be preserved for operator repair" >&2
+    cat "$TEST_DIR/aport/session-state.json" >&2
+    exit 1
+fi
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+rm -rf "$TEST_DIR/aport/session-state.json"
+mkdir "$TEST_DIR/aport/session-state.json"
+run_hook "Codex directory session state path fails closed before lease write" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_call_id":"directory-state-call","tool_input":{"prompt":"review"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.session_state_unavailable"))'
+if find "$TEST_DIR/aport/session-state.json" -mindepth 1 -print -quit | grep -q .; then
+    echo "FAIL: directory session state target must not receive moved temporary state files" >&2
+    find "$TEST_DIR/aport/session-state.json" -mindepth 1 -maxdepth 1 >&2
+    exit 1
+fi
+rm -rf "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
@@ -918,7 +1834,8 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "limits": {
     "agent.session.create": {
       "max_concurrent": 1,
-      "max_session_duration": 3600
+      "max_session_duration": 3600,
+      "local_lease_ttl_seconds": 1
     }
   },
   "regions": ["US"],
@@ -926,19 +1843,92 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 }
 EOF
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex spawn_agent without per-call id fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+if [[ -f "$TEST_DIR/aport/session-state.json" ]]; then
+    echo "FAIL: missing per-call session id must not create local session state" >&2
+    cat "$TEST_DIR/aport/session-state.json" >&2
+    exit 1
+fi
+echo "  ✅ Codex spawn_agent without per-call id fails closed"
+
 run_hook "Codex provisional session lease reserves capacity" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"no-id-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
     '. == {}'
-run_hook "Codex spawn output without session id releases provisional lease" \
+run_hook "Codex failed spawn output without session id releases provisional lease" \
     codex "$CODEX" \
-    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"no-id-call","tool_response":"agent creation failed"}' \
+    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"no-id-call","tool_response":{"success":false}}' \
     '. == {}'
 run_hook "Codex session lease after no-id spawn output is allowed" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"after-no-id-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
     '. == {}'
-echo "  ✅ Codex no-id spawn output releases provisional lease"
+echo "  ✅ Codex failed no-id spawn output releases provisional lease"
+
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex provisional session lease reserves capacity before ambiguous success" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"ambiguous-success-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '. == {}'
+run_hook "Codex successful spawn without session id fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"ambiguous-success-call","tool_response":{"success":true}}' \
+    '.hookSpecificOutput.hookEventName == "PostToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+run_hook "Codex ambiguous successful spawn preserves reserved capacity" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"after-ambiguous-success-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
+sleep 2
+run_hook "Codex ambiguous successful spawn remains reserved after lease ttl" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"after-ambiguous-success-ttl-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
+echo "  ✅ Codex successful no-id spawn output preserves provisional lease"
+
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex provisional session lease reserves capacity before unknown output" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"unknown-output-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '. == {}'
+run_hook "Codex unknown spawn output without session id fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"unknown-output-call","tool_response":{}}' \
+    '.hookSpecificOutput.hookEventName == "PostToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+run_hook "Codex unknown spawn output preserves reserved capacity" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"after-unknown-output-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
+echo "  ✅ Codex unknown no-id spawn output preserves provisional lease"
+
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex interrupt lifecycle starts tracked session" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"spawn_agent","session_id":"parent-session","tool_call_id":"interrupt-live-create","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '. == {}'
+run_hook "Codex interrupt lifecycle reconciles tracked session" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"spawn_agent","session_id":"parent-session","tool_call_id":"interrupt-live-create","tool_response":{"success":true,"agent_id":"interrupt-live-child"}}' \
+    '. == {}'
+run_hook "Codex interrupt_agent does not close tracked session" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"interrupt_agent","session_id":"parent-session","tool_call_id":"interrupt-live-interrupt","tool_input":{"id":"interrupt-live-child"}}' \
+    '. == {}'
+run_hook "Codex post-tool interrupt keeps tracked session open" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"interrupt_agent","session_id":"parent-session","tool_call_id":"interrupt-live-interrupt","tool_input":{"id":"interrupt-live-child"},"tool_response":{"success":true}}' \
+    '. == {}'
+run_hook "Codex send_input can still target interrupted session" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"send_input","session_id":"parent-session","tool_call_id":"interrupt-live-send","tool_input":{"id":"interrupt-live-child","message":"continue"}}' \
+    '. == {}'
+run_hook "Codex interrupted session still counts against concurrency" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"spawn_agent","session_id":"parent-session","tool_call_id":"after-interrupt-live","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
+echo "  ✅ Codex interrupt keeps live sessions counted"
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {
@@ -974,7 +1964,7 @@ if [[ -f "$TEST_DIR/aport/session-state.json" ]] && ! jq -e '.leases | length ==
 fi
 echo "  ✅ Session bookkeeping does not consume session capacity"
 
-"$REPO_ROOT/bin/aport-guardrail-bash.sh" "session.create" '{"session_tracking":"host_active_count","session_operation":"create","description_length":12}' > /dev/null
+"$REPO_ROOT/bin/aport-guardrail-bash.sh" "session.create" '{"session_tracking":"host_active_count","session_operation":"create","description_length":12,"active_session_count":0}' > /dev/null
 if [[ -f "$TEST_DIR/aport/session-state.json" ]] && ! jq -e '.leases | length == 0' "$TEST_DIR/aport/session-state.json" > /dev/null; then
     echo "FAIL: host-active-count session tracking should not create persistent leases" >&2
     cat "$TEST_DIR/aport/session-state.json" >&2
@@ -984,15 +1974,15 @@ echo "  ✅ Host-count session tracking avoids stale local leases"
 
 run_hook "Codex session first lease is allowed" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"session-first-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
     '. == {}'
 run_hook "Codex session second lease is allowed" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"session-second-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
     '. == {}'
 run_hook "Codex session third lease respects max_concurrent" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"session-third-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 run_hook "Codex unmatched close does not release synthetic session lease" \
     codex "$CODEX" \
@@ -1000,7 +1990,7 @@ run_hook "Codex unmatched close does not release synthetic session lease" \
     '. == {}'
 run_hook "Codex session remains capped after unmatched close" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"session-after-unmatched-close-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 jq -e '.leases | length == 2' "$TEST_DIR/aport/session-state.json" > /dev/null || {
     echo "FAIL: session limiter should retain only the two allowed leases" >&2
@@ -1013,20 +2003,20 @@ rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.js
 run_hook "Codex session ignores model-supplied tool_input call id" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"tool_call_id":"attacker-reused","prompt":"review this","agent_type":"reviewer"}}' \
-    '. == {}'
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
 run_hook "Codex session does not dedupe on model-supplied tool_input call id" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"tool_call_id":"attacker-reused","prompt":"review this","agent_type":"reviewer"}}' \
-    '. == {}'
-run_hook "Codex session repeated model-supplied call id still respects limit" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+run_hook "Codex session repeated model-supplied call id still fails missing context" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"tool_call_id":"attacker-reused","prompt":"review this","agent_type":"reviewer"}}' \
-    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
-jq -e '.leases | length == 2 and all(.session_id != "call:attacker-reused")' "$TEST_DIR/aport/session-state.json" > /dev/null || {
-    echo "FAIL: session limiter must not trust tool_input.tool_call_id for dedupe" >&2
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+if [[ -f "$TEST_DIR/aport/session-state.json" ]]; then
+    echo "FAIL: session limiter must not create leases from model-supplied tool_input.tool_call_id" >&2
     cat "$TEST_DIR/aport/session-state.json" >&2
     exit 1
-}
+fi
 echo "  ✅ Codex session ignores model-controlled call IDs"
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
@@ -1093,6 +2083,52 @@ run_hook "Codex local session lease is not expired by max_session_duration" \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {
+  "passport_id": "ap_limited_session_live_ttl",
+  "agent_id": "ap_limited_session_live_ttl",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "agent.session.create"}],
+  "limits": {
+    "agent.session.create": {
+      "max_concurrent": 1,
+      "local_lease_ttl_seconds": 1
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex session starts live-ttl test child" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"live-ttl-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '. == {}'
+run_hook "Codex session reconciles live-ttl test child" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"live-ttl-call","tool_response":{"success":true,"id":"live-ttl-child"}}' \
+    '. == {}'
+sleep 2
+run_hook "Codex live session lease survives local TTL expiry" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"after-live-ttl-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
+run_hook "Codex close live-ttl child is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.close_agent","session_id":"parent-session","tool_call_id":"close-live-ttl-call","tool_input":{"id":"live-ttl-child"}}' \
+    '. == {}'
+run_hook "Codex post-tool close releases live-ttl child" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.close_agent","session_id":"parent-session","tool_call_id":"close-live-ttl-call","tool_input":{"id":"live-ttl-child"},"tool_response":{"success":true}}' \
+    '. == {}'
+run_hook "Codex session lease after live-ttl close is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"after-live-ttl-close-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '. == {}'
+echo "  ✅ Codex live session leases survive local TTL expiry until explicit close"
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
   "passport_id": "ap_limited_session_lifecycle",
   "agent_id": "ap_limited_session_lifecycle",
   "spec_version": "oap/1.0",
@@ -1121,7 +2157,7 @@ run_hook "Codex post-tool spawn reconciles tool_use_id lease to child id" \
     '. == {}'
 run_hook "Codex close_agent keeps lease before tool succeeds" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"child-pre-release","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"child-pre-release-call","tool_input":{"id":"child-pre-release","prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 run_hook "Codex post-tool close releases matching child lease" \
     codex "$CODEX" \
@@ -1141,6 +2177,16 @@ jq -e '.leases | length == 1 and .[0].session_id == "child-2"' "$TEST_DIR/aport/
     exit 1
 }
 echo "  ✅ Codex session close releases child leases"
+run_hook "Codex post-tool close releases previous_status child lease" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.close_agent","session_id":"parent-session","tool_input":{"id":"child-2"},"tool_response":{"previous_status":{"completed":"done"}}}' \
+    '. == {}'
+jq -e '.leases | length == 0' "$TEST_DIR/aport/session-state.json" > /dev/null || {
+    echo "FAIL: previous_status close should release the matching child lease" >&2
+    cat "$TEST_DIR/aport/session-state.json" >&2
+    exit 1
+}
+echo "  ✅ Codex previous_status close releases child leases"
 
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex session lease reserves by tool call before child id exists" \
@@ -1161,7 +2207,7 @@ run_hook "Codex nested-error post-tool close keeps reconciled lease" \
     '. == {}'
 run_hook "Codex spawn remains capped after nested-error close" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"child-denied-nested-error","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"child-denied-nested-error-call","tool_input":{"id":"child-denied-nested-error","prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 run_hook "Codex failed post-tool close keeps reconciled lease" \
     codex "$CODEX" \
@@ -1169,7 +2215,7 @@ run_hook "Codex failed post-tool close keeps reconciled lease" \
     '. == {}'
 run_hook "Codex spawn remains capped after failed close" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"child-denied","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"child-denied-after-failed-close-call","tool_input":{"id":"child-denied","prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 run_hook "Codex unstructured post-tool close keeps reconciled lease" \
     codex "$CODEX" \
@@ -1177,7 +2223,7 @@ run_hook "Codex unstructured post-tool close keeps reconciled lease" \
     '. == {}'
 run_hook "Codex spawn remains capped after unstructured close" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"child-denied-unstructured","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"child-denied-after-unstructured-close-call","tool_input":{"id":"child-denied-unstructured","prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 run_hook "Codex post-tool close releases reconciled child lease" \
     codex "$CODEX" \
@@ -1214,7 +2260,7 @@ jq -e '.leases | length == 1 and .[0].session_id == "child-string"' "$TEST_DIR/a
 }
 run_hook "Codex string-response session remains capped" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"child-denied-after-string","prompt":"review this","agent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"child-denied-after-string-call","tool_input":{"id":"child-denied-after-string","prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 run_hook "Codex post-tool close releases string-response lease" \
     codex "$CODEX" \
@@ -1277,6 +2323,29 @@ run_hook "Codex spawn after status-only resume close is allowed" \
 echo "  ✅ Codex successful resume leases remain releaseable"
 
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex failed live-resume test starts tracked session" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"live-resume-spawn","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '. == {}'
+run_hook "Codex failed live-resume test reconciles tracked session" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"live-resume-spawn","tool_response":{"success":true,"id":"live-resume-child"}}' \
+    '. == {}'
+run_hook "Codex failed live-resume attempt is allowed pre-tool" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.resume_agent","session_id":"parent-session","tool_call_id":"failed-live-resume","tool_input":{"id":"live-resume-child"}}' \
+    '. == {}'
+run_hook "Codex failed live-resume completion does not release live child" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PostToolUse","tool_name":"collaboration.resume_agent","session_id":"parent-session","tool_call_id":"failed-live-resume","tool_input":{"id":"live-resume-child"},"success":false}' \
+    '. == {}'
+run_hook "Codex live child remains capped after failed resume" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"after-failed-live-resume","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
+echo "  ✅ Codex failed resume does not release existing live sessions"
+
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex overlap test starts tracked session" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_call_id":"overlap-spawn","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
@@ -1324,7 +2393,7 @@ echo "  ✅ Codex failed resume releases reserved capacity"
 
 run_hook "Codex resume_agent is blocked when concurrency is full" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.resume_agent","session_id":"parent-session","tool_input":{"id":"child-1"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.resume_agent","session_id":"parent-session","tool_call_id":"resume-while-full-call","tool_input":{"id":"child-1"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 echo "  ✅ Codex resume_agent respects session concurrency"
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
@@ -1333,7 +2402,7 @@ rm -f "$TEST_DIR/aport/session-state.json"
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex session context strips raw prompt text" \
     codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"prompt":"customer token secret_should_not_leave","subagent_type":"reviewer"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_call_id":"context-minimized-call","tool_input":{"prompt":"customer token secret_should_not_leave","subagent_type":"reviewer"}}' \
     '. == {}'
 
 if grep -q 'secret_should_not_leave' "$TEST_DIR/aport/session-decisions.jsonl"; then

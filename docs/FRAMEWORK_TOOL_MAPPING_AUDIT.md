@@ -59,7 +59,8 @@ by custom code, but that is not the same as a released harness integration.
 | `Bash`, `PowerShell`, `Monitor` | `bash` | `system.command.execute.v1` | `system.command.execute` |
 | `Read`, `Grep` and path-based read aliases | `read` | `data.file.read.v1` | `data.file.read` |
 | `Glob`, `LSP`, MCP list/wait tools, `TaskGet`/`TaskList`, `CronList`, … | *(allow, no evaluator)* | — | — |
-| `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `TodoWrite`, … | `write` | `data.file.write.v1` | `data.file.write` |
+| `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, … | `write` | `data.file.write.v1` | `data.file.write` |
+| `TodoWrite` | internal bookkeeping | allow | none |
 | `WebSearch`, `WebFetch` | `websearch` | `web.fetch.v1` | `web.fetch` |
 | `Browser` | `browser` | `web.browser.v1` | `web.browser` |
 | `Agent`, `Task`, `TaskCreate`, `Skill`, worktree, teams, … | `session.create` | `agent.session.create.v1` | `agent.session.create` |

@@ -114,6 +114,10 @@ deny_or_warn() {
     deny "$notice"
 }
 
+if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then
+    deny_or_warn "hook.input" "oap.invalid_tool_arguments" "Hook tool arguments must be a JSON object"
+fi
+
 allow() {
     echo '{"permission":"allow","allowed":true}'
     exit 0
@@ -173,10 +177,17 @@ elif [ -n "$TOOL_NAME" ]; then
     case "$TOOL_NORM" in
         shell | bash | runterminalcmd | run_terminal_cmd | runcommand | run_command | terminal | terminalcommand | terminal_command)
             GUARDRAIL_TOOL="bash"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{command: (.tool_input.command // .tool_input.cmd // .tool_input.args.command // .tool_input.args.cmd // "")}')"
+            if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
+                deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
+            fi
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" shell "$TOOL_NAME" "cursor")"
             COMMAND_TEXT="$(printf '%s' "$CONTEXT_JSON" | jq -r '.command // ""' 2> /dev/null || true)"
+            SHELL_OVERRIDE="$(printf '%s' "$CONTEXT_JSON" | jq -r '.shell // ""' 2> /dev/null || true)"
             if [ -z "$COMMAND_TEXT" ]; then
                 deny_or_warn "system.command.execute" "oap.missing_command" "Shell tool did not provide a command that APort can evaluate"
+            fi
+            if ! aport_hook_shell_override_is_trusted "$SHELL_OVERRIDE"; then
+                deny_or_warn "system.command.execute" "oap.shell_not_allowed" "Shell override is not a trusted interpreter"
             fi
             if aport_is_reentrant_guardrail_command "$COMMAND_TEXT" "$ROOT_DIR"; then
                 allow
@@ -218,16 +229,16 @@ elif [ -n "$TOOL_NAME" ]; then
             fi
             :
             ;;
-        glob | filesearch | file_search | codebasesearch | codebase_search | ls | listdir | list_dir | lsp | todoread | askquestion | askuserquestion | listmcpresourcestool | toolsearch | waitformcpservers | taskget | tasklist | taskoutput | cronlist)
+        glob | filesearch | file_search | codebasesearch | codebase_search | ls | listdir | list_dir | lsp | todoread | todowrite | askquestion | askuserquestion | listmcpresourcestool | toolsearch | waitformcpservers | taskget | tasklist | taskoutput | cronlist)
             allow
             ;;
-        write | writefile | write_file | strreplace | str_replace | edit | editfile | edit_file | createfile | create_file | multiedit | editnotebook | applypatch | searchreplace | search_replace | notebookedit | todowrite | delete | deletefile | delete_file | removefile | remove_file)
+        write | writefile | write_file | strreplace | str_replace | edit | editfile | edit_file | createfile | create_file | multiedit | editnotebook | applypatch | searchreplace | search_replace | notebookedit | delete | deletefile | delete_file | removefile | remove_file)
             GUARDRAIL_TOOL="write"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{file_path: (.tool_input.file_path // .tool_input.path // .tool_input.args.file_path // .tool_input.args.path // "")}')"
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" file_write)"
             ;;
         websearch | webfetch)
             GUARDRAIL_TOOL="websearch"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{url: (.tool_input.url // .tool_input.args.url // ""), query: (.tool_input.query // .tool_input.args.query // "")}')"
+            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
             ;;
         browser)
             GUARDRAIL_TOOL="browser"
@@ -253,6 +264,9 @@ elif [ -n "$TOOL_NAME" ]; then
 elif echo "$INPUT" | jq -e '.command' &> /dev/null; then
     # beforeShellExecution: { "command": "..." }
     GUARDRAIL_TOOL="bash"
+    if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
+        deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell hook supplied conflicting command aliases"
+    fi
     CMD="$(echo "$INPUT" | jq -r '.command // ""' 2> /dev/null)"
     if [ -z "$CMD" ]; then
         deny_or_warn "system.command.execute" "oap.missing_command" "Shell hook did not provide a command that APort can evaluate"
@@ -265,6 +279,9 @@ elif echo "$INPUT" | jq -e '.command' &> /dev/null; then
 elif echo "$INPUT" | jq -e '.tool // .input.command' &> /dev/null; then
     # Legacy Copilot-style: { "tool": "runTerminalCommand", "input": { "command": "..." } }
     GUARDRAIL_TOOL="bash"
+    if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
+        deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
+    fi
     CMD="$(echo "$INPUT" | jq -r '.input.command // .input.cmd // .args[0] // ""' 2> /dev/null)"
     if [ -z "$CMD" ]; then
         deny_or_warn "system.command.execute" "oap.missing_command" "Shell tool did not provide a command that APort can evaluate"
@@ -348,11 +365,8 @@ cleanup_decision
 if [ "$HAS_DECISION_FILE" -ne 1 ]; then
     deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "oap.evaluator_failed" "$REASON" "hard"
 fi
-case "${REASON_CODE:-oap.denied}" in
-    oap.evaluator_crash | oap.evaluation_error | oap.evaluator_failed | oap.missing_dependency | oap.passport_not_found | oap.passport_invalid | oap.passport_suspended | oap.passport_version_mismatch | oap.invalid_tool_name | oap.context_too_large)
-        deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "hard"
-        ;;
-    *)
-        deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "policy"
-        ;;
-esac
+if aport_hook_is_hard_failure_reason "${REASON_CODE:-oap.denied}"; then
+    deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "hard"
+else
+    deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "policy"
+fi

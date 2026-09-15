@@ -146,6 +146,10 @@ deny_or_warn() {
     deny "$notice"
 }
 
+if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then
+    deny_or_warn "hook.input" "oap.invalid_tool_arguments" "Hook tool arguments must be a JSON object"
+fi
+
 # Tool name passed to guardrail (must match aport-guardrail-bash.sh case patterns)
 GUARDRAIL_TOOL=""
 CONTEXT_JSON="{}"
@@ -153,10 +157,17 @@ CONTEXT_JSON="{}"
 case "$TOOL_NAME_NORM" in
     bash | shell | powershell | monitor)
         GUARDRAIL_TOOL="bash"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{command: (.command // .script // "")}')"
+        if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
+            deny_or_warn "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
+        fi
+        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" shell "$TOOL_NAME" "claude-code")"
         COMMAND_TEXT="$(printf '%s' "$CONTEXT_JSON" | jq -r '.command // ""' 2> /dev/null || true)"
+        SHELL_OVERRIDE="$(printf '%s' "$CONTEXT_JSON" | jq -r '.shell // ""' 2> /dev/null || true)"
         if [ -z "$COMMAND_TEXT" ]; then
             deny_or_warn "system.command.execute" "oap.missing_command" "Shell tool did not provide a command that APort can evaluate"
+        fi
+        if ! aport_hook_shell_override_is_trusted "$SHELL_OVERRIDE"; then
+            deny_or_warn "system.command.execute" "oap.shell_not_allowed" "Shell override is not a trusted interpreter"
         fi
         if aport_is_reentrant_guardrail_command "$COMMAND_TEXT" "$ROOT_DIR"; then
             exit 0
@@ -188,7 +199,7 @@ case "$TOOL_NAME_NORM" in
         GUARDRAIL_TOOL="mcp.tool"
         CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
         ;;
-    glob | ls | lsp | todoread | toolsearch | askuserquestion | listmcpresourcestool | waitformcpservers)
+    glob | ls | lsp | todoread | todowrite | toolsearch | askuserquestion | listmcpresourcestool | waitformcpservers)
         # Search/list/read tools without a single file_path: allow without evaluator
         exit 0
         ;;
@@ -200,13 +211,13 @@ case "$TOOL_NAME_NORM" in
         # Internal state transitions: allow without evaluator
         exit 0
         ;;
-    write | edit | multiedit | notebookedit | todowrite | delete | strreplace | editnotebook | shareonboardingguide)
+    write | edit | multiedit | notebookedit | delete | strreplace | editnotebook | shareonboardingguide)
         GUARDRAIL_TOOL="write"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{file_path: (.file_path // .path // "")}')"
+        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" file_write)"
         ;;
     websearch | webfetch)
         GUARDRAIL_TOOL="websearch"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{url: (.url // ""), query: (.query // "")}')"
+        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
         ;;
     browser)
         GUARDRAIL_TOOL="browser"
@@ -301,11 +312,8 @@ cleanup_decision
 if [ "$HAS_DECISION_FILE" -ne 1 ]; then
     deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "oap.evaluator_failed" "$REASON" "hard"
 fi
-case "${REASON_CODE:-oap.denied}" in
-    oap.evaluator_crash | oap.evaluation_error | oap.evaluator_failed | oap.missing_dependency | oap.passport_not_found | oap.passport_invalid | oap.passport_suspended | oap.passport_version_mismatch | oap.invalid_tool_name | oap.context_too_large)
-        deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "hard"
-        ;;
-    *)
-        deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "policy"
-        ;;
-esac
+if aport_hook_is_hard_failure_reason "${REASON_CODE:-oap.denied}"; then
+    deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "hard"
+else
+    deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "${REASON_CODE:-oap.denied}" "$REASON" "policy"
+fi

@@ -147,6 +147,35 @@ grep -q '^APORT_API_URL=https://api.aport.io$' "$MODE_FILE" || {
 }
 echo "  ✅ guardrail mode config saved (api)"
 
+SYMLINK_CONFIG_DIR="$TEST_DIR/.claude-runtime-symlink"
+SYMLINK_OUTSIDE_DIR="$TEST_DIR/runtime-symlink-outside"
+rm -rf "$SYMLINK_CONFIG_DIR" "$SYMLINK_OUTSIDE_DIR"
+mkdir -p "$SYMLINK_CONFIG_DIR/aport" "$SYMLINK_OUTSIDE_DIR"
+ln -s "$SYMLINK_OUTSIDE_DIR" "$SYMLINK_CONFIG_DIR/aport/runtime"
+
+echo "  Test: setup refuses symlinked runtime target..."
+set +e
+APORT_CLAUDE_CODE_CONFIG_DIR="$SYMLINK_CONFIG_DIR" APORT_NONINTERACTIVE=1 \
+    "$DISPATCHER" --framework=claude-code --output "$SYMLINK_CONFIG_DIR/aport/passport.json" --non-interactive --mode=local > "$TEST_DIR/claude-code-symlink-runtime.log" 2>&1
+SYMLINK_EXIT=$?
+set -e
+if [[ "$SYMLINK_EXIT" -eq 0 ]]; then
+    echo "FAIL: expected setup to reject symlinked runtime target" >&2
+    cat "$TEST_DIR/claude-code-symlink-runtime.log" >&2
+    exit 1
+fi
+if [[ -e "$SYMLINK_OUTSIDE_DIR/bin/aport-claude-code-hook.sh" ]]; then
+    echo "FAIL: setup wrote runtime files through symlink" >&2
+    find "$SYMLINK_OUTSIDE_DIR" -maxdepth 3 -type f >&2
+    exit 1
+fi
+grep -q 'Refusing to install APort runtime through symlink' "$TEST_DIR/claude-code-symlink-runtime.log" || {
+    echo "FAIL: expected symlink refusal diagnostic" >&2
+    cat "$TEST_DIR/claude-code-symlink-runtime.log" >&2
+    exit 1
+}
+echo "  ✅ setup refuses symlinked runtime target"
+
 echo ""
 echo "  Claude Code setup integration test passed."
 echo ""

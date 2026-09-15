@@ -53,7 +53,7 @@ run_setup() {
         hook_config_dir="${APORT_GEMINI_CLI_HOOKS_DIR:-$PWD/.gemini}"
     fi
     hook_config_dir="${hook_config_dir/#\~/$HOME}"
-    export APORT_GEMINI_CLI_CONFIG_DIR="${APORT_CONFIG_DIR:-${APORT_GEMINI_CLI_CONFIG_DIR:-$HOME/.aport/gemini-cli}}"
+    export APORT_GEMINI_CLI_CONFIG_DIR="${APORT_GEMINI_CLI_CONFIG_DIR:-${APORT_CONFIG_DIR:-$HOME/.aport/gemini-cli}}"
 
     warn_if_framework_command_missing "gemini" "Install Gemini CLI first if this machine has not been onboarded yet."
     log_info "Setting up APort guardrails for Gemini CLI..."
@@ -74,7 +74,7 @@ run_setup() {
         setup_from_agentsmd_or_wizard ${forward_args[@]+"${forward_args[@]}"}
     fi
 
-    [ -f "$config_dir/aport/passport.json" ] && chmod 600 "$config_dir/aport/passport.json"
+    secure_framework_passport_file_if_present "$config_dir"
     [[ -z "$hosted_agent_id" && -n "${APORT_AGENT_ID:-}" ]] && hosted_agent_id="$APORT_AGENT_ID"
 
     select_guardrail_mode "gemini-cli" "$hosted_agent_id"
@@ -98,8 +98,7 @@ run_setup() {
     chmod 600 "$settings_file"
 
     mkdir -p "$config_dir/aport"
-    : >> "$config_dir/aport/audit.log"
-    chmod 600 "$config_dir/aport/audit.log" 2> /dev/null || true
+    initialize_framework_audit_log "$config_dir"
 
     echo ""
     echo "  Next steps (Gemini CLI):"
@@ -130,6 +129,15 @@ const fs = require("node:fs");
 const [file, command, marker, timeoutText] = process.argv.slice(2);
 const timeout = Number(timeoutText || 10000);
 const existing = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+const isPlainObject = (value) => value && typeof value === "object" && !Array.isArray(value);
+if (!isPlainObject(existing)) {
+  console.error(`[aport] ERROR: Refusing to update Gemini CLI settings JSON with non-object root: ${file}`);
+  process.exit(1);
+}
+if (existing.hooks != null && !isPlainObject(existing.hooks)) {
+  console.error(`[aport] ERROR: Refusing to update Gemini CLI settings JSON with non-object hooks: ${file}`);
+  process.exit(1);
+}
 const isAportHook = (hook) =>
   hook?.[marker] === true || /(^|\s|\/)aport-gemini-cli-hook\.sh($|\s)/.test(String(hook?.command || ""));
 const aportHook = {
