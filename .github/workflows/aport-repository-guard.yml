@@ -97,12 +97,23 @@ jobs:
         if: >-
           ${{
             steps.bootstrap.outputs.skip != 'true' &&
+            github.event_name != 'push' &&
             steps.aport_guard.outcome == 'failure' &&
             steps.override.outputs.approved != 'true'
           }}
         run: |
           echo "::error::APort Repository Guard failed. Review the APort action output above."
           exit 1
+
+      - name: Record push audit warning
+        if: >-
+          ${{
+            steps.bootstrap.outputs.skip != 'true' &&
+            github.event_name == 'push' &&
+            steps.aport_guard.outcome == 'failure'
+          }}
+        run: |
+          echo "::warning::APort Repository Guard push audit reported findings. Push events are post-commit detection; review the APort action output above."
 
       - name: Record control-plane override
         if: >-
