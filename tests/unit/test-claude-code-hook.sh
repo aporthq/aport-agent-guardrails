@@ -132,8 +132,10 @@ echo "  ✅ no-jq Claude Code response fallback: valid escaped JSON"
 # 1. Allow: Read with allowed path (local evaluator)
 echo "  Test: Read tool -> allow (allowed path)..."
 OUT1="$TEST_DIR/claude-allow-read.txt"
+CLAUDE_ALLOWED_READ="$TEST_DIR/claude-readable.txt"
+printf 'claude read fixture\n' > "$CLAUDE_ALLOWED_READ"
 set +e
-echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/foo"}}' \
+echo "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$CLAUDE_ALLOWED_READ\"}}" \
     | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
         OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT1" 2> /dev/null
 EXIT1=$?
@@ -247,6 +249,29 @@ grep -q 'oap.invalid_tool_arguments' "$OUT2C" || {
     exit 1
 }
 echo "  ✅ Bash rejects conflicting command aliases"
+
+echo "  Test: Bash rejects non-string command alias..."
+OUT2D="$TEST_DIR/claude-deny-command-alias-non-string.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":["ls","-la"]}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT2D" 2> /dev/null
+EXIT2D=$?
+set -e
+[[ "$EXIT2D" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for non-string command alias, got $EXIT2D" >&2
+    cat "$OUT2D" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT2D" || {
+    echo "FAIL: expected structured deny payload for non-string command alias" >&2
+    cat "$OUT2D" >&2
+    exit 1
+}
+grep -q 'oap.invalid_tool_arguments' "$OUT2D" || {
+    echo "FAIL: non-string command alias should fail closed before command evaluation" >&2
+    cat "$OUT2D" >&2
+    exit 1
+}
+echo "  ✅ Bash rejects non-string command aliases"
 
 # 3. Deny: Bash with blocked pattern (rm -rf) -> hookSpecificOutput
 echo "  Test: Bash deny (blocked pattern)..."
@@ -652,6 +677,39 @@ if grep -q 'apk_claude_secret' "$OUT8W"; then
     exit 1
 fi
 echo "  ✅ API mode warn still denies evaluator failures"
+
+STALE_DECISION_BASE="$TEST_DIR/aport/stale-claude-decision.json"
+STALE_DECISION_OUT="$TEST_DIR/claude-stale-decision-out.json"
+STALE_DECISION_ERR="$TEST_DIR/claude-stale-decision-err.txt"
+echo "  Test: stale per-invocation decision is cleared before evaluator call..."
+set +e
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git status"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_DECISION_FILE="$STALE_DECISION_BASE" bash -c '
+        stale="${OPENCLAW_DECISION_FILE%.json}-$$.json"
+        printf "%s" "{\"allow\":true,\"policy_id\":\"system.command.execute.v1\",\"reasons\":[{\"code\":\"oap.allowed\",\"message\":\"stale\"}]}" > "$stale"
+        exec "$1"
+    ' _ "$HOOK_SCRIPT" > "$STALE_DECISION_OUT" 2> "$STALE_DECISION_ERR"
+STALE_DECISION_EXIT=$?
+set -e
+[[ "$STALE_DECISION_EXIT" -eq 0 ]] || {
+    echo "FAIL: expected structured deny when API is unreachable, got $STALE_DECISION_EXIT" >&2
+    cat "$STALE_DECISION_OUT" >&2 || true
+    cat "$STALE_DECISION_ERR" >&2 || true
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$STALE_DECISION_OUT" || {
+    echo "FAIL: stale decision file must not downgrade evaluator failure" >&2
+    cat "$STALE_DECISION_OUT" >&2
+    cat "$STALE_DECISION_ERR" >&2
+    exit 1
+}
+grep -Eq 'oap\.evaluator_failed|oap\.evaluation_error' "$STALE_DECISION_OUT" || {
+    echo "FAIL: stale decision regression should surface evaluator failure" >&2
+    cat "$STALE_DECISION_OUT" >&2
+    cat "$STALE_DECISION_ERR" >&2
+    exit 1
+}
+echo "  ✅ stale per-invocation decision files are cleared"
 
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=api

@@ -190,6 +190,15 @@ grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
 }
 echo "  ✅ beforeShellExecution command alias conflict fails closed"
 
+run_hook "beforeShellExecution: rejects non-string command alias" \
+    '{"command":["ls","-la"]}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected beforeShellExecution non-string command alias to fail closed" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+echo "  ✅ beforeShellExecution non-string command alias fails closed"
+
 run_hook "beforeShellExecution: deny (rm -rf)" \
     '{"command":"rm -rf /tmp/x"}' 2 '"permission":"deny"'
 
@@ -215,6 +224,15 @@ grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
 }
 echo "  ✅ preToolUse Shell command alias conflict fails closed"
 
+run_hook "preToolUse Shell: rejects non-string command alias" \
+    '{"tool_name":"Shell","tool_input":{"command":["ls","-la"]}}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected preToolUse shell non-string command alias to fail closed" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+echo "  ✅ preToolUse Shell non-string command alias fails closed"
+
 run_hook "preToolUse Shell: deny (sudo)" \
     '{"tool_name":"Shell","tool_input":{"command":"sudo reboot"}}' 2 '"permission":"deny"'
 
@@ -222,11 +240,14 @@ run_hook "preToolUse Shell: missing command fails closed" \
     '{"tool_name":"Shell","tool_input":{"description":"missing command"}}' 2 '"permission":"deny"'
 
 # --- preToolUse: Read (evaluator: allow allowed path) ---
+CURSOR_ALLOWED_READ="$TEST_DIR/cursor-readable.txt"
+printf 'cursor read fixture\n' > "$CURSOR_ALLOWED_READ"
+
 run_hook "preToolUse Read: allow (allowed path)" \
-    '{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"}}' 0 '"permission":"allow"'
+    "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$CURSOR_ALLOWED_READ\"}}" 0 '"permission":"allow"'
 
 run_hook "preToolUse read_file: allow (args path)" \
-    '{"tool_name":"read_file","tool_input":{"args":{"path":"/tmp/test.txt"}}}' 0 '"permission":"allow"'
+    "{\"tool_name\":\"read_file\",\"tool_input\":{\"args\":{\"path\":\"$CURSOR_ALLOWED_READ\"}}}" 0 '"permission":"allow"'
 
 run_hook "preToolUse Read: deny (.env sensitive path)" \
     '{"tool_name":"Read","tool_input":{"file_path":"/repo/.env.local"}}' 2 '"permission":"deny"'
@@ -484,6 +505,32 @@ if grep -q "apk_cursor_secret" "$WARN_OUT"; then
     cat "$WARN_OUT" >&2
     exit 1
 fi
+
+STALE_DECISION_BASE="$TEST_DIR/aport/stale-cursor-decision.json"
+STALE_DECISION_OUT="$TEST_DIR/cursor-stale-decision-out.json"
+STALE_DECISION_ERR="$TEST_DIR/cursor-stale-decision-err.txt"
+set +e
+printf '%s' '{"tool_name":"Shell","tool_input":{"command":"git status"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_DECISION_FILE="$STALE_DECISION_BASE" bash -c '
+        stale="${OPENCLAW_DECISION_FILE%.json}-$$.json"
+        printf "%s" "{\"allow\":true,\"policy_id\":\"system.command.execute.v1\",\"reasons\":[{\"code\":\"oap.allowed\",\"message\":\"stale\"}]}" > "$stale"
+        exec "$1"
+    ' _ "$HOOK_SCRIPT" > "$STALE_DECISION_OUT" 2> "$STALE_DECISION_ERR"
+STALE_DECISION_EXIT=$?
+set -e
+[[ "$STALE_DECISION_EXIT" -eq 2 ]] || {
+    echo "FAIL: expected Cursor deny exit 2 when API is unreachable, got $STALE_DECISION_EXIT" >&2
+    cat "$STALE_DECISION_OUT" >&2 || true
+    cat "$STALE_DECISION_ERR" >&2 || true
+    exit 1
+}
+jq -e '.permission == "deny" and ((.reason | contains("oap.evaluator_failed")) or (.reason | contains("oap.evaluation_error")))' "$STALE_DECISION_OUT" > /dev/null || {
+    echo "FAIL: stale decision file must not downgrade Cursor evaluator failure" >&2
+    cat "$STALE_DECISION_OUT" >&2
+    cat "$STALE_DECISION_ERR" >&2
+    exit 1
+}
+echo "  ✅ stale per-invocation decision files are cleared"
 
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local

@@ -599,7 +599,7 @@ if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
 fi
 
 if [ "${agent_session_cap:-n}" = "y" ] || [ "${agent_session_cap:-n}" = "Y" ]; then
-    limits_json="$limits_json\"agent.session.create\": {\"max_concurrent\": 10},"
+    limits_json="$limits_json\"agent.session.create\": {},"
 fi
 
 if [ "${mcp_tool_cap:-n}" = "y" ] || [ "${mcp_tool_cap:-n}" = "Y" ]; then
