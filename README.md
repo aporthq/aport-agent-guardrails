@@ -279,7 +279,7 @@ Your framework doc describes where hook config and APort state are stored for th
 | **Recommended** | **Yes** | Only as documentation or fallback |
 
 **Runtime hook/plugin (recommended):** The host invokes APort before supported tool calls execute. This repo ships runtime integrations for Claude Code, Cursor, OpenClaw, LangChain, CrewAI, Codex CLI, Gemini CLI, Goose, DeerFlow setup, and n8n setup. Exact coverage depends on what each host exposes.
-**AGENTS.md:** Agent is *instructed* to call the guardrail; best-effort only.
+**AGENTS.md:** Agent is *instructed* to call the guardrail; best-effort only. Runtime hooks ignore repository-controlled AGENTS.md passport settings by default so a checked-out repo cannot swap in a permissive passport. Set `APORT_TRUST_REPO_POLICY=1` only for repositories whose AGENTS.md policy you intentionally trust.
 
 ---
 
