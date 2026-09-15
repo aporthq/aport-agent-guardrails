@@ -801,5 +801,30 @@ if (cfg.plugins.entries["openclaw-aport"]) process.exit(1);
     exit 1
 }
 
+SYMLINK_TARGET_DIR="$TEST_DIR/set-mode-symlink-target"
+SYMLINK_CONFIG_DIR="$TEST_DIR/set-mode-symlink-config"
+mkdir -p "$SYMLINK_TARGET_DIR"
+ln -s "$SYMLINK_TARGET_DIR" "$SYMLINK_CONFIG_DIR"
+set +e
+APORT_CODEX_CONFIG_DIR="$SYMLINK_CONFIG_DIR" "$MODE_HELPER" codex --enforcement=warn > "$TEST_DIR/set-mode-symlink.out" 2> "$TEST_DIR/set-mode-symlink.err"
+SYMLINK_SET_MODE_EXIT=$?
+set -e
+if [[ "$SYMLINK_SET_MODE_EXIT" -eq 0 ]]; then
+    echo "FAIL: set-mode should reject symlinked config directories" >&2
+    cat "$TEST_DIR/set-mode-symlink.out" >&2 || true
+    cat "$TEST_DIR/set-mode-symlink.err" >&2 || true
+    exit 1
+fi
+grep -q "Refusing to write through symlink" "$TEST_DIR/set-mode-symlink.err" || {
+    echo "FAIL: set-mode should explain symlink rejection" >&2
+    cat "$TEST_DIR/set-mode-symlink.out" >&2 || true
+    cat "$TEST_DIR/set-mode-symlink.err" >&2 || true
+    exit 1
+}
+if [[ -e "$SYMLINK_TARGET_DIR/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: set-mode should not write through rejected symlink target" >&2
+    exit 1
+fi
+
 echo "  ✅ set-mode preserves passports and updates enforcement"
 echo ""

@@ -218,6 +218,11 @@ run_hook "Codex PermissionRequest deny uses decision.behavior" \
     '{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"sudo reboot"}}' \
     '.hookSpecificOutput.hookEventName == "PermissionRequest" and .hookSpecificOutput.decision.behavior == "deny"'
 
+run_hook "Codex PermissionRequest without tool name fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PermissionRequest","tool_input":{"command":"sudo reboot"}}' \
+    '.hookSpecificOutput.hookEventName == "PermissionRequest" and .hookSpecificOutput.decision.behavior == "deny" and (.hookSpecificOutput.decision.message | contains("oap.missing_tool_name"))'
+
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
@@ -232,9 +237,67 @@ run_hook "Codex warn mode keeps shell parser ambiguity blocking" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status; unauthorized-command"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.command_chain_unsupported"))'
 
+STALE_DECISION_BASE="$TEST_DIR/aport/stale-decision.json"
+STALE_DECISION_OUT="$TEST_DIR/stale-decision-out.json"
+STALE_DECISION_ERR="$TEST_DIR/stale-decision-err.txt"
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_AGENT_ID=ap_unreachable_test
+APORT_ENFORCEMENT=warn
+EOF
+set +e
+printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}' \
+    | OPENCLAW_DECISION_FILE="$STALE_DECISION_BASE" bash -c '
+        stale="${OPENCLAW_DECISION_FILE%.json}-$$.json"
+        printf "%s" "{\"allow\":true,\"policy_id\":\"system.command.execute.v1\",\"reasons\":[{\"code\":\"oap.allowed\",\"message\":\"stale\"}]}" > "$stale"
+        exec "$1"
+    ' _ "$CODEX" > "$STALE_DECISION_OUT" 2> "$STALE_DECISION_ERR"
+STALE_DECISION_EXIT=$?
+set -e
+if [[ "$STALE_DECISION_EXIT" -ne 0 ]]; then
+    echo "FAIL: stale decision regression exited $STALE_DECISION_EXIT" >&2
+    cat "$STALE_DECISION_OUT" >&2 || true
+    cat "$STALE_DECISION_ERR" >&2 || true
+    exit 1
+fi
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and ((.hookSpecificOutput.permissionDecisionReason | contains("oap.evaluator_failed")) or (.hookSpecificOutput.permissionDecisionReason | contains("oap.evaluation_error")))' "$STALE_DECISION_OUT" > /dev/null || {
+    echo "FAIL: stale decision file must not downgrade evaluator failure in warn mode" >&2
+    cat "$STALE_DECISION_OUT" >&2
+    cat "$STALE_DECISION_ERR" >&2
+    exit 1
+}
+echo "  ✅ Stale decision files are cleared before evaluator execution"
+
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_command_timeout_limit",
+  "agent_id": "ap_command_timeout_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "system.command.execute"}],
+  "limits": {
+    "system.command.execute": {
+      "allowed_commands": ["git"],
+      "max_execution_time": 1
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex shell enforces configured timeout when supplied" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status","timeoutMs":2000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.timeout_exceeded"))'
+
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
 run_hook "Gemini run_shell_command deny uses Gemini decision JSON" \
     gemini "$GEMINI" \
@@ -323,6 +386,57 @@ run_hook "Gemini read_many_files allows include-only single target" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"read_many_files","tool_input":{"include":["/tmp/test.txt"]}}' \
     '.decision == "allow"'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_read_size_limit",
+  "agent_id": "ap_read_size_limit",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.read"}],
+  "limits": {
+    "data.file.read": {
+      "allowed_paths": ["*"],
+      "max_file_size_bytes": 1
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+READ_TOO_LARGE_FILE="$TEST_DIR/read-too-large.txt"
+printf 'xx' > "$READ_TOO_LARGE_FILE"
+run_hook "Gemini file read enforces configured max file size" \
+    gemini "$GEMINI" \
+    "{\"hook_event_name\":\"BeforeTool\",\"tool_name\":\"read_file\",\"tool_input\":{\"file_path\":\"$READ_TOO_LARGE_FILE\"}}" \
+    '.decision == "deny" and (.reason | contains("oap.file_too_large"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_read_bad_limits",
+  "agent_id": "ap_read_bad_limits",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "data.file.read"}],
+  "limits": {
+    "data.file.read": {
+      "allowed_paths": "*"
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Gemini file read rejects malformed configured path lists" \
+    gemini "$GEMINI" \
+    "{\"hook_event_name\":\"BeforeTool\",\"tool_name\":\"read_file\",\"tool_input\":{\"file_path\":\"$READ_TOO_LARGE_FILE\"}}" \
+    '.decision == "deny" and (.reason | contains("oap.invalid_limit"))'
+
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
 run_hook "Gemini grep_search denies recursive directory search" \
     gemini "$GEMINI" \
@@ -491,7 +605,7 @@ run_hook "Gemini MCP URL allowlist preserves port and path boundaries" \
 run_hook "Gemini MCP URL allowlist rejects ambiguous authority backslash" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"https://evil.com\\@example.com:8443/trusted/issues","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
-    '.decision == "deny" and (.reason | contains("oap.missing_required_context"))'
+    '.decision == "deny" and (.reason | contains("oap.invalid_mcp_server"))'
 run_hook "Gemini MCP URL allowlist rejects dot-segment path traversal" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"https://example.com:8443/trusted/../untrusted","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
@@ -503,11 +617,11 @@ run_hook "Gemini MCP URL allowlist rejects encoded separator traversal" \
 run_hook "Gemini MCP URL allowlist rejects control-character path normalization" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"https://example.com:8443/trusted/.\t./untrusted","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
-    '.decision == "deny" and (.reason | contains("oap.missing_required_context"))'
+    '.decision == "deny" and (.reason | contains("oap.invalid_mcp_server"))'
 run_hook "Gemini MCP URL allowlist rejects backslash path traversal" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"https://example.com:8443/trusted/..\\untrusted","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
-    '.decision == "deny" and (.reason | contains("oap.missing_required_context"))'
+    '.decision == "deny" and (.reason | contains("oap.invalid_mcp_server"))'
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {

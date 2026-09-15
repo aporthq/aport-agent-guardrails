@@ -12,6 +12,8 @@ source "$LIB/common.sh"
 source "$LIB/config.sh"
 # shellcheck source=lib/guardrail-mode.sh
 source "$LIB/guardrail-mode.sh"
+# shellcheck source=lib/framework-setup.sh
+source "$LIB/framework-setup.sh"
 
 SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n)
 
@@ -332,6 +334,9 @@ resolve_set_mode_config_dir() {
 
 config_dir="$(resolve_set_mode_config_dir)"
 config_dir="${config_dir/#\~/$HOME}"
+refuse_symlink_path "$config_dir" || exit 1
+refuse_symlink_path "$config_dir/aport" || exit 1
+refuse_symlink_path "$config_dir/aport/guardrail-mode.env" || exit 1
 mkdir -p "$config_dir/aport"
 chmod 700 "$config_dir/aport" 2> /dev/null || true
 
