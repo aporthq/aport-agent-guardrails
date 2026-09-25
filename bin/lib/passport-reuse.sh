@@ -56,6 +56,9 @@ aport_apply_reused_passport() {
         hosted)
             # "cli" marks a bare agent id from --reuse-from; it is not a framework and has no config dir. For a
             # framework, the same reader that picks up a saved hosted config exports its id, key and URL.
+            # Start from a clean hosted credential state. A source mode file may omit the optional API key or
+            # URL, and those omissions must not inherit stale values from the shell or the target framework.
+            unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
             if [[ "$fw" != cli ]]; then
                 local src_dir
                 src_dir="$(get_config_dir "$fw")"

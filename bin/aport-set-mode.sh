@@ -92,7 +92,7 @@ has_explicit_config_dir_override() {
 
     case "$framework" in
         openclaw)
-            [[ -n "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}" ]]
             ;;
         cursor)
             [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" ]]
@@ -130,7 +130,7 @@ has_explicit_config_dir_override() {
 framework_specific_config_dir_override() {
     case "$framework" in
         openclaw)
-            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}"
             ;;
         cursor)
             printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}"

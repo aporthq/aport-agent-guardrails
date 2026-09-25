@@ -278,6 +278,46 @@ fi
 
 echo "  ✅ reset cursor prefers framework-specific config over generic APORT_CONFIG_DIR"
 
+OPENCLAW_STATE_RESET_DIR="$TEST_DIR/openclaw-state-reset"
+OPENCLAW_HOME_RESET_DIR="$TEST_DIR/openclaw-home-reset"
+mkdir -p "$OPENCLAW_STATE_RESET_DIR/aport" "$OPENCLAW_HOME_RESET_DIR/aport"
+cat > "$OPENCLAW_STATE_RESET_DIR/openclaw.json" << 'EOF'
+{
+  "plugins": {
+    "entries": {
+      "openclaw-aport": {
+        "enabled": true,
+        "config": {"mode": "api", "agentId": "ap_state_existing"}
+      },
+      "custom-plugin": {
+        "enabled": true
+      }
+    }
+  }
+}
+EOF
+touch "$OPENCLAW_STATE_RESET_DIR/aport/passport.json" "$OPENCLAW_HOME_RESET_DIR/aport/passport.json"
+
+echo "  Test: reset openclaw honors OPENCLAW_STATE_DIR..."
+OPENCLAW_STATE_DIR="$OPENCLAW_STATE_RESET_DIR" OPENCLAW_HOME="$OPENCLAW_HOME_RESET_DIR" "$DISPATCHER" reset openclaw --yes > "$TEST_DIR/reset-openclaw-state-dir.txt" 2>&1
+if [[ -d "$OPENCLAW_STATE_RESET_DIR/aport" ]]; then
+    echo "FAIL: expected OpenClaw state dir APort runtime to be removed" >&2
+    cat "$TEST_DIR/reset-openclaw-state-dir.txt" >&2
+    exit 1
+fi
+if [[ ! -f "$OPENCLAW_HOME_RESET_DIR/aport/passport.json" ]]; then
+    echo "FAIL: reset openclaw removed OPENCLAW_HOME instead of OPENCLAW_STATE_DIR" >&2
+    cat "$TEST_DIR/reset-openclaw-state-dir.txt" >&2
+    exit 1
+fi
+jq -e '(.plugins.entries | has("openclaw-aport") | not) and (.plugins.entries["custom-plugin"].enabled == true)' "$OPENCLAW_STATE_RESET_DIR/openclaw.json" > /dev/null || {
+    echo "FAIL: reset openclaw should clean only APort plugin entries from OPENCLAW_STATE_DIR" >&2
+    cat "$OPENCLAW_STATE_RESET_DIR/openclaw.json" >&2
+    exit 1
+}
+
+echo "  ✅ reset openclaw honors OPENCLAW_STATE_DIR"
+
 CODEX_DIR="$TEST_DIR/.codex"
 mkdir -p "$CODEX_DIR/aport"
 cat > "$CODEX_DIR/hooks.json" << 'EOF'

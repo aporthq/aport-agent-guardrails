@@ -70,6 +70,9 @@ payload_for_case() {
         browser)
             jq -nc --arg event "$event" --arg tool "$tool" '{hook_event_name:$event,tool_name:$tool,tool_call_id:"surface-browser",tool_input:{url:"https://example.com/surface",action:"open"}}'
             ;;
+        browser_unsupported)
+            jq -nc --arg event "$event" --arg tool "$tool" '{hook_event_name:$event,tool_name:$tool,tool_call_id:"surface-browser-unsupported",tool_input:{url:"https://example.com/surface",action:"type",text:"secret text must not be forwarded"}}'
+            ;;
         mcp)
             jq -nc --arg event "$event" --arg tool "$tool" '{hook_event_name:$event,tool_name:$tool,tool_call_id:"surface-mcp",mcp_context:{server_name:"github",tool_name:"issues.list"},tool_input:{id:"surface"}}'
             ;;

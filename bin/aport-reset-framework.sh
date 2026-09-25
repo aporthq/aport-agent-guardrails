@@ -64,7 +64,7 @@ has_project_aport_gemini_config() {
 framework_specific_config_dir_override() {
     case "$framework" in
         openclaw)
-            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}"
             ;;
         cursor)
             printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}"

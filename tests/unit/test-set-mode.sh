@@ -655,6 +655,25 @@ if (plugin.enforcementMode !== "warn") process.exit(3);
     exit 1
 }
 
+OPENCLAW_STATE_MODE_DIR="$TEST_DIR/openclaw-state-mode"
+mkdir -p "$OPENCLAW_STATE_MODE_DIR"
+cat > "$OPENCLAW_STATE_MODE_DIR/openclaw.json" << 'EOF'
+{"plugins":{"entries":{"openclaw-aport":{"enabled":true,"config":{"mode":"api","agentId":"ap_state_existing","apiUrl":"https://api.aport.io","enforcementMode":"enforce"}}}}}
+EOF
+OPENCLAW_STATE_DIR="$OPENCLAW_STATE_MODE_DIR" "$MODE_HELPER" openclaw --enforcement=warn > "$TEST_DIR/openclaw-state-mode.out"
+node -e '
+const fs = require("fs");
+const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const plugin = cfg.plugins.entries["openclaw-aport"].config;
+if (plugin.mode !== "api") process.exit(1);
+if (plugin.agentId !== "ap_state_existing") process.exit(2);
+if (plugin.enforcementMode !== "warn") process.exit(3);
+' "$OPENCLAW_STATE_MODE_DIR/openclaw.json" || {
+    echo "FAIL: OpenClaw mode switching should honor OPENCLAW_STATE_DIR" >&2
+    cat "$OPENCLAW_STATE_MODE_DIR/openclaw.json" >&2
+    exit 1
+}
+
 APORT_OPENCLAW_CONFIG_DIR="$OPENCLAW_DIR" "$MODE_HELPER" openclaw --mode=api > "$TEST_DIR/openclaw-preserve-enforcement.out"
 node -e '
 const fs = require("fs");

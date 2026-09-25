@@ -128,6 +128,34 @@ run_hook "Codex webrun reaches the web policy instead of unknown_tool" \
     '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
 
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex browser navigation reaches browser policy, not web fetch" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"browser","tool_input":{"action":"open","url":"https://example.com/page"}}' \
+    '. == {}'
+jq -e '
+  .original_tool == "browser"
+  and .guardrail_tool == "browser"
+  and .decision.policy_id == "web.browser.v1"
+  and .context.action == "navigate"
+  and .context.url == "https://example.com"
+' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex browser navigation should be authorized as web.browser metadata" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex browser navigation maps to web.browser"
+
+run_hook "Codex browser click fails closed locally instead of using web.fetch" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"browser","tool_input":{"action":"click","url":"https://example.com/page","selector":"#approve"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.interactive_browser_unsupported")) and ((.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool")) | not)'
+
+run_hook "Codex computer_use is recognized but not authorized as web.fetch locally" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"action":"type","text":"secret_text_should_not_persist","url":"https://example.com/form"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.interactive_browser_unsupported")) and ((.hookSpecificOutput.permissionDecisionReason | contains("secret_text_should_not_persist")) | not)'
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex image_gen.imagegen reaches image generation policy without prompt text" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"secret_should_not_persist","num_last_images_to_include":0}}' \
@@ -373,6 +401,11 @@ run_hook "Codex write_stdin carrying an allowed command reaches the command poli
 run_hook "Codex write_stdin partial command fails closed" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"rm"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+run_hook "Codex write_stdin denies trailing partial input after a newline" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"echo ok\nrm -"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
 
 run_hook "Codex write_stdin control-only input fails closed" \

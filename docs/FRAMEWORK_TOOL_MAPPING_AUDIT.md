@@ -118,6 +118,8 @@ Reviewed against official Codex hook docs: <https://learn.chatgpt.com/docs/hooks
 | single-target `apply_patch`, `Write`, `Edit`, `MultiEdit`, delete/replace aliases | `write` | `data.file.write.v1` |
 | path-based `Read`, `read_file`, `view_image`, `Grep` | `read` | `data.file.read.v1` |
 | `WebFetch`, `WebSearch` | `websearch` | `web.fetch.v1` |
+| `browser` / `browse` URL navigation | `browser` | `web.browser.v1` |
+| `computer_use`, interactive browser actions | `browser` | hosted: `web.browser.v1`; local: `oap.interactive_browser_unsupported` |
 | `image_gen.imagegen` / `image_genimagegen` | `image.generate` | `media.image.generate.v1` |
 | MCP tools and resource reads | `mcp.tool` | `mcp.tool.execute.v1` |
 | `Agent`, `Task`, subagent/send-message aliases | `session.create` | `agent.session.create.v1` |
@@ -132,7 +134,10 @@ command, and multi-target `apply_patch` payloads are denied in enforce mode.
 Metadata-only listing/glob tools may be allowed without an evaluator, but
 network-backed search is policy-checked. If a web/search payload has no concrete
 URL or domain, local enforce mode fails closed because domain policy cannot be
-evaluated safely.
+evaluated safely. Codex browser and desktop automation names are recognized
+separately from web fetch: URL navigation maps to `web.browser.v1`, while
+local interactive browser or `computer_use` calls fail closed unless hosted
+verification is used.
 
 ---
 

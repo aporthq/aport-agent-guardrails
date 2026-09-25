@@ -574,6 +574,40 @@ map_web() {
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
 }
 
+map_codex_browser() {
+    local browser_action
+
+    if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting URL or domain aliases"
+    fi
+
+    CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
+    if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
+        GUARDRAIL_TOOL="browser"
+        return
+    fi
+
+    browser_action="$(printf '%s' "$CONTEXT_JSON" | jq -r '.action // ""' 2> /dev/null || true)"
+    case "$browser_action" in
+        navigate)
+            GUARDRAIL_TOOL="browser"
+            ;;
+        *)
+            emit_response "deny" "web.browser" "oap.interactive_browser_unsupported" "Codex browser action '$browser_action' is interactive; local APort can only authorize URL navigation metadata"
+            ;;
+    esac
+}
+
+map_codex_computer_use() {
+    CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
+    if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
+        GUARDRAIL_TOOL="browser"
+        return
+    fi
+
+    emit_response "deny" "web.browser" "oap.interactive_browser_unsupported" "Codex computer_use is interactive desktop/browser automation; APort cannot safely authorize it as a single web fetch"
+}
+
 map_codex_image_generation() {
     local image_context referenced_count
 
@@ -700,7 +734,8 @@ has_mcp_context() {
 # could be typed in after a bare `bash` was authorized. The characters are therefore evaluated as shell input
 # against system.command.execute, the same policy that judged the command that opened the session.
 #
-# A non-empty chunk without a line terminator is incomplete shell evidence: "rm" now and " -rf /tmp/x\n" later
+# A non-empty chunk must end at a line boundary. A chunk that merely contains an earlier newline is still
+# incomplete evidence if more non-terminated text follows it: "echo ok\nrm -" now and "rf /tmp/x\n" later
 # would bypass a blocklist if each piece were judged independently. Control-only chunks can also execute a
 # command already buffered in the terminal. Without per-session terminal state, both cases fail closed.
 map_codex_write_stdin() {
@@ -718,7 +753,7 @@ map_codex_write_stdin() {
       ([$ti.chars, $ti.input, $ti.text, $ti.data, $ti.stdin] | map(select(type == "string")) | .[0] // "") as $s |
       [
         (if $s == "" then "empty" else "nonempty" end),
-        (if (($s | contains("\n")) or ($s | contains("\r"))) then "line" else "partial" end),
+        (if ($s | test("[\r\n]$")) then "line" else "partial" end),
         (if (($s | gsub("[ \t\r\n]"; "") | length) > 0) then "nonblank" else "blank" end)
       ] | @tsv
     ' 2> /dev/null || printf 'empty\tpartial\tblank')"
@@ -772,8 +807,14 @@ case "$FRAMEWORK" in
             read | readfile | read_file | viewimage | view_image | grep | grepsearch | grep_search | grepfiles | grep_files)
                 map_file_read
                 ;;
-            webfetch | web_fetch | websearch | web_search | webrun | web_run | web.run | browser | browse | openurl | open_url | fetchurl | fetch_url | httprequest | http_request | computeruse | computer_use)
+            webfetch | web_fetch | websearch | web_search | webrun | web_run | web.run | openurl | open_url | fetchurl | fetch_url | httprequest | http_request)
                 map_web
+                ;;
+            browser | browse)
+                map_codex_browser
+                ;;
+            computeruse | computer_use)
+                map_codex_computer_use
                 ;;
             image_gen.imagegen | image_genimagegen | imagegen | image_generate | imagegeneration | image_generation)
                 map_codex_image_generation
