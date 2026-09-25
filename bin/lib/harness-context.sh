@@ -228,6 +228,44 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_payload_has_conflicting_browser_action_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def normalize_action(v):
+        if (v | type) != "string" or (v | length) == 0 then ""
+        else
+          (v | ascii_downcase) as $a |
+          if ($a == "open" or $a == "goto" or $a == "go" or $a == "visit" or $a == "browse") then "navigate"
+          else $a
+          end
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      ([
+        normalize_action($root.action),
+        normalize_action($root.operation),
+        normalize_action($root.type),
+        ($root | argument_containers[] | normalize_action(.action), normalize_action(.operation), normalize_action(.type))
+      ] | map(select(. != "")) | unique | length) > 1
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
 aport_hook_payload_has_conflicting_mcp_routing_aliases() {
     local payload="$1"
     jq -e '
