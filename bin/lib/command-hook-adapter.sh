@@ -371,10 +371,21 @@ fi
 GUARDRAIL_TOOL=""
 CONTEXT_JSON="{}"
 
-# The shape of an unknown Codex tool's payload: shell, web, write, read, or empty when nothing is recognisable
-# or the fallback is off. Looks at tool_input/input/args like aport_hook_context_from_payload does.
+# The shape of an unmapped Codex tool's payload: shell, web, write, read, "mixed", or empty.
+#
+# STRICT BY DEFAULT. An unmapped tool denies oap.unknown_tool unless the operator sets
+# APORT_CODEX_TOOL_FALLBACK=on. Routing by payload shape alone authorizes by shape, not by what the tool does:
+# a name this list has never seen, carrying a generic `url`, `path` or `command`, would inherit whatever
+# capability that field maps to. A payment or database tool with a `url` field would be judged by web.fetch.
+# Naming the tool is the operator's job; guessing is not a substitute for it.
+#
+# Even when the operator opts in, a payload that carries MORE THAN ONE effect-bearing field is "mixed" and
+# denies. Picking one effect means dropping the others unevaluated: {"command":"rm -rf /","url":"https://ok"}
+# used to route to web.fetch, drop the command, and return allow.
+#
+# Looks at tool_input/input/args like aport_hook_context_from_payload does.
 codex_payload_shape() {
-    [ "${APORT_CODEX_TOOL_FALLBACK:-on}" != "off" ] || return 0
+    [ "${APORT_CODEX_TOOL_FALLBACK:-off}" = "on" ] || return 0
     printf '%s' "$1" | jq -r '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
       def str(v): (v | type) == "string" and (v | length) > 0;
@@ -383,7 +394,10 @@ codex_payload_shape() {
       (str($ti.url)) as $url |
       (str($ti.file_path) or str($ti.path)) as $path |
       (str($ti.content) or ($ti.edits | type) == "array" or str($ti.new_string)) as $content |
-      if $url then "web"
+      # A path is read evidence on its own and write evidence with content, so it counts once either way.
+      ([$cmd, $url, $path] | map(select(. == true)) | length) as $effects |
+      if $effects > 1 then "mixed"
+      elif $url then "web"
       elif $path and $content then "write"
       elif $path then "read"
       elif $cmd then "shell"
@@ -601,6 +615,35 @@ has_mcp_context() {
     printf '%s' "$INPUT" | jq -e '(.mcp_context | type) == "object" and (.mcp_context | length) > 0' > /dev/null 2>&1
 }
 
+# Codex write_stdin submits keystrokes into a session started by exec_command or unified_exec. When that
+# session is an interactive shell, the keystrokes ARE a new command: grouping write_stdin with the
+# bookkeeping tools returned allow without ever looking at `chars`, so anything the shell allowlist denies
+# could be typed in after a bare `bash` was authorized. The characters are therefore evaluated as shell input
+# against system.command.execute, the same policy that judged the command that opened the session.
+#
+# Evaluating beats denying outright: write_stdin is how Codex drives a REPL or answers a prompt, and a blanket
+# deny would push users to turn the hook off. The trade-off is that keystrokes bound for a non-shell process
+# (a pager, a REPL) are also judged by the command policy, which can deny input a shell would never run.
+map_codex_write_stdin() {
+    local stdin_chars
+    stdin_chars="$(printf '%s' "$INPUT" | jq -r '
+      def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
+      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
+      [$ti.chars, $ti.input, $ti.text, $ti.data, $ti.stdin]
+      | map(select(type == "string"))
+      | .[0] // ""
+    ' 2> /dev/null || true)"
+    # Nothing typed is nothing to judge; the session itself was already authorized.
+    if [ -z "${stdin_chars//[[:space:]$'\n']/}" ]; then
+        emit_response "allow" "" "" ""
+    fi
+    GUARDRAIL_TOOL="bash"
+    CONTEXT_JSON="$(jq -nc --arg command "$stdin_chars" '{command: $command}')"
+    if aport_is_reentrant_guardrail_command "$stdin_chars" "$ROOT_DIR"; then
+        emit_response "allow" "" "" ""
+    fi
+}
+
 map_goose_text_editor() {
     local editor_command
     editor_command="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // .input.command // .args.command // ""' 2> /dev/null || true)"
@@ -639,9 +682,12 @@ case "$FRAMEWORK" in
             glob | list | ls | lsp | listdir | list_dir)
                 map_metadata_or_path_read
                 ;;
-            todoread | toolsearch | tool_search | updateplan | update_plan | requestuserinput | request_user_input | writestdin | write_stdin | memoryoperators | memory_*)
-                # Session bookkeeping, plan updates, user prompts, stdin to an already-authorized process, and
-                # Codex's own memory store: no new effect outside the session, nothing for a policy to judge.
+            writestdin | write_stdin)
+                map_codex_write_stdin
+                ;;
+            todoread | toolsearch | tool_search | updateplan | update_plan | requestuserinput | request_user_input | memoryoperators | memory_*)
+                # Session bookkeeping, plan updates, user prompts, and Codex's own memory store: no new effect
+                # outside the session, nothing for a policy to judge.
                 emit_response "allow" "" "" ""
                 ;;
             mcp__* | mcp:* | callmcptool | call_mcp_tool | readmcpresourcetool | read_mcp_resource_tool)
@@ -654,17 +700,23 @@ case "$FRAMEWORK" in
                 emit_response "deny" "hook.tool.map" "oap.missing_tool_name" "Codex $HOOK_EVENT payload did not include tool_name"
                 ;;
             *)
-                # Codex adds tools faster than this list is updated. A name that is not listed is routed by what
-                # its payload carries, which is the evidence the policies judge anyway: a command and no file or
-                # URL is a shell call, a URL is a web call, a path with content is a write, a path alone is a
-                # read. A payload that says nothing recognisable still fails closed. Names are never guessed
-                # from: "execute_sql" with a command is judged by the command policy against that string.
-                # Set APORT_CODEX_TOOL_FALLBACK=off to keep the strict list only.
+                # An unmapped tool denies. Codex adds tools faster than this list is updated, but a name that
+                # is not listed is a name nobody has decided the capability for, and the payload cannot decide
+                # it: a `url` on a payment tool is not a web fetch. An operator who has reviewed their own
+                # tool surface can set APORT_CODEX_TOOL_FALLBACK=on to route unmapped tools by payload shape,
+                # and even then a payload with more than one effect-bearing field denies rather than having
+                # one effect picked and the rest dropped.
                 case "$(codex_payload_shape "$INPUT")" in
                     shell) map_shell ;;
                     web) map_web ;;
                     write) map_file_write ;;
                     read) map_file_read ;;
+                    mixed)
+                        # Same code and hard-failure handling as the conflicting-alias denials above: the
+                        # payload is unusable as evidence, not merely unrecognised.
+                        emit_response "deny" "hook.tool.map" "oap.invalid_tool_arguments" \
+                            "Codex tool $ORIGINAL_TOOL carries more than one effect (command, URL or path); APort cannot authorize it by payload shape"
+                        ;;
                     *) emit_response "deny" "hook.tool.map" "oap.unknown_tool" "Unknown Codex tool: $ORIGINAL_TOOL" ;;
                 esac
                 ;;

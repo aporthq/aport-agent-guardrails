@@ -169,9 +169,12 @@ if [ "$HOOK_EVENT" = "beforeReadFile" ] || [ "$HOOK_EVENT" = "beforeTabFileRead"
     # beforeReadFile (Agent) and beforeTabFileRead (Tab completions) share the
     # same file_path/content input and the same permission output. Only
     # file_path is evaluated; content and attachments are never forwarded.
+    # No usable path is no evidence, and a read hook with no evidence must not allow. Both events are
+    # documented to carry file_path; a payload without one (or with one the read context builder rejects)
+    # is a payload this hook cannot authorize, so it denies rather than waving the read through.
     FILE_PATH="$(echo "$INPUT" | jq -r '.file_path // ""' 2> /dev/null || true)"
     if ! aport_hook_try_read_evaluation_from_file_path "$FILE_PATH"; then
-        allow
+        deny_or_warn "data.file.read" "oap.missing_file_path" "$HOOK_EVENT did not provide a file path that APort can evaluate"
     fi
 
 elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INPUT" | jq -e '.subagent_id' &> /dev/null; }; then

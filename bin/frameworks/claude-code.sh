@@ -26,7 +26,9 @@ APORT_HOOK_MARKER="__aport_hook"
 # enforced with an AbortSignal in src/evaluator.js) or a slow hosted evaluator would fail
 # open. The budget is derived, not a second constant: the evaluator bound plus a 15 s
 # margin for node startup and the audit write. Upstream default for command hooks is 600s.
-APORT_HOOK_TIMEOUT="${APORT_HOOK_TIMEOUT:-$((${APORT_API_TIMEOUT:-15} + 15))}"
+# aport_api_timeout_seconds applies the evaluator's own normalization, so 0, -5, "abc" and
+# "1.5" cannot produce a budget below the bound or a bash arithmetic error here.
+APORT_HOOK_TIMEOUT="${APORT_HOOK_TIMEOUT:-$(($(aport_api_timeout_seconds) + 15))}"
 
 run_setup() {
     parse_guardrail_mode_args "$@"
@@ -175,7 +177,7 @@ _write_claude_settings() {
               "type": "command",
               "command": "${escaped_cmd}",
               "__aport_hook": true,
-              "timeout": 30
+              "timeout": ${APORT_HOOK_TIMEOUT}
             }
         ]
       }

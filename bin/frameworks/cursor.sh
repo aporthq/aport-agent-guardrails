@@ -25,7 +25,9 @@ APORT_HOOK_MARKER="__aport_hook"
 # evaluator's request bound (APORT_API_TIMEOUT, default 15 s, src/evaluator.js) plus a
 # 15 s margin for node startup and the audit write, so a slow hosted evaluator is
 # reported as oap.evaluation_error with a reason instead of a bare hook timeout.
-APORT_HOOK_TIMEOUT="${APORT_HOOK_TIMEOUT:-$((${APORT_API_TIMEOUT:-15} + 15))}"
+# aport_api_timeout_seconds applies the evaluator's own normalization, so 0, -5, "abc" and
+# "1.5" cannot produce a budget below the bound or a bash arithmetic error here.
+APORT_HOOK_TIMEOUT="${APORT_HOOK_TIMEOUT:-$(($(aport_api_timeout_seconds) + 15))}"
 
 # beforeTabFileRead gates file reads made by Tab (inline completions), not by
 # the Agent. It is opt-in because it runs the evaluator on every Tab file read

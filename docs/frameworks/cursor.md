@@ -46,6 +46,8 @@ Every payload also carries `hook_event_name`, `conversation_id`, `generation_id`
 
 Output: `{"permission": "allow" | "deny", "user_message": ..., "agent_message": ...}`. The hook also emits `allowed`, `agentMessage` and `reason` for older consumers. Exit code 2 is a deny; Cursor treats any other non-zero exit, a crash, a timeout or empty output as fail-open unless the entry sets `failClosed: true`, which the installer does. `timeout` is in seconds; the installer writes `APORT_API_TIMEOUT` (default 15) plus a 15 s margin, so 30 by default. Cursor rejects invalid JSON or an out-of-schema response from a permission hook by blocking the action. `permission: "ask"` exists upstream for shell and MCP hooks; APort never returns it. Hooks that cannot block (`afterFileEdit`, `afterShellExecution`, `postToolUse`, `beforeSubmitPrompt`, `stop`, `sessionStart` and the rest) are not registered.
 
+Both read events deny with `oap.missing_file_path` when the payload carries no usable `file_path`. A read hook with no path has no evidence to evaluate, so it cannot allow the read.
+
 **Tab completions:** `beforeTabFileRead` fires when Tab (inline completions) reads a file, with the same `file_path`/`content` input and `permission` output as `beforeReadFile`. It is off by default because it runs the evaluator on every Tab file read and a passport without `data.file.read` would block completions. To register it, install with `APORT_CURSOR_TAB_READ_HOOK=1`; a later install without the variable removes the APort entry again. Cursor's `matcher` field (a regex on the tool type, subagent type or command text) is left unset so every event reaches APort.
 
 **Hook script path:** The installer copies a stable APort runtime into

@@ -121,8 +121,7 @@ jq -e '
 }
 echo "  ✅ Shell session decision context stores metadata only"
 
-# Codex adds tools faster than the routing list is updated: names that say what they do reach a policy instead
-# of a hard oap.unknown_tool deny, names that say nothing still fail closed, and the fallback can be switched off.
+# Explicitly mapped Codex tools reach their policy by name, never by payload shape.
 run_hook "Codex webrun reaches the web policy instead of unknown_tool" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"webrun","tool_input":{"url":"https://example.com/page"}}' \
@@ -138,34 +137,68 @@ run_hook "Codex local_shell maps to the shell policy" \
     '{"hook_event_name":"PreToolUse","tool_name":"local_shell","tool_input":{"command":"rm -rf /tmp/test"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
 
-# Unlisted Codex tools are routed by payload shape, never by name: a url is a web call, a path with content a
-# write, a path alone a read, a command a shell call, anything else unknown.
-run_hook "Codex fallback routes an unlisted tool with a url to the web policy" \
+# An unmapped Codex tool denies by default. Routing by payload shape authorizes by shape, not by what the
+# tool does, so it is off unless the operator turns it on for a tool surface they have reviewed.
+run_hook "Codex unmapped tool with a url denies by default" \
     codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+run_hook "Codex unmapped tool with a command denies by default" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"execute_sql","tool_input":{"command":"ls -la"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+run_hook "Codex unmapped tool with a path denies by default" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"vault_reader","tool_input":{"path":"/etc/hosts"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+# Same three payloads with the operator opt-in. They now reach a policy instead of oap.unknown_tool.
+run_codex_fallback_on() {
+    local desc="$1" input="$2" assertion="$3"
+    local out="$TEST_DIR/out-codex-fallback-on-${RANDOM}.json"
+    printf '%s' "$input" \
+        | APORT_CODEX_TOOL_FALLBACK=on APORT_CODEX_CONFIG_DIR="$TEST_DIR" "$CODEX" > "$out" 2> /dev/null || true
+    jq -e "$assertion" "$out" > /dev/null || {
+        echo "FAIL: $desc" >&2
+        cat "$out" >&2
+        exit 1
+    }
+    echo "  ✅ $desc"
+}
+
+run_codex_fallback_on "Opt-in fallback routes an unmapped tool with a url to the web policy" \
     '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
     '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
 
-run_hook "Codex fallback routes webrun {url} to the web policy" \
-    codex "$CODEX" \
-    '{"hook_event_name":"PreToolUse","tool_name":"webrun","tool_input":{"url":"https://example.com/"}}' \
-    '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
-
 # execute_sql carries only a command, so the command policy judges that string (allowed_commands,
-# blocked_patterns); nothing in the name is trusted. That is the fallback's contract, stated here on purpose.
-run_hook "Codex fallback judges an unlisted tool that carries only a command by the command policy" \
-    codex "$CODEX" \
+# blocked_patterns); nothing in the name is trusted. That is the opt-in fallback's contract.
+run_codex_fallback_on "Opt-in fallback judges a command-only unmapped tool by the command policy" \
     '{"hook_event_name":"PreToolUse","tool_name":"execute_sql","tool_input":{"command":"rm -rf /tmp/test"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
 
-run_hook "Codex fallback still fails closed on a payload that says nothing" \
-    codex "$CODEX" \
+run_codex_fallback_on "Opt-in fallback still fails closed on a payload that says nothing" \
     '{"hook_event_name":"PreToolUse","tool_name":"frobnicate","tool_input":{"x":1}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
 
-run_hook "Codex fallback: a name that sounds like a read but carries no path is unknown" \
-    codex "$CODEX" \
+run_codex_fallback_on "Opt-in fallback: a name that sounds like a read but carries no path is unknown" \
     '{"hook_event_name":"PreToolUse","tool_name":"read_secret_from_vault","tool_input":{"key":"db/creds"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+# A payload carrying more than one effect denies even with the opt-in. Picking one effect means dropping the
+# others unevaluated: this payload used to route to web.fetch, drop the denied command, and return allow.
+run_codex_fallback_on "Opt-in fallback denies a mixed command+url payload instead of picking one" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"command":"rm -rf /","url":"https://example.com/"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_codex_fallback_on "Opt-in fallback denies a mixed command+path payload" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"command":"rm -rf /","file_path":"/tmp/x","content":"hi"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_codex_fallback_on "Opt-in fallback denies a mixed url+path payload" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"url":"https://example.com/","file_path":"/tmp/x"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
 
 CODEX_FALLBACK_OFF_OUT="$TEST_DIR/out-codex-fallback-off.json"
 printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
@@ -175,7 +208,26 @@ jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput
     cat "$CODEX_FALLBACK_OFF_OUT" >&2
     exit 1
 }
-echo "  ✅ Codex tool fallback can be switched off"
+echo "  ✅ Codex tool fallback can be switched off explicitly too"
+
+# write_stdin submits keystrokes into a session an exec_command already opened. When that session is an
+# interactive shell the keystrokes are a new command, so they are evaluated as shell input rather than
+# waved through as session bookkeeping.
+run_hook "Codex write_stdin carrying a denied command does not allow" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"rm -rf /tmp/test\n"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny"'
+
+run_hook "Codex write_stdin carrying an allowed command reaches the command policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"ls -la\n"}}' \
+    '. == {}'
+
+run_hook "Codex write_stdin with no characters is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"\n"}}' \
+    '. == {}'
+echo "  ✅ Codex write_stdin is evaluated, not assumed harmless"
 
 run_hook "Codex exec_command maps to shell policy" \
     codex "$CODEX" \
@@ -186,6 +238,37 @@ run_hook "Codex exec_command rejects untrusted shell override" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la","shell":"/tmp/untrusted-shell"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.shell_not_allowed"))'
+
+# The trust check has to see the whole path. An attacker-planted /tmp/bash basenames to "bash", which is in
+# the trusted set, so a context builder that basenamed before the check let the host run /tmp/bash while
+# APort judged only "ls -la". The name of the interpreter is not evidence about the interpreter.
+run_hook "Codex exec_command rejects /tmp/bash, whose basename would pass as trusted" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la","shell":"/tmp/bash"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.shell_not_allowed"))'
+
+run_hook "Codex exec_command rejects a planted /tmp/sh too" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la","shell":"/tmp/sh"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.shell_not_allowed"))'
+
+# The context the trust check reads keeps the raw path; only normalize_api_context basenames it, on the way
+# to the hosted API, whose schema takes the enum and not a path.
+(
+    source "$REPO_ROOT/bin/lib/harness-context.sh"
+    source "$REPO_ROOT/bin/lib/validation.sh"
+    raw="$(aport_hook_context_from_payload '{"tool_input":{"cmd":"ls","shell":"/bin/bash"}}' shell exec_command codex)"
+    [[ "$(printf '%s' "$raw" | jq -r '.shell')" == "/bin/bash" ]] || {
+        echo "FAIL: hook context must keep the raw shell path, got $raw" >&2
+        exit 1
+    }
+    api="$(normalize_api_context system.command.execute.v1 "$raw")"
+    [[ "$(printf '%s' "$api" | jq -r '.shell')" == "bash" ]] || {
+        echo "FAIL: API context must receive the basename, got $api" >&2
+        exit 1
+    }
+) || exit 1
+echo "  ✅ Shell trust is decided on the full path; the API still gets the basename"
 
 ALT_BASH_DIR="$TEST_DIR/alternate-bash"
 mkdir -p "$ALT_BASH_DIR"

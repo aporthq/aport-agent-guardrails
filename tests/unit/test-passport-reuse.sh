@@ -43,7 +43,10 @@ listing="$(aport_list_device_passports claude-code)"
 aport_apply_reused_passport "cursor|local|$HOME/.cursor/aport/passport.json" "$HOME/.claude"
 [[ -f "$HOME/.claude/aport/passport.json" ]] || fail "passport not copied"
 grep -q local-cursor "$HOME/.claude/aport/passport.json" || fail "copied passport has wrong content"
-mode="$(stat -f '%Lp' "$HOME/.claude/aport/passport.json" 2> /dev/null || stat -c '%a' "$HOME/.claude/aport/passport.json")"
+# GNU stat has no -f '%Lp'; it reads '%Lp' as a filename, prints a usage error and exits nonzero, so the
+# first command's stdout has to be discarded or both outputs end up concatenated in $mode. Same order and
+# same redirection as tests/frameworks/*/setup.sh: GNU first, BSD as the fallback.
+mode="$(stat -c '%a' "$HOME/.claude/aport/passport.json" 2> /dev/null || stat -f '%Lp' "$HOME/.claude/aport/passport.json" 2> /dev/null)"
 [[ "$mode" = "600" ]] || fail "passport mode is $mode, expected 600"
 [[ "${APORT_PASSPORT_REUSED:-}" = "1" ]] || fail "APORT_PASSPORT_REUSED not set"
 [[ "${APORT_PASSPORT_REUSED_FROM:-}" = "cursor" ]] || fail "APORT_PASSPORT_REUSED_FROM not set"
@@ -173,5 +176,89 @@ echo "PASS: symlinked destination refused"
 
 # 14. A bare agent id is not a local passport, so --mode=local --reuse-from=<agent id> fails clearly.
 if aport_resolve_reuse_ref ap_abcdefabcdefabcdefabcdefabcdefab claude-code local 2> /dev/null; then fail "an agent id must not resolve when only local passports are wanted"; fi
+
+# 15. A failed copy must not report success. Callers invoke aport_apply_reused_passport inside an `if` or
+#     after a `||`, which turns errexit off for everything the function runs, so an unchecked cp that failed
+#     would fall through to the success log and return 0: the wizard would be skipped with no passport, or an
+#     existing passport would be overwritten after a backup that is not there.
+#     The function chmods its own destination directory to 700, so an unwritable directory cannot force the
+#     failure; a read-only passport.json can, and it is a state a user reaches by hardening the file by hand.
+#     The backup succeeds here and the destination copy fails, which is exactly the case where returning 0
+#     would have skipped the wizard with the OLD passport still in place.
+BLOCKED_DIR="$HOME/.blocked-dest"
+mkdir -p "$BLOCKED_DIR/aport"
+printf '{"passport_id":"read-only-dest","spec_version":"oap/1.0","capabilities":[]}\n' > "$BLOCKED_DIR/aport/passport.json"
+chmod 400 "$BLOCKED_DIR/aport/passport.json"
+unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM
+if aport_apply_reused_passport "cursor|local|$HOME/.cursor/aport/passport.json" "$BLOCKED_DIR" 2> "$TEST_DIR/blocked-dest.err"; then
+    chmod 600 "$BLOCKED_DIR/aport/passport.json"
+    fail "a failed destination copy must return non-zero"
+fi
+[[ -z "${APORT_PASSPORT_REUSED:-}" ]] || fail "a failed destination copy must not set the wizard-skip flag"
+[[ -z "${APORT_PASSPORT_REUSED_FROM:-}" ]] || fail "a failed destination copy must not record a source"
+grep -q read-only-dest "$BLOCKED_DIR/aport/passport.json" || fail "the unwritable passport should be unchanged"
+grep -qi "could not copy" "$TEST_DIR/blocked-dest.err" || fail "the failure must say what went wrong: $(cat "$TEST_DIR/blocked-dest.err")"
+chmod 600 "$BLOCKED_DIR/aport/passport.json"
+echo "PASS: a failed destination copy fails loudly"
+
+#     Unwritable backup: the existing passport must survive and the reuse must fail, because the backup the
+#     function promises in its log line could not be written. A read-only .bak makes `cp dest dest.bak` fail.
+BAK_DIR="$HOME/.unwritable-backup"
+mkdir -p "$BAK_DIR/aport"
+printf '{"passport_id":"must-survive","spec_version":"oap/1.0","capabilities":[]}\n' > "$BAK_DIR/aport/passport.json"
+printf 'reserved\n' > "$BAK_DIR/aport/passport.json.bak"
+chmod 400 "$BAK_DIR/aport/passport.json.bak"
+unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM
+if aport_apply_reused_passport "cursor|local|$HOME/.cursor/aport/passport.json" "$BAK_DIR" 2> "$TEST_DIR/bak.err"; then
+    chmod 600 "$BAK_DIR/aport/passport.json.bak"
+    fail "a failed backup must return non-zero"
+fi
+grep -q must-survive "$BAK_DIR/aport/passport.json" || fail "a failed backup must leave the existing passport in place"
+[[ -z "${APORT_PASSPORT_REUSED:-}" ]] || fail "a failed backup must not set the wizard-skip flag"
+grep -qi "could not back up" "$TEST_DIR/bak.err" || fail "the failure must name the backup: $(cat "$TEST_DIR/bak.err")"
+chmod 600 "$BAK_DIR/aport/passport.json.bak"
+echo "PASS: a failed backup leaves the existing passport alone"
+
+# 16. OpenClaw stores its passport under $OPENCLAW_HOME when that is set (bin/openclaw), so the scanner has
+#     to resolve the same aliases or it misses a passport already on the device and offers to mint a duplicate.
+OC_HOME="$HOME/.openclaw-custom-home"
+mkdir -p "$OC_HOME/aport"
+printf '{"passport_id":"local-openclaw-home","spec_version":"oap/1.0","capabilities":[]}\n' > "$OC_HOME/aport/passport.json"
+oc_listing="$(OPENCLAW_HOME="$OC_HOME" aport_list_device_passports claude-code)"
+[[ "$oc_listing" == *"openclaw|local|$OC_HOME/aport/passport.json"* ]] \
+    || fail "OPENCLAW_HOME passport not discovered: $oc_listing"
+oc_listing="$(OPENCLAW_CONFIG_DIR="$OC_HOME" aport_list_device_passports claude-code)"
+[[ "$oc_listing" == *"openclaw|local|$OC_HOME/aport/passport.json"* ]] \
+    || fail "OPENCLAW_CONFIG_DIR passport not discovered: $oc_listing"
+# APort's own override still wins over both, which is the precedence set-mode and reset already use.
+OTHER_OC="$HOME/.openclaw-aport-override"
+mkdir -p "$OTHER_OC/aport"
+printf '{"passport_id":"aport-override","spec_version":"oap/1.0","capabilities":[]}\n' > "$OTHER_OC/aport/passport.json"
+oc_listing="$(APORT_OPENCLAW_CONFIG_DIR="$OTHER_OC" OPENCLAW_HOME="$OC_HOME" aport_list_device_passports claude-code)"
+[[ "$oc_listing" == *"openclaw|local|$OTHER_OC/aport/passport.json"* ]] \
+    || fail "APORT_OPENCLAW_CONFIG_DIR must win over OPENCLAW_HOME: $oc_listing"
+# And --reuse-from=openclaw resolves the alias too, not just the listing.
+oc_line="$(OPENCLAW_HOME="$OC_HOME" aport_resolve_reuse_ref openclaw claude-code)"
+[[ "$oc_line" = "openclaw|local|$OC_HOME/aport/passport.json" ]] || fail "--reuse-from=openclaw did not resolve OPENCLAW_HOME: $oc_line"
+echo "PASS: OpenClaw home aliases are resolved during discovery"
+
+# 17. --reuse-from= with an empty value is refused like the separated form with no argument. Storing "" read
+#     as "not provided" everywhere later, so a non-interactive setup would mint a new passport anyway.
+# shellcheck source=../../bin/lib/guardrail-mode.sh
+source "$REPO_ROOT/bin/lib/guardrail-mode.sh"
+unset APORT_REUSE_PASSPORT_FROM_CLI
+if parse_guardrail_mode_args --reuse-from= 2> "$TEST_DIR/empty-reuse.err"; then
+    fail "--reuse-from= with an empty value must be refused"
+fi
+grep -q "reuse-from requires" "$TEST_DIR/empty-reuse.err" || fail "the refusal must name the option: $(cat "$TEST_DIR/empty-reuse.err")"
+[[ -z "${APORT_REUSE_PASSPORT_FROM_CLI:-}" ]] || fail "a refused --reuse-from= must not store a value"
+# The separated form with no argument is still refused, and a real value is still accepted.
+unset APORT_REUSE_PASSPORT_FROM_CLI
+if parse_guardrail_mode_args --reuse-from 2> /dev/null; then fail "--reuse-from with no argument must be refused"; fi
+unset APORT_REUSE_PASSPORT_FROM_CLI
+parse_guardrail_mode_args --reuse-from=cursor || fail "--reuse-from=cursor must still be accepted"
+[[ "${APORT_REUSE_PASSPORT_FROM_CLI:-}" = "cursor" ]] || fail "--reuse-from=cursor did not store the value"
+unset APORT_REUSE_PASSPORT_FROM_CLI
+echo "PASS: --reuse-from= with an empty value is refused"
 
 echo "PASS: passport reuse"
