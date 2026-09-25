@@ -104,6 +104,7 @@ aport_apply_reused_passport() {
                 fi
             fi
             chmod 600 "$dest" 2> /dev/null || true
+            unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
             export APORT_PASSPORT_REUSED=1
             export APORT_PASSPORT_REUSED_FROM="$fw"
             log_info "Reusing local passport from $fw ($ref)"

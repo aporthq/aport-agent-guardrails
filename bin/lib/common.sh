@@ -82,6 +82,24 @@ aport_api_timeout_seconds() {
     printf '%s\n' "$seconds"
 }
 
+# Hook runtimes must outlive the evaluator request bound. A low or malformed explicit hook timeout is safer to
+# clamp than to honor, because Claude Code treats hook timeouts as non-blocking.
+aport_hook_timeout_seconds() {
+    local raw="${1-${APORT_HOOK_TIMEOUT:-}}"
+    local min_timeout override_timeout
+    min_timeout="$(($(aport_api_timeout_seconds) + 15))"
+    if [[ -z "${raw:-}" ]]; then
+        printf '%s\n' "$min_timeout"
+        return 0
+    fi
+    override_timeout="$(aport_api_timeout_seconds "$raw")"
+    if ((override_timeout < min_timeout)); then
+        printf '%s\n' "$min_timeout"
+    else
+        printf '%s\n' "$override_timeout"
+    fi
+}
+
 # Export for subshells
 export SCRIPT_DIR ROOT_DIR
-export -f log_info log_warn log_error require_cmd aport_api_timeout_seconds
+export -f log_info log_warn log_error require_cmd aport_api_timeout_seconds aport_hook_timeout_seconds
