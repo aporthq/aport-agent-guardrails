@@ -200,6 +200,14 @@ run_codex_fallback_on "Opt-in fallback denies a mixed url+path payload" \
     '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"url":"https://example.com/","file_path":"/tmp/x"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
 
+run_codex_fallback_on "Opt-in fallback denies mixed effects hidden in nested args" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"args":{"command":"rm -rf /tmp/test"},"url":"https://example.com/"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_codex_fallback_on "Opt-in fallback denies mixed effects hidden in nested arguments" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","args":{"arguments":{"command":"rm -rf /tmp/test"},"url":"https://example.com/"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
 CODEX_FALLBACK_OFF_OUT="$TEST_DIR/out-codex-fallback-off.json"
 printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
     | APORT_CODEX_TOOL_FALLBACK=off APORT_CODEX_CONFIG_DIR="$TEST_DIR" "$CODEX" > "$CODEX_FALLBACK_OFF_OUT" 2> /dev/null || true
@@ -223,9 +231,19 @@ run_hook "Codex write_stdin carrying an allowed command reaches the command poli
     '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"ls -la\n"}}' \
     '. == {}'
 
-run_hook "Codex write_stdin with no characters is allowed" \
+run_hook "Codex write_stdin partial command fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"rm"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+run_hook "Codex write_stdin control-only input fails closed" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"\n"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+run_hook "Codex write_stdin with no characters is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":""}}' \
     '. == {}'
 echo "  ✅ Codex write_stdin is evaluated, not assumed harmless"
 
@@ -412,7 +430,12 @@ EOF
 run_hook "Codex warn mode allows with additionalContext" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
-    '.systemMessage and .hookSpecificOutput.additionalContext'
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("report-only mode allowed"))
+      and (.systemMessage | contains("Evidence:"))
+      and (.systemMessage | contains("mode codex --enforcement=enforce"))
+      and ((.systemMessage | contains("Review or update the hosted passport")) | not)'
 
 run_hook "Codex warn mode keeps shell parser ambiguity blocking" \
     codex "$CODEX" \
@@ -1804,7 +1827,11 @@ EOF
 run_hook "Goose warn mode allows with reason" \
     goose "$GOOSE" \
     '{"hook_event_name":"PreToolUse","tool_name":"developer__shell","tool_input":{"command":"rm -rf /tmp/x"}}' \
-    '.decision == "allow" and (.reason | contains("APort Warning"))'
+    '.decision == "allow"
+      and (.reason | contains("APort Warning"))
+      and (.reason | contains("Evidence:"))
+      and (.reason | contains("mode goose --enforcement=enforce"))
+      and ((.reason | contains("Review or update the hosted passport")) | not)'
 
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local

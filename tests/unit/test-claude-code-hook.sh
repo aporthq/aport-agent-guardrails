@@ -129,6 +129,37 @@ printf '%s' "$FALLBACK_JSON" | "$JQ_BIN" -e '
 }
 echo "  ✅ no-jq Claude Code response fallback: valid escaped JSON"
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+OUT_WARN="$TEST_DIR/claude-warn-shell.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT_WARN" 2> /dev/null
+EXIT_WARN=$?
+set -e
+[[ "$EXIT_WARN" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Claude warn-mode shell denial, got $EXIT_WARN" >&2
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("report-only mode allowed"))
+  and (.systemMessage | contains("Evidence:"))
+  and (.systemMessage | contains("mode claude-code --enforcement=enforce"))
+  and ((.systemMessage | contains("Review or update the hosted passport")) | not)
+' "$OUT_WARN" > /dev/null || {
+    echo "FAIL: Claude warn-mode message should point to evidence and enforce-mode CTA" >&2
+    cat "$OUT_WARN" >&2
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Claude warn-mode message: evidence plus enforce CTA"
+
 # 1. Allow: Read with allowed path (local evaluator)
 echo "  Test: Read tool -> allow (allowed path)..."
 OUT1="$TEST_DIR/claude-allow-read.txt"

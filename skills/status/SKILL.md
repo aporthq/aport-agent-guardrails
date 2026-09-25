@@ -23,6 +23,7 @@ The audit log is `<config dir>/aport/audit.log`, next to the passport that Step 
 
 ```bash
 cat ~/.claude/aport/audit.log 2>/dev/null | tail -10 || echo "No audit log found."
+```
 
 Report the results to the user.
 

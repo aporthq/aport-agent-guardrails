@@ -142,11 +142,11 @@ deny_or_warn() {
     local failure_class="${4:-hard}"
     local notice user_warning
     if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
-        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message")"
+        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "claude-code")"
+        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "claude-code")"
         warn_allow "$notice" "$user_warning"
     fi
-    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
+    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "claude-code")"
     deny "$notice"
 }
 
