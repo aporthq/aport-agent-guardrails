@@ -70,7 +70,9 @@ The hook wrapper is `bin/aport-codex-hook.sh`, which delegates to the shared `bi
 | `shell`, `local_shell`, `exec_command`, `unified_exec`, `container_exec`, `js_repl`, `code_mode_exec` and other shell or exec tools | `system.command.execute.v1` |
 | `apply_patch`, write/edit/delete tools | `data.file.write.v1` |
 | `read_file`, `view_image`, `grep` and other path-based reads and content searches | `data.file.read.v1` |
-| `web_fetch`, `web_search`, `webrun`, `browser`, `open_url`, `fetch_url`, `http_request`, `computer_use` | `web.fetch.v1` |
+| `web_fetch`, `web_search`, `webrun`, `open_url`, `fetch_url`, `http_request` | `web.fetch.v1` |
+| `browser` / `browse` URL navigation | `web.browser.v1` |
+| `browser` interactive actions and `computer_use` | hosted: `web.browser.v1`; local: denied by the hook as `oap.interactive_browser_unsupported` |
 | `image_gen.imagegen` / `image_genimagegen` | `media.image.generate.v1` |
 | MCP tools and MCP resource reads | `mcp.tool.execute.v1` |
 | `spawn_agent`, `send_message`, `wait_agent` and the other collaboration tools | `agent.session.create.v1` |
@@ -81,6 +83,8 @@ The hook wrapper is `bin/aport-codex-hook.sh`, which delegates to the shared `bi
 `write_stdin` submits keystrokes into a session that `exec_command` or `unified_exec` opened. When that session is an interactive shell, the keystrokes are a new command, so the `chars` are evaluated against `system.command.execute` rather than waved through with the bookkeeping tools. A non-empty chunk must contain complete, non-whitespace terminal input. Partial chunks and whitespace/control-only chunks deny with `oap.partial_stdin_unsupported`, because APort cannot authorize split shell input or prove that a newline will not execute already-buffered text. The cost is that keystrokes bound for a pager or a REPL are judged by the command policy too, which can deny input no shell would have run.
 
 `image_gen.imagegen` is authorized as image generation, not as a generic web fetch. The hook sends metadata only to `media.image.generate.v1`: provider, optional model/size/aspect ratio, prompt length, referenced image count, output count, and output format. It never forwards raw prompt text, image contents, or local image paths. The passport must configure `limits["media.image.generate"].allowed_providers`, `max_prompt_length`, `max_referenced_images`, `max_output_images`, and `allowed_output_formats`; missing or malformed limits fail closed with `oap.invalid_limit`. Set `APORT_IMAGE_GENERATION_PROVIDER` if your hosted verifier should see a provider name other than `openai`. If the call includes `referenced_image_paths`, the hook denies with `oap.multi_policy_tool_unsupported` because the tool needs both local file-read and image-generation authorization and the shell hook can safely emit only one decision.
+
+Browser and desktop automation are not web fetches. Codex `browser`/`browse` URL-open style calls map to `web.browser.v1` with sanitized URL/action metadata. In local mode, APort authorizes only navigation because the shell verifier can deterministically enforce URL/domain/action limits there. Interactive browser actions such as click/type and all `computer_use` calls remain mapped but fail closed locally with `oap.interactive_browser_unsupported`; in hosted mode they are forwarded to `web.browser.v1` so the hosted verifier remains the source of truth for richer browser policies.
 
 An unmapped tool name is denied with `oap.unknown_tool`. Codex adds tools faster than this table changes, but a name nobody has mapped is a name nobody has decided the capability for, and the payload cannot decide it: a `url` field on a payment tool is not a web fetch, and a `command` field on a database tool is not a shell call. Add the name to the table instead of relying on a guess.
 
@@ -114,8 +118,8 @@ Warn mode records the original deny decision locally or in APort hosted audit,
 then returns allow semantics with a warning. It applies only after APort
 completed policy evaluation; malformed hook input, invalid config, missing
 dependencies, and unmapped effectful tools still fail closed. Use warn mode only
-while tuning policy. The multi-file `apply_patch` and `Glob`/`List`/`LS` denials
-described above are hook-level, so they stay denied in warn mode.
+while tuning policy. The multi-file `apply_patch` and `Glob`/`List`/`LS`/`LSP`
+denials described above are hook-level, so they stay denied in warn mode.
 
 ## Validate
 

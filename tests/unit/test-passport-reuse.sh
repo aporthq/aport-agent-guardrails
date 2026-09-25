@@ -89,6 +89,23 @@ aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null ||
 [[ "${APORT_AGENT_ID:-}" = "ap_1234567890abcdef1234567890abcdef" ]] || fail "hosted reuse did not export the agent id"
 unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL APORT_PASSPORT_REUSE_DECIDED APORT_REUSE_PASSPORT_FROM_CLI APORT_PASSPORT_REUSED_FROM
 
+# Hosted reuse from a source mode file that omits optional credentials must clear inherited stale values rather
+# than carrying them into the target framework.
+mkdir -p "$HOME/.aport/gemini-cli/aport"
+cat > "$HOME/.aport/gemini-cli/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT_MODE=warn
+APORT_API_URL=https://api.aport.io
+APORT_AGENT_ID=ap_abcdefabcdefabcdefabcdefabcdefab
+EOF
+export APORT_REUSE_PASSPORT_FROM_CLI=gemini-cli APORT_API_KEY=apk_stale_key APORT_API_URL=https://stale.example APORT_SELECTED_API_URL=https://stale.example
+aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null || fail "keyless hosted reuse must return 0"
+[[ "${APORT_AGENT_ID:-}" = "ap_abcdefabcdefabcdefabcdefabcdefab" ]] || fail "keyless hosted reuse did not export the source agent id"
+[[ -z "${APORT_API_KEY:-}" ]] || fail "keyless hosted reuse must clear stale APORT_API_KEY"
+[[ "${APORT_API_URL:-}" = "https://api.aport.io" ]] || fail "keyless hosted reuse should keep the source API URL, got ${APORT_API_URL:-unset}"
+[[ "${APORT_SELECTED_API_URL:-}" = "https://api.aport.io" ]] || fail "keyless hosted reuse should replace stale APORT_SELECTED_API_URL, got ${APORT_SELECTED_API_URL:-unset}"
+unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL APORT_PASSPORT_REUSE_DECIDED APORT_REUSE_PASSPORT_FROM_CLI APORT_PASSPORT_REUSED_FROM
+
 # 7. --reuse-from with a bare agent id or a path works without any framework state.
 line="$(aport_resolve_reuse_ref ap_abcdefabcdefabcdefabcdefabcdefab claude-code)"
 [[ "$line" = "cli|hosted|ap_abcdefabcdefabcdefabcdefabcdefab" ]] || fail "agent id ref not resolved: $line"
@@ -234,22 +251,28 @@ echo "PASS: a failed backup leaves the existing passport alone"
 OC_HOME="$HOME/.openclaw-custom-home"
 mkdir -p "$OC_HOME/aport"
 printf '{"passport_id":"local-openclaw-home","spec_version":"oap/1.0","capabilities":[]}\n' > "$OC_HOME/aport/passport.json"
+OC_STATE="$HOME/.openclaw-state-dir"
+mkdir -p "$OC_STATE/aport"
+printf '{"passport_id":"local-openclaw-state","spec_version":"oap/1.0","capabilities":[]}\n' > "$OC_STATE/aport/passport.json"
 oc_listing="$(OPENCLAW_HOME="$OC_HOME" aport_list_device_passports claude-code)"
 [[ "$oc_listing" == *"openclaw|local|$OC_HOME/aport/passport.json"* ]] \
     || fail "OPENCLAW_HOME passport not discovered: $oc_listing"
+oc_listing="$(OPENCLAW_STATE_DIR="$OC_STATE" OPENCLAW_HOME="$OC_HOME" aport_list_device_passports claude-code)"
+[[ "$oc_listing" == *"openclaw|local|$OC_STATE/aport/passport.json"* ]] \
+    || fail "OPENCLAW_STATE_DIR passport not discovered or did not beat OPENCLAW_HOME: $oc_listing"
 oc_listing="$(OPENCLAW_CONFIG_DIR="$OC_HOME" aport_list_device_passports claude-code)"
 [[ "$oc_listing" == *"openclaw|local|$OC_HOME/aport/passport.json"* ]] \
     || fail "OPENCLAW_CONFIG_DIR passport not discovered: $oc_listing"
-# APort's own override still wins over both, which is the precedence set-mode and reset already use.
+# APort's own override still wins over OpenClaw aliases, which is the precedence set-mode and reset use.
 OTHER_OC="$HOME/.openclaw-aport-override"
 mkdir -p "$OTHER_OC/aport"
 printf '{"passport_id":"aport-override","spec_version":"oap/1.0","capabilities":[]}\n' > "$OTHER_OC/aport/passport.json"
-oc_listing="$(APORT_OPENCLAW_CONFIG_DIR="$OTHER_OC" OPENCLAW_HOME="$OC_HOME" aport_list_device_passports claude-code)"
+oc_listing="$(APORT_OPENCLAW_CONFIG_DIR="$OTHER_OC" OPENCLAW_STATE_DIR="$OC_STATE" OPENCLAW_HOME="$OC_HOME" aport_list_device_passports claude-code)"
 [[ "$oc_listing" == *"openclaw|local|$OTHER_OC/aport/passport.json"* ]] \
-    || fail "APORT_OPENCLAW_CONFIG_DIR must win over OPENCLAW_HOME: $oc_listing"
+    || fail "APORT_OPENCLAW_CONFIG_DIR must win over OpenClaw aliases: $oc_listing"
 # And --reuse-from=openclaw resolves the alias too, not just the listing.
-oc_line="$(OPENCLAW_HOME="$OC_HOME" aport_resolve_reuse_ref openclaw claude-code)"
-[[ "$oc_line" = "openclaw|local|$OC_HOME/aport/passport.json" ]] || fail "--reuse-from=openclaw did not resolve OPENCLAW_HOME: $oc_line"
+oc_line="$(OPENCLAW_STATE_DIR="$OC_STATE" OPENCLAW_HOME="$OC_HOME" aport_resolve_reuse_ref openclaw claude-code)"
+[[ "$oc_line" = "openclaw|local|$OC_STATE/aport/passport.json" ]] || fail "--reuse-from=openclaw did not resolve OPENCLAW_STATE_DIR: $oc_line"
 echo "PASS: OpenClaw home aliases are resolved during discovery"
 
 # 17. --reuse-from= with an empty value is refused like the separated form with no argument. Storing "" read

@@ -357,6 +357,8 @@ elif [[ "$POLICY_ID" == "media.image.generate"* ]]; then
     LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["media.image.generate"] then .["media.image.generate"] else ({allowed_providers, max_prompt_length, max_referenced_images, max_output_images, allowed_output_formats} | with_entries(select(.value != null))) end')
 elif [[ "$POLICY_ID" == "web.fetch"* ]]; then
     LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["web.fetch"] then .["web.fetch"] else ({allowed_domains, blocked_domains, allowed_methods, max_requests_per_min, max_requests_per_minute} | with_entries(select(.value != null))) end')
+elif [[ "$POLICY_ID" == "web.browser"* ]]; then
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["web.browser"] then .["web.browser"] else ({allowed_domains, blocked_domains, allowed_actions, max_screenshots_per_hour, allow_form_submission} | with_entries(select(.value != null))) end')
 else
     LIMITS=$(echo "$PASSPORT" | jq ".limits.\"$POLICY_BASE\" // {}")
 fi
@@ -2348,6 +2350,112 @@ if [[ "$POLICY_ID" == "web.fetch.v1" ]]; then
     fi
 
     enforce_web_fetch_rate_limit
+fi
+
+if [[ "$POLICY_ID" == "web.browser.v1" ]]; then
+    ACTION=$(echo "$CONTEXT_JSON" | jq -r '.action // ""' 2> /dev/null || true)
+    URL=$(echo "$CONTEXT_JSON" | jq -r '.url // ""' 2> /dev/null || true)
+    DOMAIN_INPUT=$(echo "$CONTEXT_JSON" | jq -r '.domain // ""' 2> /dev/null || true)
+    INVALID_URL=$(echo "$CONTEXT_JSON" | jq -r '.invalid_url // false' 2> /dev/null || echo "false")
+    DOMAIN_MISMATCH=$(echo "$CONTEXT_JSON" | jq -r '.domain_mismatch // false' 2> /dev/null || echo "false")
+    DOMAIN=""
+
+    if echo "$LIMITS" | jq -e 'type != "object"' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "web.browser limits must be an object when configured"
+    fi
+    UNSUPPORTED_BROWSER_LIMITS=$(echo "$LIMITS" | jq -r '
+        keys - ["allowed_domains", "blocked_domains", "allowed_actions", "max_screenshots_per_hour", "allow_form_submission"]
+        | join(", ")
+    ' 2> /dev/null || true)
+    if [ -n "$UNSUPPORTED_BROWSER_LIMITS" ]; then
+        write_decision false "$POLICY_ID" "oap.unsupported_limit" "web.browser local mode cannot enforce configured limit(s): $UNSUPPORTED_BROWSER_LIMITS"
+    fi
+    validate_string_array_limits allowed_domains blocked_domains allowed_actions
+    if echo "$LIMITS" | jq -e 'has("allow_form_submission") and (.allow_form_submission | type) != "boolean"' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "allow_form_submission must be a boolean when configured"
+    fi
+    if echo "$LIMITS" | jq -e 'has("max_screenshots_per_hour")' > /dev/null 2>&1; then
+        if ! configured_integer_limit max_screenshots_per_hour 1 > /dev/null; then
+            write_decision false "$POLICY_ID" "oap.invalid_limit" "max_screenshots_per_hour must be a positive integer when configured"
+        fi
+    fi
+
+    ACTION="$(printf '%s' "$ACTION" | tr '[:upper:]' '[:lower:]')"
+    case "$ACTION" in
+        "" | open | goto | go | visit | browse) ACTION="navigate" ;;
+    esac
+    if [ -z "$ACTION" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Browser context must include action for local enforcement"
+    fi
+
+    ALLOWED_ACTIONS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_actions | type) == "array" then .allowed_actions else [] end' 2> /dev/null || echo "[]")
+    if has_restrictive_limit_array "$ALLOWED_ACTIONS_JSON" && ! is_allowed_by_patterns "$ACTION" "$ALLOWED_ACTIONS_JSON"; then
+        write_decision false "$POLICY_ID" "oap.action_not_allowed" "Browser action '$ACTION' is not in allowed list"
+    fi
+
+    case "$ACTION" in
+        navigate) ;;
+        *)
+            write_decision false "$POLICY_ID" "oap.interactive_browser_unsupported" "Local web.browser enforcement supports navigation only; use hosted mode for interactive browser actions"
+            ;;
+    esac
+
+    if [ "$INVALID_URL" = "true" ]; then
+        write_decision false "$POLICY_ID" "oap.invalid_url" "URL contains ambiguous parser characters"
+    fi
+    if [ "$DOMAIN_MISMATCH" = "true" ]; then
+        write_decision false "$POLICY_ID" "oap.domain_mismatch" "Provided domain does not match URL host"
+    fi
+    if [ -n "$URL" ]; then
+        case "$URL" in
+            http://* | https://*) ;;
+            *) write_decision false "$POLICY_ID" "oap.invalid_url" "URL must be an absolute http(s) URL" ;;
+        esac
+    fi
+    if [ -n "$URL" ] && url_has_parser_hazards "$URL"; then
+        write_decision false "$POLICY_ID" "oap.invalid_url" "URL contains ambiguous parser characters"
+    fi
+    if [ -n "$URL" ] && url_authority_has_percent_escape "$URL"; then
+        write_decision false "$POLICY_ID" "oap.invalid_url" "URL authority contains percent escapes"
+    fi
+    if [ -n "$URL" ] && url_authority_has_non_ascii "$URL"; then
+        write_decision false "$POLICY_ID" "oap.invalid_url" "URL authority contains non-ASCII characters that require runtime-specific hostname normalization"
+    fi
+    if [ -n "$DOMAIN_INPUT" ] && url_authority_has_non_ascii "$DOMAIN_INPUT"; then
+        write_decision false "$POLICY_ID" "oap.invalid_url" "Domain contains non-ASCII characters that require runtime-specific hostname normalization"
+    fi
+    if [ -n "$URL" ]; then
+        DOMAIN="$(url_host "$URL")"
+        if [ -n "$DOMAIN_INPUT" ]; then
+            DOMAIN_INPUT_HOST="$(url_host "$DOMAIN_INPUT")"
+            if [ -n "$DOMAIN_INPUT_HOST" ] && [ "$DOMAIN_INPUT_HOST" != "$DOMAIN" ]; then
+                write_decision false "$POLICY_ID" "oap.domain_mismatch" "Provided domain '$DOMAIN_INPUT_HOST' does not match URL host '$DOMAIN'"
+            fi
+        fi
+    else
+        DOMAIN="$(url_host "$DOMAIN_INPUT")"
+    fi
+
+    if [ -z "$URL" ] && [ -z "$DOMAIN" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Browser navigation context must include url or domain for local enforcement"
+    fi
+
+    if is_private_network_destination "$DOMAIN"; then
+        write_decision false "$POLICY_ID" "oap.private_network_destination" "Private network destination '$DOMAIN' is blocked"
+    fi
+
+    if ! echo "$LIMITS" | jq -e '(.allowed_domains | type) == "array"' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "allowed_domains is required and must be an array"
+    fi
+    BLOCKED_DOMAINS_JSON=$(echo "$LIMITS" | jq -c 'if (.blocked_domains | type) == "array" then .blocked_domains else [] end' 2> /dev/null || echo "[]")
+    if domain_blocked_by_list "$DOMAIN" "$BLOCKED_DOMAINS_JSON"; then
+        write_decision false "$POLICY_ID" "oap.domain_blocked" "Domain '$DOMAIN' is blocked"
+    fi
+
+    ALLOWED_DOMAINS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_domains | type) == "array" then .allowed_domains else [] end' 2> /dev/null || echo "[]")
+    if ! domain_allowed_by_list "$DOMAIN" "$ALLOWED_DOMAINS_JSON"; then
+        write_decision false "$POLICY_ID" "oap.domain_not_allowed" "Domain '$DOMAIN' is not in allowed list"
+    fi
 fi
 
 if [[ "$POLICY_ID" == "media.image.generate.v1" ]]; then

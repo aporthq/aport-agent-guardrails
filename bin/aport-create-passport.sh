@@ -45,8 +45,8 @@ fi
 PASSPORT_FILE="${PASSPORT_FILE/#\~/$HOME}"
 
 # Config dir: from env, or derived from passport path (e.g. .../aport/passport.json -> parent of aport)
-if [ -n "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}" ]; then
-    CONFIG_DIR="${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+if [ -n "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}" ]; then
+    CONFIG_DIR="${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}"
     CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
 else
     CONFIG_DIR="$(dirname "$PASSPORT_FILE")"

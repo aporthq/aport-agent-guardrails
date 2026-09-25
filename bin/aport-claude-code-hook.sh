@@ -230,7 +230,7 @@ case "$TOOL_NAME_NORM" in
         ;;
     browser)
         GUARDRAIL_TOOL="browser"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{url: (.url // "")}')"
+        CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
         ;;
     agent | task | taskcreate | taskupdate | taskstop | skill | enterworktree | exitworktree | subagent | subagentstart | sendmessage | teamcreate | teamdelete | remotetrigger)
         GUARDRAIL_TOOL="session.create"

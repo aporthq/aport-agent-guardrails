@@ -11,12 +11,12 @@ get_config_dir() {
     local framework="${1:-}"
     case "$framework" in
         # OpenClaw is the one framework whose location has aliases. bin/openclaw writes the passport under
-        # $OPENCLAW_HOME and exports OPENCLAW_CONFIG_DIR for the runtime, and aport-set-mode/aport-reset read
-        # APORT_OPENCLAW_CONFIG_DIR and OPENCLAW_CONFIG_DIR. Resolving only APORT_OPENCLAW_CONFIG_DIR here
-        # meant the passport-reuse scanner looked in ~/.openclaw on a machine using OPENCLAW_HOME, found
+        # $OPENCLAW_HOME or $OPENCLAW_STATE_DIR and exports OPENCLAW_CONFIG_DIR for the runtime, and
+        # aport-set-mode/aport-reset read the same aliases. Resolving only APORT_OPENCLAW_CONFIG_DIR here
+        # meant the passport-reuse scanner looked in ~/.openclaw on a machine using an OpenClaw alias, found
         # nothing, and offered to mint a duplicate of a passport that was already on the device. Same
-        # precedence the other commands use, with OPENCLAW_HOME last so an APort-specific override still wins.
-        openclaw) echo "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_HOME:-$HOME/.openclaw}}}" ;;
+        # precedence the other commands use, with OpenClaw's aliases last so APort-specific overrides win.
+        openclaw) echo "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-${OPENCLAW_HOME:-$HOME/.openclaw}}}}" ;;
         langchain) echo "${APORT_LANGCHAIN_CONFIG_DIR:-$HOME/.aport/langchain}" ;;
         crewai) echo "${APORT_CREWAI_CONFIG_DIR:-$HOME/.aport/crewai}" ;;
         n8n) echo "${APORT_N8N_CONFIG_DIR:-$HOME/.n8n}" ;;

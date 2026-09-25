@@ -286,6 +286,33 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_browser_context_from_payload() {
+    local payload="$1"
+    local base_context
+
+    base_context="$(aport_hook_context_from_payload "$payload" web 2> /dev/null || printf '{}')"
+    [ -n "$base_context" ] || base_context='{}'
+
+    jq -c --argjson base "$base_context" '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def first_string(v): (v | map(select(type == "string" and length > 0)) | .[0] // "");
+      def normalize_action(v):
+        (v | ascii_downcase) as $a |
+        if $a == "" then "navigate"
+        elif ($a == "open" or $a == "goto" or $a == "go" or $a == "visit" or $a == "browse") then "navigate"
+        else $a
+        end;
+      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti_base |
+      ($ti_base + obj($ti_base.args) + obj($ti_base.arguments)) as $ti |
+      first_string([.action, .operation, .type, $ti.action, $ti.operation, $ti.type]) as $action |
+      $base + {action: normalize_action($action)}
+    ' <<< "$payload"
+}
+
 aport_hook_context_from_payload() {
     local payload="$1"
     local kind="$2"

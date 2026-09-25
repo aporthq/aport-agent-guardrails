@@ -30,3 +30,4 @@ file src/evaluator.js
 tree external/aport-policies
 file external/aport-spec/oap/passport-schema.json
 mkdir local-overrides/policies
+file local-overrides/policies/media.image.generate.v1.json

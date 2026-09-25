@@ -33,7 +33,7 @@ source "$SCRIPT_DIR/lib/guardrail-mode.sh"
 source "$SCRIPT_DIR/lib/quick-hosted.sh"
 
 APORT_PLUGIN_PATH="$REPO_ROOT/extensions/openclaw-aport"
-DEFAULT_CONFIG="${OPENCLAW_HOME:-$HOME/.openclaw}"
+DEFAULT_CONFIG="${OPENCLAW_STATE_DIR:-${OPENCLAW_HOME:-$HOME/.openclaw}}"
 
 is_noninteractive() {
 	[ -n "${APORT_NONINTERACTIVE:-${CI:-}}" ]

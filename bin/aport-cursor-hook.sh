@@ -264,7 +264,7 @@ elif [ -n "$TOOL_NAME" ]; then
             ;;
         browser)
             GUARDRAIL_TOOL="browser"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{url: (.tool_input.url // .tool_input.args.url // "")}')"
+            CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
             ;;
         task | agent | taskcreate | taskupdate | taskstop | skill | subagent | subagentstart | sendmessage | teamcreate | teamdelete)
             GUARDRAIL_TOOL="session.create"

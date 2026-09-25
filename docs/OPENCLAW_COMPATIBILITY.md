@@ -95,7 +95,7 @@ These were not changed in the drift review because they alter enforcement behavi
 
 | Area | Notes |
 |------|-------|
-| Config and state | `~/.openclaw`. Override with `OPENCLAW_HOME` or `OPENCLAW_STATE_DIR`. `bin/openclaw` defaults to `~/.openclaw` and honors `OPENCLAW_HOME`. |
+| Config and state | `~/.openclaw`. Override with `OPENCLAW_HOME` or `OPENCLAW_STATE_DIR`. `bin/openclaw` defaults to `~/.openclaw` and honors both aliases, with APort-specific overrides (`APORT_OPENCLAW_CONFIG_DIR`, `OPENCLAW_CONFIG_DIR`) taking precedence. |
 | Plugin config | `plugins.entries.openclaw-aport.config` in `config.yaml` and `openclaw.json`, written by the installer. |
 | Wrappers | `CONFIG_DIR/.skills/aport-*` for manual guardrail and status commands. The plugin does not depend on them. |
 | Workspace | `~/.openclaw/workspace` (AGENTS.md, TOOLS.md, SOUL.md). Setup writes the APort rule into `workspace/AGENTS.md`. |
