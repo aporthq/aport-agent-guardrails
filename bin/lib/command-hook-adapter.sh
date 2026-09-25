@@ -191,7 +191,7 @@ fi
 
 is_session_tool() {
     case "$1" in
-        agent | task | subagent | subagentstart | subagent_start | sendmessage | send_message | collaboration.sendmessage | collaboration.send_message | followuptask | followup_task | collaboration.followuptask | collaboration.followup_task | waitagent | wait_agent | collaboration.waitagent | collaboration.wait_agent | interruptagent | interrupt_agent | collaboration.interruptagent | collaboration.interrupt_agent | spawnagent | spawn_agent | collaboration.spawnagent | collaboration.spawn_agent | sendinput | send_input | collaboration.sendinput | collaboration.send_input | closeagent | close_agent | collaboration.closeagent | collaboration.close_agent | resumeagent | resume_agent | collaboration.resumeagent | collaboration.resume_agent | listagents | list_agents | collaboration.listagents | collaboration.list_agents)
+        agent | task | subagent | subagentstart | subagent_start | sendmessage | send_message | collaboration.sendmessage | collaboration.send_message | followuptask | followup_task | collaboration.followuptask | collaboration.followup_task | waitagent | wait_agent | collaboration.waitagent | collaboration.wait_agent | interruptagent | interrupt_agent | collaboration.interruptagent | collaboration.interrupt_agent | spawnagent | spawn_agent | collaboration.spawnagent | collaboration.spawn_agent | sendinput | send_input | collaboration.sendinput | collaboration.send_input | closeagent | close_agent | collaboration.closeagent | collaboration.close_agent | resumeagent | resume_agent | collaboration.resumeagent | collaboration.resume_agent | listagents | list_agents | collaboration.listagents | collaboration.list_agents | multi_agent_v1.spawn_agent | multi_agent_v1.send_input | multi_agent_v1.resume_agent | multi_agent_v1.wait_agent | multi_agent_v1.close_agent | collaboration.create_channel | collaboration.get_channels | collaboration.list_threads | collaboration.search_posts | collaboration.read_thread | collaboration.read_post | collaboration.subscribe | collaboration.unsubscribe | collaboration.post)
             return 0
             ;;
     esac
@@ -580,6 +580,9 @@ map_codex_browser() {
     if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
         emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting URL or domain aliases"
     fi
+    if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting action aliases"
+    fi
 
     CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
     if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
@@ -599,6 +602,9 @@ map_codex_browser() {
 }
 
 map_codex_computer_use() {
+    if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting action aliases"
+    fi
     CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
     if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
         GUARDRAIL_TOOL="browser"
@@ -683,6 +689,11 @@ map_mcp() {
     if [ "$(printf '%s' "$CONTEXT_JSON" | jq -r 'if .invalid_server == true then "true" else "false" end' 2> /dev/null || echo false)" = "true" ]; then
         emit_response "deny" "mcp.tool.execute" "oap.invalid_mcp_server" "MCP server contains ambiguous parser characters"
     fi
+}
+
+map_codex_plugin_install() {
+    GUARDRAIL_TOOL="mcp.tool"
+    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "mcp:codex:request_plugin_install")"
 }
 
 map_session() {
@@ -825,15 +836,18 @@ case "$FRAMEWORK" in
             writestdin | write_stdin)
                 map_codex_write_stdin
                 ;;
-            todoread | toolsearch | tool_search | toolsearchtool | tool_search_tool | tool_search.tool_search_tool | updateplan | update_plan | requestuserinput | request_user_input | getgoal | get_goal | creategoal | create_goal | updategoal | update_goal | memoryoperators | memory_*)
-                # Session bookkeeping, plan updates, user prompts, and Codex's own memory store: no new effect
-                # outside the session, nothing for a policy to judge.
+            todoread | toolsearch | tool_search | toolsearchtool | tool_search_tool | tool_search.tool_search_tool | updateplan | update_plan | requestuserinput | request_user_input | requestuserinputasync | request_user_input_async | sendmessagetouserasync | send_message_to_user_async | requestpermissions | request_permissions | wait | waitforenvironment | wait_for_environment | getcontextremaining | get_context_remaining | newcontext | new_context | clock.curr_time | clock.sleep | currtime | curr_time | sleep | getgoal | get_goal | creategoal | create_goal | updategoal | update_goal | memories.add_ad_hoc_note | memories.list | memories.read | memories.search | skills.list | skills.read | listavailablepluginstoinstall | list_available_plugins_to_install | memoryoperators | memory_*)
+                # Session bookkeeping, plan/user prompts, provider-owned metadata, and bounded memory/skill
+                # reads do not expose host file contents or perform external side effects through this hook.
                 emit_response "allow" "" "" ""
+                ;;
+            requestplugininstall | request_plugin_install)
+                map_codex_plugin_install
                 ;;
             mcp__* | mcp:* | callmcptool | call_mcp_tool | readmcpresource | read_mcp_resource | readmcpresourcetool | read_mcp_resource_tool | listmcpresources | list_mcp_resources | listmcpresourcetemplates | list_mcp_resource_templates)
                 map_mcp
                 ;;
-            agent | task | subagent | subagentstart | subagent_start | sendmessage | send_message | collaboration.sendmessage | collaboration.send_message | followuptask | followup_task | collaboration.followuptask | collaboration.followup_task | waitagent | wait_agent | collaboration.waitagent | collaboration.wait_agent | interruptagent | interrupt_agent | collaboration.interruptagent | collaboration.interrupt_agent | spawnagent | spawn_agent | collaboration.spawnagent | collaboration.spawn_agent | sendinput | send_input | collaboration.sendinput | collaboration.send_input | closeagent | close_agent | collaboration.closeagent | collaboration.close_agent | resumeagent | resume_agent | collaboration.resumeagent | collaboration.resume_agent | listagents | list_agents | collaboration.listagents | collaboration.list_agents)
+            agent | task | subagent | subagentstart | subagent_start | sendmessage | send_message | collaboration.sendmessage | collaboration.send_message | followuptask | followup_task | collaboration.followuptask | collaboration.followup_task | waitagent | wait_agent | collaboration.waitagent | collaboration.wait_agent | interruptagent | interrupt_agent | collaboration.interruptagent | collaboration.interrupt_agent | spawnagent | spawn_agent | collaboration.spawnagent | collaboration.spawn_agent | sendinput | send_input | collaboration.sendinput | collaboration.send_input | closeagent | close_agent | collaboration.closeagent | collaboration.close_agent | resumeagent | resume_agent | collaboration.resumeagent | collaboration.resume_agent | listagents | list_agents | collaboration.listagents | collaboration.list_agents | multi_agent_v1.spawn_agent | multi_agent_v1.send_input | multi_agent_v1.resume_agent | multi_agent_v1.wait_agent | multi_agent_v1.close_agent | collaboration.create_channel | collaboration.get_channels | collaboration.list_threads | collaboration.search_posts | collaboration.read_thread | collaboration.read_post | collaboration.subscribe | collaboration.unsubscribe | collaboration.post)
                 map_session
                 ;;
             "")

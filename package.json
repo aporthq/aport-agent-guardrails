@@ -25,6 +25,7 @@
     "prepush:check": "bash scripts/pre-push-check.sh",
     "build": "npm run build:core && npm run build --workspaces --if-present",
     "build:core": "npm run build -w @aporthq/aport-agent-guardrails-core",
+    "codex:tool-surface": "bash scripts/check-codex-provider-tool-surface.sh",
     "local-codex-review": "bash scripts/local-codex-review.sh",
     "local-pr-audit": "npm run prepush:check",
     "local-pr-review": "npm run local-codex-review",

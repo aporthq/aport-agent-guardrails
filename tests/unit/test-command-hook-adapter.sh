@@ -150,6 +150,11 @@ run_hook "Codex browser click fails closed locally instead of using web.fetch" \
     '{"hook_event_name":"PreToolUse","tool_name":"browser","tool_input":{"action":"click","url":"https://example.com/page","selector":"#approve"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.interactive_browser_unsupported")) and ((.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool")) | not)'
 
+run_hook "Codex browser rejects conflicting action aliases before choosing one" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"browser","tool_input":{"action":"click","url":"https://example.com/page","args":{"action":"navigate"}}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
 run_hook "Codex computer_use is recognized but not authorized as web.fetch locally" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"action":"type","text":"secret_text_should_not_persist","url":"https://example.com/form"}}' \
@@ -186,6 +191,26 @@ run_hook "Codex image_genimagegen concatenated host name reaches image generatio
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"image_genimagegen","tool_input":{"prompt":"draw a safe badge"}}' \
     '. == {}'
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-wizard-image-test.json"
+"$REPO_ROOT/bin/aport-create-passport.sh" --framework=codex --output "$TEST_DIR/aport/passport.json" --non-interactive > "$TEST_DIR/codex-wizard-image-passport.log" 2>&1
+jq -e '
+  any(.capabilities[]; .id == "media.image.generate")
+  and (.limits["media.image.generate"].allowed_providers | type == "array")
+  and (.limits["media.image.generate"].max_prompt_length | type == "number")
+  and (.limits["media.image.generate"].max_referenced_images | type == "number")
+  and (.limits["media.image.generate"].max_output_images | type == "number")
+  and (.limits["media.image.generate"].allowed_output_formats | type == "array")
+' "$TEST_DIR/aport/passport.json" > /dev/null || {
+    echo "FAIL: Codex wizard passport should include media.image.generate capability and required limits" >&2
+    cat "$TEST_DIR/aport/passport.json" >&2
+    exit 1
+}
+run_hook "Codex wizard-generated local passport authorizes image generation metadata" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"wizard generated image passport","num_last_images_to_include":0}}' \
+    '. == {}'
+mv "$TEST_DIR/aport/passport.before-wizard-image-test.json" "$TEST_DIR/aport/passport.json"
 
 run_hook "Codex image generation enforces previous-image reference count" \
     codex "$CODEX" \
@@ -298,6 +323,49 @@ run_hook "Codex update_plan is session bookkeeping and is allowed" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"update_plan","tool_input":{"plan":[{"step":"x","status":"pending"}]}}' \
     '. == {}'
+
+run_hook "Codex request_user_input_async is prompt bookkeeping and is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"request_user_input_async","tool_input":{"question":"Continue?","task_handle":"surface-user-input"}}' \
+    '. == {}'
+
+run_hook "Codex request_user_input_sync remains unmapped until observed in Codex" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"request_user_input_sync","tool_input":{"question":"Continue?"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+run_hook "Codex skills.read provider tool is explicitly classified" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"skills.read","tool_input":{"package":"skill://example","resource":"skill://example/SKILL.md"}}' \
+    '. == {}'
+
+run_hook "Codex plugin candidate listing is explicitly classified" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"list_available_plugins_to_install","tool_input":{}}' \
+    '. == {}'
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex plugin install request routes through MCP policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"request_plugin_install","tool_input":{"tool_id":"private-plugin-should-not-persist","tool_type":"plugin","suggest_reason":"secret_reason_should_not_persist"}}' \
+    '. == {}'
+if grep -q 'private-plugin-should-not-persist\|secret_reason_should_not_persist' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Codex plugin install context must not persist raw requested plugin values" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '
+  .guardrail_tool == "mcp.tool"
+  and .context.mcp_server == "codex"
+  and .context.mcp_tool == "request_plugin_install"
+  and (.context.parameter_keys | index("tool_id") != null)
+  and (.context.parameter_keys | index("suggest_reason") != null)
+' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex plugin install should route to codex/request_plugin_install MCP policy metadata" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex plugin install request maps to MCP policy metadata"
 
 run_hook "Codex local_shell maps to the shell policy" \
     codex "$CODEX" \
