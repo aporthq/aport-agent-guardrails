@@ -218,6 +218,66 @@ aport_hook_policy_reference() {
     printf 'Review the APort setup for this framework: %s/quickstart' "$app_url"
 }
 
+aport_hook_framework_cli_name() {
+    local framework="${1:-}"
+    if [ -z "$framework" ] || [ "$framework" = "unknown" ]; then
+        framework="$(aport_hook_detect_framework)"
+    fi
+    case "$framework" in
+        claude | claude-code) printf 'claude-code' ;;
+        cursor) printf 'cursor' ;;
+        codex) printf 'codex' ;;
+        gemini | gemini-cli) printf 'gemini' ;;
+        goose) printf 'goose' ;;
+        openclaw) printf 'openclaw' ;;
+        langchain) printf 'langchain' ;;
+        crewai) printf 'crewai' ;;
+        deerflow) printf 'deerflow' ;;
+        n8n) printf 'n8n' ;;
+        *) printf '<framework>' ;;
+    esac
+}
+
+aport_hook_enforce_reference() {
+    local framework="${1:-}"
+    local cli_framework cli_command
+    cli_framework="$(aport_hook_framework_cli_name "$framework")"
+    cli_command="${APORT_CLI_COMMAND:-npx @aporthq/aport-agent-guardrails}"
+    printf 'Switch this harness to blocking mode: %s mode %s --enforcement=enforce' "$cli_command" "$cli_framework"
+}
+
+aport_hook_decision_reference() {
+    local app_url="${APORT_APP_URL:-https://aport.io}"
+    app_url="${app_url%/}"
+
+    if [ -n "${APORT_AGENT_ID:-}" ]; then
+        printf 'View hosted decision/audit for this passport: %s/passports?details=%s' "$app_url" "$APORT_AGENT_ID"
+        return 0
+    fi
+
+    if [ -n "${DECISION_FILE:-${OPENCLAW_DECISION_FILE:-}}" ] || [ -n "${AUDIT_LOG:-${OPENCLAW_AUDIT_LOG:-}}" ]; then
+        printf 'View local decision/audit: %s; %s' "${DECISION_FILE:-${OPENCLAW_DECISION_FILE:-decision.json}}" "${AUDIT_LOG:-${OPENCLAW_AUDIT_LOG:-audit.log}}"
+        return 0
+    fi
+
+    if [ -n "${PASSPORT_FILE:-}" ]; then
+        printf 'View local passport and adjacent audit files near: %s' "$PASSPORT_FILE"
+        return 0
+    fi
+
+    printf 'Run APort status for this framework to find the latest decision and audit log'
+}
+
+aport_hook_warn_reference_text() {
+    local framework="${1:-}"
+    local separator="${2:-. }"
+    local evidence action
+
+    evidence="$(aport_sanitize_display_text "$(aport_hook_decision_reference)")"
+    action="$(aport_sanitize_display_text "$(aport_hook_enforce_reference "$framework")")"
+    printf 'Evidence: %s%sTo fail closed: %s' "$evidence" "$separator" "$action"
+}
+
 aport_sanitize_display_text() {
     local value="${1:-}"
     value="$(printf '%s' "$value" | tr '\r\n' '  ')"
@@ -306,15 +366,21 @@ aport_format_guardrail_notice() {
     local policy="$2"
     local reason_code="${3:-oap.denied}"
     local reason_message="${4:-}"
-    local reference
+    local framework="${5:-}"
+    local reference warn_refs
     reference="$(aport_hook_policy_reference)"
+    warn_refs="$(aport_hook_warn_reference_text "$framework" ". ")"
 
     reason_code="$(aport_sanitize_display_text "$reason_code")"
     reason_message="$(aport_sanitize_display_text "$reason_message")"
     reference="$(aport_sanitize_display_text "$reference")"
 
     if [ "$outcome" = "warn" ]; then
-        printf 'APort warning: policy would have denied this tool call. Policy: %s. Reason: %s. Review: %s' "$policy" "$reason_code" "$reference"
+        if [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
+            printf 'APort warning: report-only mode allowed a tool call that policy would have denied. Policy: %s. Reason: %s. Detail: %s. %s' "$policy" "$reason_code" "$reason_message" "$warn_refs"
+        else
+            printf 'APort warning: report-only mode allowed a tool call that policy would have denied. Policy: %s. Reason: %s. %s' "$policy" "$reason_code" "$warn_refs"
+        fi
     else
         if [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
             printf 'APort denied this tool call. Policy: %s. Reason: %s. Detail: %s. Review: %s' "$policy" "$reason_code" "$reason_message" "$reference"
@@ -393,16 +459,17 @@ aport_hook_format_user_warning() {
     local policy="$1"
     local reason_code="${2:-oap.denied}"
     local reason_message="${3:-}"
-    local reference
+    local framework="${4:-}"
+    local warn_refs
 
     reason_code="$(aport_sanitize_display_text "$reason_code")"
     reason_message="$(aport_sanitize_display_text "$reason_message")"
-    reference="$(aport_sanitize_display_text "$(aport_hook_policy_reference)")"
+    warn_refs="$(aport_hook_warn_reference_text "$framework" $'\n')"
 
     if [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
-        printf '⚠️  APort Warning: This action would normally be blocked.\nPolicy: %s | Reason: %s\nDetail: %s\nReview: %s' "$policy" "$reason_code" "$reason_message" "$reference"
+        printf '⚠️  APort Warning: report-only mode allowed an action that policy would normally block.\nPolicy: %s | Reason: %s\nDetail: %s\n%s' "$policy" "$reason_code" "$reason_message" "$warn_refs"
     else
-        printf '⚠️  APort Warning: This action would normally be blocked.\nPolicy: %s | Reason: %s\nReview: %s' "$policy" "$reason_code" "$reference"
+        printf '⚠️  APort Warning: report-only mode allowed an action that policy would normally block.\nPolicy: %s | Reason: %s\n%s' "$policy" "$reason_code" "$warn_refs"
     fi
 }
 

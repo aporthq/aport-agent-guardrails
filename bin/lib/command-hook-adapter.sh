@@ -17,6 +17,7 @@ case "$FRAMEWORK" in
         ;;
 esac
 [ "$FRAMEWORK" = "gemini" ] && FRAMEWORK="gemini-cli"
+export APORT_HOOK_FRAMEWORK="$FRAMEWORK"
 
 aport_adapter_json_escape() {
     local value="${1:-}"
@@ -110,8 +111,8 @@ emit_response() {
     fi
 
     if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
-        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message")"
+        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "$FRAMEWORK")"
+        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "$FRAMEWORK")"
         # Some hosts do not surface allow-response warnings consistently. Keep
         # stderr human-readable and sanitized while returning allow semantics.
         aport_sanitize_display_text "$user_warning" >&2
@@ -120,7 +121,7 @@ emit_response() {
         exit 0
     fi
 
-    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
+    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "$FRAMEWORK")"
     aport_hook_build_response "deny" "$notice" "" "$FRAMEWORK"
     exit 0
 }
@@ -383,13 +384,25 @@ CONTEXT_JSON="{}"
 # denies. Picking one effect means dropping the others unevaluated: {"command":"rm -rf /","url":"https://ok"}
 # used to route to web.fetch, drop the command, and return allow.
 #
-# Looks at tool_input/input/args like aport_hook_context_from_payload does.
+# Looks at tool_input/input/args and their args/arguments children like aport_hook_context_from_payload does.
 codex_payload_shape() {
     [ "${APORT_CODEX_TOOL_FALLBACK:-off}" = "on" ] || return 0
     printf '%s' "$1" | jq -r '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
       def str(v): (v | type) == "string" and (v | length) > 0;
-      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
+      def merged_args:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ] | add;
+      merged_args as $ti |
       (str($ti.command) or str($ti.cmd) or str($ti.script)) as $cmd |
       (str($ti.url)) as $url |
       (str($ti.file_path) or str($ti.path)) as $path |
@@ -621,11 +634,11 @@ has_mcp_context() {
 # could be typed in after a bare `bash` was authorized. The characters are therefore evaluated as shell input
 # against system.command.execute, the same policy that judged the command that opened the session.
 #
-# Evaluating beats denying outright: write_stdin is how Codex drives a REPL or answers a prompt, and a blanket
-# deny would push users to turn the hook off. The trade-off is that keystrokes bound for a non-shell process
-# (a pager, a REPL) are also judged by the command policy, which can deny input a shell would never run.
+# A non-empty chunk without a line terminator is incomplete shell evidence: "rm" now and " -rf /tmp/x\n" later
+# would bypass a blocklist if each piece were judged independently. Control-only chunks can also execute a
+# command already buffered in the terminal. Without per-session terminal state, both cases fail closed.
 map_codex_write_stdin() {
-    local stdin_chars
+    local stdin_chars stdin_meta stdin_state stdin_line_state stdin_blank_state
     stdin_chars="$(printf '%s' "$INPUT" | jq -r '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
@@ -633,9 +646,26 @@ map_codex_write_stdin() {
       | map(select(type == "string"))
       | .[0] // ""
     ' 2> /dev/null || true)"
+    stdin_meta="$(printf '%s' "$INPUT" | jq -r '
+      def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
+      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
+      ([$ti.chars, $ti.input, $ti.text, $ti.data, $ti.stdin] | map(select(type == "string")) | .[0] // "") as $s |
+      [
+        (if $s == "" then "empty" else "nonempty" end),
+        (if (($s | contains("\n")) or ($s | contains("\r"))) then "line" else "partial" end),
+        (if (($s | gsub("[ \t\r\n]"; "") | length) > 0) then "nonblank" else "blank" end)
+      ] | @tsv
+    ' 2> /dev/null || printf 'empty\tpartial\tblank')"
+    IFS=$'\t' read -r stdin_state stdin_line_state stdin_blank_state <<< "$stdin_meta"
     # Nothing typed is nothing to judge; the session itself was already authorized.
-    if [ -z "${stdin_chars//[[:space:]$'\n']/}" ]; then
+    if [ "$stdin_state" = "empty" ]; then
         emit_response "allow" "" "" ""
+    fi
+    if [ "$stdin_line_state" != "line" ]; then
+        emit_response "deny" "system.command.execute" "oap.partial_stdin_unsupported" "Codex write_stdin sent partial terminal input; APort cannot authorize split shell input without session buffering"
+    fi
+    if [ "$stdin_blank_state" != "nonblank" ]; then
+        emit_response "deny" "system.command.execute" "oap.partial_stdin_unsupported" "Codex write_stdin sent only terminal control characters; APort cannot prove no buffered shell command will execute"
     fi
     GUARDRAIL_TOOL="bash"
     CONTEXT_JSON="$(jq -nc --arg command "$stdin_chars" '{command: $command}')"

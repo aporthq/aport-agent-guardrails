@@ -218,7 +218,7 @@ if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
         # Parse log line: [timestamp] tool=X decision_id=Y allow=Z ... context="..." (optional)
         timestamp=$(echo "$line" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
         tool=$(echo "$line" | sed -n 's/.*tool=\([^ ]*\).*/\1/p')
-        framework=$(echo "$line" | sed -n 's/.*framework=\([^ ]*\).*/\1/p')
+        framework=$(echo "$line" | sed -n 's/.*tool=[^ ]* framework=\([^ ]*\) decision_id=.*/\1/p')
         decision_id=$(echo "$line" | sed -n 's/.*decision_id=\([^ ]*\).*/\1/p')
         allow=$(echo "$line" | sed -n 's/.*allow=\([^ ]*\).*/\1/p')
         context=$(echo "$line" | sed -n 's/.*context="\([^"]*\)".*/\1/p')

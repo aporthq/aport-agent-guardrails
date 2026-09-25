@@ -259,6 +259,18 @@ unset APORT_REUSE_PASSPORT_FROM_CLI
 parse_guardrail_mode_args --reuse-from=cursor || fail "--reuse-from=cursor must still be accepted"
 [[ "${APORT_REUSE_PASSPORT_FROM_CLI:-}" = "cursor" ]] || fail "--reuse-from=cursor did not store the value"
 unset APORT_REUSE_PASSPORT_FROM_CLI
+if parse_guardrail_mode_args --reuse-from=codex ap_abcdefabcdefabcdefabcdefabcdefab 2> "$TEST_DIR/reuse-conflict.err"; then
+    fail "--reuse-from plus a positional hosted agent id must be refused during argument parsing"
+fi
+grep -q "hosted agent id" "$TEST_DIR/reuse-conflict.err" || fail "the conflict refusal must name the hosted id: $(cat "$TEST_DIR/reuse-conflict.err")"
+if (
+    export HOME="$TEST_DIR/conflict-home" APORT_NONINTERACTIVE=1 APORT_CURSOR_CONFIG_DIR="$TEST_DIR/conflict-cursor"
+    mkdir -p "$HOME"
+    "$REPO_ROOT/bin/frameworks/cursor.sh" --reuse-from=codex ap_abcdefabcdefabcdefabcdefabcdefab > "$TEST_DIR/reuse-conflict-installer.out" 2> "$TEST_DIR/reuse-conflict-installer.err"
+); then
+    fail "the Cursor installer path must reject conflicting passport selectors before hosted-id setup"
+fi
+grep -q "hosted agent id" "$TEST_DIR/reuse-conflict-installer.err" || fail "installer conflict must name the hosted id: $(cat "$TEST_DIR/reuse-conflict-installer.err")"
 echo "PASS: --reuse-from= with an empty value is refused"
 
 echo "PASS: passport reuse"

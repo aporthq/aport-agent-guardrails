@@ -7,6 +7,11 @@ if ! command -v log_info > /dev/null 2>&1; then
     # shellcheck source=common.sh
     source "$_quick_hosted_lib_dir/common.sh"
 fi
+if ! command -v validate_passport_selector_conflict > /dev/null 2>&1; then
+    _quick_hosted_lib_dir="${_quick_hosted_lib_dir:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)}"
+    # shellcheck source=guardrail-mode.sh
+    source "$_quick_hosted_lib_dir/guardrail-mode.sh"
+fi
 
 DEFAULT_APORT_ISSUE_URL="${DEFAULT_APORT_ISSUE_URL:-https://aport.id/api/issue}"
 
@@ -155,9 +160,8 @@ aport_maybe_configure_hosted_passport() {
     local selected_mode_lower
     selected_mode_lower="$(printf '%s' "$selected_mode" | tr '[:upper:]' '[:lower:]')"
     local requested_reuse="${APORT_REUSE_PASSPORT_FROM_CLI:-${APORT_REUSE_PASSPORT_FROM:-}}"
-    if [[ -n "$requested_reuse" && -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
-        log_error "--reuse-from and --agent-id name two different passports; pass one of them"
-        exit 1
+    if command -v validate_passport_selector_conflict > /dev/null 2>&1; then
+        validate_passport_selector_conflict || exit 1
     fi
 
     if [[ "$selected_mode_lower" = "local" ]]; then

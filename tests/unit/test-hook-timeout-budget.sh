@@ -34,20 +34,24 @@ check_norm "abc" 15 # not a number
 check_norm "1.5" 2  # fractional, rounded up so the budget never understates the bound
 check_norm "45" 45  # a usable value is used
 check_norm "15" 15
-check_norm "0.4" 1       # rounds up to the 1 s floor apiTimeoutMs also enforces
-check_norm "+30" 30      # an explicit sign is still a number
-check_norm "1e3" 1000    # exponent notation, because the evaluator Number()s the same string
-check_norm "0.0" 15      # zero however it is spelled
-check_norm "15s" 15      # a unit suffix is not a number, same as the evaluator
-check_norm "30 " 30      # Number() trims whitespace, so the evaluator would use 30 s and so does this
-check_norm "0x10" 16     # Number("0x10") is 16
+check_norm "0.4" 1        # rounds up to the 1 s floor apiTimeoutMs also enforces
+check_norm "+30" 30       # an explicit sign is still a number
+check_norm "1e3" 1000     # exponent notation, because the evaluator Number()s the same string
+check_norm "0.0" 15       # zero however it is spelled
+check_norm "15s" 15       # a unit suffix is not a number, same as the evaluator
+check_norm "30 " 30       # Number() trims whitespace, so the evaluator would use 30 s and so does this
+check_norm "0x10" 16      # Number("0x10") is 16
+check_norm "0b1000000" 64 # Number("0b1000000") is 64
+check_norm "0o100" 64     # Number("0o100") is 64
+check_norm "+0b10" 15     # signed non-decimal strings are NaN to Number()
+check_norm "-0o10" 15
 check_norm "Infinity" 15 # not finite, so the evaluator falls back and so does this
 check_norm "NaN" 15
 echo "PASS: APORT_API_TIMEOUT normalization matches the evaluator"
 
 # 2. The evaluator and this helper agree, checked against src/evaluator.js rather than restated.
 if command -v node > /dev/null 2>&1; then
-    for raw in "" "0" "-5" "abc" "1.5" "45" "15" "0.4" "1e3" "15s" "NaN" "0x10" "Infinity" "30 " "+30" "0.0"; do
+    for raw in "" "0" "-5" "abc" "1.5" "45" "15" "0.4" "1e3" "15s" "NaN" "0x10" "0b1000000" "0o100" "+0b10" "-0o10" "Infinity" "30 " "+30" "0.0"; do
         evaluator_ms="$(APORT_API_TIMEOUT="$raw" node -e '
           const {apiTimeoutMs} = require("./src/evaluator.js");
           process.stdout.write(String(apiTimeoutMs(process.env.APORT_API_TIMEOUT)));
@@ -89,7 +93,7 @@ budget_for() {
 
 for script in "$REPO_ROOT/bin/frameworks/claude-code.sh" "$REPO_ROOT/bin/frameworks/cursor.sh"; do
     name="$(basename "$script")"
-    for raw in "" "0" "-5" "abc" "1.5" "45"; do
+    for raw in "" "0" "-5" "abc" "1.5" "45" "0b1000000" "0o100"; do
         got="$(budget_for "$script" "$raw")" || fail "$name errored deriving a budget for APORT_API_TIMEOUT=\"$raw\""
         [[ "$got" =~ ^[0-9]+$ ]] || fail "$name produced a non-numeric timeout \"$got\" for APORT_API_TIMEOUT=\"$raw\""
         # 15 s of margin over the normalized bound: node startup plus the audit write.

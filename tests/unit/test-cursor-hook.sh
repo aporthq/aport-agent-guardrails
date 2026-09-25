@@ -99,11 +99,79 @@ APORT_GUARDRAIL_MODE=local
 EOF
 echo "  ✅ oversized stdin: warn mode still fails closed"
 
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+OUT_WARN="$TEST_DIR/cursor-warn-shell.txt"
+set +e
+echo '{"hook_event_name":"preToolUse","tool_name":"Shell","tool_input":{"command":"rm -rf /tmp/x"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT_WARN" 2> /dev/null
+EXIT_WARN=$?
+set -e
+[[ "$EXIT_WARN" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Cursor warn-mode shell denial, got $EXIT_WARN" >&2
+    cat "$OUT_WARN" >&2 || true
+    exit 1
+}
+jq -e '
+  .permission == "allow"
+  and .allowed == true
+  and (.user_message | contains("report-only mode allowed"))
+  and (.user_message | contains("Evidence:"))
+  and (.user_message | contains("mode cursor --enforcement=enforce"))
+  and ((.user_message | contains("Review or update the hosted passport")) | not)
+' "$OUT_WARN" > /dev/null || {
+    echo "FAIL: Cursor warn-mode message should point to evidence and enforce-mode CTA" >&2
+    cat "$OUT_WARN" >&2
+    exit 1
+}
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Cursor warn-mode message: evidence plus enforce CTA"
+
 # Byte cap must count UTF-8 bytes, not shell characters. Two emoji are 8 bytes.
 # Use octal escapes to keep this source file ASCII-stable.
 # shellcheck source=bin/lib/hook-runtime.sh
 source "$REPO_ROOT/bin/lib/hook-runtime.sh"
 JQ_BIN="$(command -v jq)"
+HOSTED_WARN_AGENT_ID="ap_warn_notice_test"
+HOSTED_WARN_NOTICE="$(APORT_AGENT_ID="$HOSTED_WARN_AGENT_ID" aport_format_guardrail_notice warn bash oap.blocked_pattern "" cursor)"
+case "$HOSTED_WARN_NOTICE" in
+    *"View hosted decision/audit for this passport: https://aport.io/passports?details=$HOSTED_WARN_AGENT_ID"*) ;;
+    *)
+        echo "FAIL: hosted warn notice should show hosted evidence link" >&2
+        printf '%s\n' "$HOSTED_WARN_NOTICE" >&2
+        exit 1
+        ;;
+esac
+case "$HOSTED_WARN_NOTICE" in
+    *"mode cursor --enforcement=enforce"*) ;;
+    *)
+        echo "FAIL: hosted warn notice should show cursor enforce CTA" >&2
+        printf '%s\n' "$HOSTED_WARN_NOTICE" >&2
+        exit 1
+        ;;
+esac
+CUSTOM_CLI_WARN_NOTICE="$(APORT_AGENT_ID="$HOSTED_WARN_AGENT_ID" APORT_CLI_COMMAND="aport-agent-guardrails" aport_format_guardrail_notice warn bash oap.blocked_pattern "" cursor)"
+case "$CUSTOM_CLI_WARN_NOTICE" in
+    *"aport-agent-guardrails mode cursor --enforcement=enforce"*) ;;
+    *)
+        echo "FAIL: hosted warn notice should honor APORT_CLI_COMMAND" >&2
+        printf '%s\n' "$CUSTOM_CLI_WARN_NOTICE" >&2
+        exit 1
+        ;;
+esac
+case "$HOSTED_WARN_NOTICE" in
+    *"Review or update the hosted passport"*)
+        echo "FAIL: hosted warn notice should not use the deny-mode passport-update CTA" >&2
+        printf '%s\n' "$HOSTED_WARN_NOTICE" >&2
+        exit 1
+        ;;
+esac
+echo "  ✅ hosted warn notice: evidence link plus enforce CTA"
 JQ_JSON="$(
     aport_hook_build_response_cursor \
         deny \

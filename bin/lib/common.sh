@@ -44,14 +44,25 @@ aport_api_timeout_seconds() {
             line = $0
             # Number() ignores surrounding whitespace; anything else non-numeric makes it NaN.
             gsub(/^[ \t\r\n]+|[ \t\r\n]+$/, "", line)
-            # Hex first, then the decimal grammar Number accepts: an optional sign, digits with an optional
-            # fraction or a bare fraction, an optional exponent. "15s", "NaN" and "Infinity" fall through to
-            # 15, which is what the evaluator does with them too (Infinity is not finite).
+            # Non-decimal integer forms first, then the decimal grammar Number accepts: an optional sign,
+            # digits with an optional fraction or a bare fraction, an optional exponent. "15s", "NaN" and
+            # "Infinity" fall through to 15, which is what the evaluator does with them too (Infinity is
+            # not finite). JavaScript Number() accepts unsigned 0x/0b/0o forms, but not signed ones.
             if (line ~ /^0[xX][0-9a-fA-F]+$/) {
               # Number("0x10") is 16. awk would read "0x10" as 0, so convert the digits by hand.
               hex = substr(line, 3); n = 0
               for (i = 1; i <= length(hex); i++) {
                 n = n * 16 + index("0123456789abcdef", tolower(substr(hex, i, 1))) - 1
+              }
+            } else if (line ~ /^0[bB][01]+$/) {
+              bin = substr(line, 3); n = 0
+              for (i = 1; i <= length(bin); i++) {
+                n = n * 2 + substr(bin, i, 1)
+              }
+            } else if (line ~ /^0[oO][0-7]+$/) {
+              oct = substr(line, 3); n = 0
+              for (i = 1; i <= length(oct); i++) {
+                n = n * 8 + substr(oct, i, 1)
               }
             } else if (line !~ /^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$/) {
               print 15; exit
