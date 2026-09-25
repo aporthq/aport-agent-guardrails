@@ -80,13 +80,13 @@ if command -v jq &> /dev/null; then
         .hooks.beforeMCPExecution[]?,
         .hooks.beforeReadFile[]?,
         .hooks.subagentStart[]?
-    ] | map(select(.__aport_hook == true and .timeout == 10 and .failClosed == true)) | length' "$CURSOR_DIR/hooks.json")
+    ] | map(select(.__aport_hook == true and .timeout == 30 and .failClosed == true)) | length' "$CURSOR_DIR/hooks.json")
     if [[ "$MARKER_COUNT" -ne 5 ]]; then
-        echo "FAIL: expected one marker-owned APort hook with timeout=10 and failClosed=true for each supported Cursor event" >&2
+        echo "FAIL: expected one marker-owned APort hook with timeout=30 (evaluator bound 15 s + 15 s margin) and failClosed=true for each supported Cursor event" >&2
         jq -c '.hooks' "$CURSOR_DIR/hooks.json" >&2
         exit 1
     fi
-    echo "  ✅ marker-owned APort hooks with timeout=10"
+    echo "  ✅ marker-owned APort hooks with timeout=30"
 
     # Stale marker-owned npx APort cursor hook path should be replaced
     STALE_COUNT=$(jq -r '[
@@ -125,6 +125,70 @@ if command -v jq &> /dev/null; then
         exit 1
     fi
     echo "  ✅ custom hooks preserved"
+
+    # beforeTabFileRead is opt-in: a default install must not register it.
+    TAB_DEFAULT_COUNT=$(jq -r '[.hooks.beforeTabFileRead[]? | select(.__aport_hook == true)] | length' "$CURSOR_DIR/hooks.json")
+    if [[ "$TAB_DEFAULT_COUNT" -ne 0 ]]; then
+        echo "FAIL: default install must not register beforeTabFileRead" >&2
+        jq -c '.hooks' "$CURSOR_DIR/hooks.json" >&2
+        exit 1
+    fi
+    echo "  ✅ beforeTabFileRead not registered by default"
+
+    # Opt-in re-run merges a marker-owned beforeTabFileRead entry into the existing file.
+    APORT_CURSOR_TAB_READ_HOOK=1 "$DISPATCHER" --framework=cursor --output "$PASSPORT_PATH" --non-interactive --mode=api --api-url="https://api.aport.io" > "$TEST_DIR/cursor-setup-tab.log" 2>&1 || true
+    TAB_OPTIN_COUNT=$(jq -r '[.hooks.beforeTabFileRead[]? | select(.__aport_hook == true and .timeout == 30 and .failClosed == true and (.command | endswith("/aport/runtime/bin/aport-cursor-hook.sh")))] | length' "$CURSOR_DIR/hooks.json")
+    if [[ "$TAB_OPTIN_COUNT" -ne 1 ]]; then
+        echo "FAIL: APORT_CURSOR_TAB_READ_HOOK=1 should register one marker-owned beforeTabFileRead hook" >&2
+        jq -c '.hooks' "$CURSOR_DIR/hooks.json" >&2
+        cat "$TEST_DIR/cursor-setup-tab.log" >&2
+        exit 1
+    fi
+    OTHER_COUNT=$(jq -r '[
+        .hooks.beforeShellExecution[]?,
+        .hooks.preToolUse[]?,
+        .hooks.beforeMCPExecution[]?,
+        .hooks.beforeReadFile[]?,
+        .hooks.subagentStart[]?
+    ] | map(select(.__aport_hook == true)) | length' "$CURSOR_DIR/hooks.json")
+    if [[ "$OTHER_COUNT" -ne 5 ]]; then
+        echo "FAIL: opt-in re-run must keep exactly one APort entry per default event" >&2
+        jq -c '.hooks' "$CURSOR_DIR/hooks.json" >&2
+        exit 1
+    fi
+    grep -q 'beforeTabFileRead is registered' "$TEST_DIR/cursor-setup-tab.log" || {
+        echo "FAIL: opt-in install should report beforeTabFileRead registration" >&2
+        cat "$TEST_DIR/cursor-setup-tab.log" >&2
+        exit 1
+    }
+    echo "  ✅ APORT_CURSOR_TAB_READ_HOOK=1 registers beforeTabFileRead"
+
+    # A later run without the opt-in removes the APort entry and drops the empty key,
+    # while a user's own beforeTabFileRead hook survives.
+    jq '.hooks.beforeTabFileRead += [{"command":"/usr/local/bin/custom-tab-hook.sh"}]' "$CURSOR_DIR/hooks.json" > "$CURSOR_DIR/hooks.json.tmp" \
+        && mv "$CURSOR_DIR/hooks.json.tmp" "$CURSOR_DIR/hooks.json"
+    "$DISPATCHER" --framework=cursor --output "$PASSPORT_PATH" --non-interactive --mode=api --api-url="https://api.aport.io" > "$TEST_DIR/cursor-setup-notab.log" 2>&1 || true
+    TAB_AFTER_COUNT=$(jq -r '[.hooks.beforeTabFileRead[]? | select(.__aport_hook == true)] | length' "$CURSOR_DIR/hooks.json")
+    TAB_CUSTOM_COUNT=$(jq -r '[.hooks.beforeTabFileRead[]? | select(.command == "/usr/local/bin/custom-tab-hook.sh")] | length' "$CURSOR_DIR/hooks.json")
+    if [[ "$TAB_AFTER_COUNT" -ne 0 || "$TAB_CUSTOM_COUNT" -ne 1 ]]; then
+        echo "FAIL: re-install without opt-in should remove only the APort beforeTabFileRead entry" >&2
+        jq -c '.hooks' "$CURSOR_DIR/hooks.json" >&2
+        exit 1
+    fi
+    echo "  ✅ re-install without opt-in removes APort beforeTabFileRead entry only"
+
+    rm -f "$CURSOR_DIR/hooks.json"
+    APORT_CURSOR_TAB_READ_HOOK=1 "$DISPATCHER" --framework=cursor --output "$PASSPORT_PATH" --non-interactive --mode=api --api-url="https://api.aport.io" > "$TEST_DIR/cursor-setup-fresh-tab.log" 2>&1 || true
+    FRESH_KEYS=$(jq -r '.hooks | keys | sort | join(",")' "$CURSOR_DIR/hooks.json")
+    if [[ "$FRESH_KEYS" != "beforeMCPExecution,beforeReadFile,beforeShellExecution,beforeTabFileRead,preToolUse,subagentStart" ]]; then
+        echo "FAIL: fresh opt-in install should write six permission hooks, got: $FRESH_KEYS" >&2
+        exit 1
+    fi
+    jq -e '.version == 1' "$CURSOR_DIR/hooks.json" > /dev/null || {
+        echo "FAIL: hooks.json must keep version 1" >&2
+        exit 1
+    }
+    echo "  ✅ fresh opt-in install writes all six permission hooks"
 fi
 
 MODE_FILE="$CURSOR_DIR/aport/guardrail-mode.env"

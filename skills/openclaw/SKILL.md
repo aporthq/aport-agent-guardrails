@@ -40,7 +40,7 @@ cd aport-agent-guardrails
 npx @aporthq/aport-agent-guardrails
 ```
 
-Both run the same interactive wizard. Let the user interact with it directly. Do not answer the prompts for them.
+Both run the same interactive wizard. Let the user interact with it directly. Do not answer the prompts for them. The first prompt is the OpenClaw config directory (default `$OPENCLAW_HOME` or `~/.openclaw`); if the user picks another directory, replace `~/.openclaw` in the commands below with it.
 
 The wizard will:
 1. Create a local passport file
@@ -72,11 +72,17 @@ cat ~/.openclaw/aport/audit.log 2>/dev/null | tail -5
 ```
 Expected: Shows recent allow/deny decisions from the verification step.
 
+## Limits to tell the user about
+
+- The shell evaluator used in Step 3 checks only the command text: `allowed_commands` is a prefix match; `blocked_patterns` uses word-boundary and glob matching, case-insensitive: a single word such as `sudo` matches only as a whole word (it does not block `sudoku`), an entry containing `*` or `?` is a glob, and a multi-word entry such as `rm -rf` matches as written; when `allowed_commands` is restrictive (not `*`), a command containing an unquoted `&&`, `||`, `;`, `|`, `&`, newline, `(`, `)`, `$(`, `<(`, `>(`, a `#` comment or `$'...'` quoting is denied with `oap.command_chain_unsupported`. It does not see what `cat`, `>`, `curl` or `git push` touch.
+- Reads of `.env` and anything starting with `.env`, the `.ssh`, `.aws`, `.gnupg` and `.kube` directories, `id_rsa`, `id_dsa`, `id_ecdsa` and `id_ed25519` anywhere in the path, files ending in `.pem` or `.key`, and any path containing `credentials` or `password` are denied by default (case-insensitive). Other `id_*` names such as `id_token` are not on the list. Other secret files need `limits["data.file.read"].blocked_patterns` (substring match); writes have no built-in list and use `limits["data.file.write"].blocked_paths` (path prefix).
+- `sessions_spawn`, `sessions_send`, `subagents` and similar map to `agent.session.create.v1` and need the `agent.session.create` capability in the passport.
+
 ## Troubleshooting
 
 If the wizard fails:
 - Check `~/.openclaw/` directory exists and is writable
-- Check `openclaw plugin list` shows aport-guardrail
+- Check `openclaw plugins list` shows `openclaw-aport`
 - Run with `DEBUG_APORT=1` prefix for verbose output
 
 If a tool is unexpectedly blocked:

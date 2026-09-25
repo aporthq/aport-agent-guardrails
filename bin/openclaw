@@ -226,6 +226,9 @@ elif aport_maybe_configure_hosted_passport "openclaw" "$CONFIG_DIR"; then
 	USE_HOSTED_PASSPORT=true
 	echo "  ✅ Using hosted passport (agent_id: $HOSTED_AGENT_ID)"
 	echo ""
+elif [ -n "${APORT_PASSPORT_REUSED:-}" ]; then
+	echo "  ✅ Using passport reused from ${APORT_PASSPORT_REUSED_FROM:-another framework}"
+	echo ""
 elif [ -f "$PASSPORT_FILE" ]; then
 	# Local passport exists
 	prompt_with_default again "  Passport already exists. Run wizard again (overwrite)? [y/N]: " "n"
@@ -236,6 +239,16 @@ elif [ -f "$PASSPORT_FILE" ]; then
 	fi
 else
 	run_local_passport_wizard
+fi
+
+# A passport reused from another framework arrives during the block above: the local file lands in
+# $APORT_DIR, and a hosted one may carry that framework's API URL. Re-resolve both so the plugin config, the
+# mode file and the verification run use the reused passport, not the values fixed before the block ran.
+if [ -f "$APORT_DIR/passport.json" ]; then
+	PASSPORT_FILE="$APORT_DIR/passport.json"
+fi
+if [ -z "${APORT_GUARDRAIL_API_URL_CLI:-}" ] && [ -n "${APORT_API_URL:-}" ]; then
+	CONFIGURED_API_URL="$APORT_API_URL"
 fi
 
 # 3. Install OpenClaw Plugin (Deterministic Enforcement)

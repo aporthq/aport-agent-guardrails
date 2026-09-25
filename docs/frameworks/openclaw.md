@@ -30,8 +30,8 @@ npx @aporthq/aport-agent-guardrails openclaw ap_your_agent_id
 
 The setup command:
 
-1. Chooses your OpenClaw config directory
-2. Creates a local passport or wires a hosted `agent_id`
+1. Chooses your OpenClaw config directory (a prompt; default `$OPENCLAW_HOME` or `~/.openclaw`). The `mode` and `reset` commands read `APORT_OPENCLAW_CONFIG_DIR` or `OPENCLAW_CONFIG_DIR` for the same directory.
+2. Creates a local passport or wires a hosted `agent_id` (keep `Spawn sub-agents and tasks?` at `Y` if the agent uses `sessions_spawn` or sub-agents; those map to `agent.session.create.v1` and need that capability)
 3. Installs the `openclaw-aport` plugin with `openclaw plugins install --link ...`
 4. Writes `plugins.entries.openclaw-aport` config into your OpenClaw config files
 5. Installs APort wrappers in `CONFIG_DIR/.skills/` for manual status checks and smoke tests
@@ -180,6 +180,13 @@ Common mappings include:
 
 - Local passport: set `status` to `suspended` in `~/.openclaw/aport/passport.json`
 - Hosted passport: suspend the passport at aport.io
+
+## Host compatibility
+
+- Minimum OpenClaw: `>=2026.4.11` (`openclaw.install.minHostVersion` and `openclaw.compat.pluginApi` in the plugin `package.json`). OpenClaw enforces both at install time.
+- Last reviewed against OpenClaw v2026.9.5 source and the 2026.8.1 through 2026.9.6 release notes. The hook name (`before_tool_call`), event fields (`toolName`, `params`, `toolCallId`), and return shape (`block`, `blockReason`) are unchanged.
+- OpenClaw 2026.9.3 and later require Node 24.16+ (24.x) or 26.1+. Upgrade Node before OpenClaw.
+- Full matrix, reviewed deprecations, and open risks: [docs/OPENCLAW_COMPATIBILITY.md](../OPENCLAW_COMPATIBILITY.md).
 
 ## Status
 

@@ -7,33 +7,33 @@
       "type": "http",
       "label": "Tool call policy hooks doc",
       "url": "https://docs.openclaw.ai/plugins/hooks/tool-policy",
-      "sha256": "893bd877c3b90680becb9d2e7a4b2144b4ee29fdc310201b56ac7874790b749d",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "sha256": "e2e599d4502b95b08287b3d0651cbc90816b628e5cb0bcb986c28df2756b0549",
+      "capturedAt": "2026-09-24T04:31:44.516Z"
     },
     "openclaw-tags": {
       "framework": "openclaw",
       "type": "github-tags",
       "label": "Latest repository tag",
       "url": "https://github.com/openclaw/openclaw",
-      "latestTag": "v2026.9.4",
-      "latestTagSha": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "latestTag": "v2026.9.6",
+      "latestTagSha": "eb377ac59e6c9fd6c7705028034812becf00271b",
+      "capturedAt": "2026-09-24T04:31:44.516Z"
     },
     "cursor-hooks-doc": {
       "framework": "cursor",
       "type": "http",
       "label": "Hooks reference",
       "url": "https://prod.cursor.com/docs/hooks",
-      "sha256": "7afe9b1aaf5e85726249dfb19631678c37534eb182e63faab1db59cec7bf0233",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "sha256": "6816a7da72d700034ab4a96d95e2307c86b4036b3e9a24b54204e01584247081",
+      "capturedAt": "2026-09-24T04:26:28.619Z"
     },
     "claude-code-hooks-doc": {
       "framework": "claude-code",
       "type": "http",
       "label": "Hooks reference",
       "url": "https://code.claude.com/docs/en/hooks",
-      "sha256": "2e5356ab42a22a10ab894e2b7a43f4d9e12ddc9cab06f178d96a28716b823e03",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "sha256": "31f4f2c5d9968000838a847fc06118a8589184baf7e310824845daae1399e752",
+      "capturedAt": "2026-09-24T04:29:39.073Z"
     },
     "langchain-middleware-doc": {
       "framework": "langchain",
@@ -82,8 +82,8 @@
       "type": "http",
       "label": "Repository README",
       "url": "https://raw.githubusercontent.com/bytedance/deer-flow/main/README.md",
-      "sha256": "e1a413ed5acf77eef9c9a7cb8372ac00843dbf9f27e56f40155dee9b7c890db6",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "sha256": "fa3f14e52a0987bb6729dd59fb79b9f681497268d954e2d7a30c785557ef3dfc",
+      "capturedAt": "2026-09-24T04:31:44.516Z"
     },
     "deerflow-tools-guide": {
       "framework": "deerflow",
@@ -91,16 +91,16 @@
       "label": "Harness tools guide",
       "url": "https://deerflow.tech/en/docs/harness/tools",
       "sha256": "5783ad54ddfb04152e5e7afce9d9bf3da18c04d5dc78453df61d21ea8a22bbd3",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "capturedAt": "2026-09-24T04:31:44.516Z"
     },
     "deerflow-tags": {
       "framework": "deerflow",
       "type": "github-tags",
       "label": "Latest repository tag",
       "url": "https://github.com/bytedance/deer-flow",
-      "latestTag": "v2.0.0",
-      "latestTagSha": "7e7f0410797693cf882594555ba414e0361d4c6f",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "latestTag": "v2.1.0-rc0",
+      "latestTagSha": "769589e8daee14c2587a634b6b43bd96471a41a1",
+      "capturedAt": "2026-09-24T04:31:44.516Z"
     },
     "n8n-tools-agent-doc": {
       "framework": "n8n",
@@ -108,15 +108,15 @@
       "label": "Tools AI Agent node",
       "url": "https://raw.githubusercontent.com/n8n-io/n8n-docs/main/docs/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.agent/tools-agent.md",
       "sha256": "673687120dd98c62081f098e0142e605ef4e4368363357edbe3dbccbd8b80073",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "capturedAt": "2026-09-24T04:31:44.516Z"
     },
     "n8n-agents-doc": {
       "framework": "n8n",
       "type": "http",
       "label": "Build and manage agents",
       "url": "https://raw.githubusercontent.com/n8n-io/n8n-docs/main/docs/build/build-and-manage-agents.md",
-      "sha256": "9e37e95aeba1ecb4580fbf0e574e04c2eb71b0aedac07392c85fda94269a934f",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "sha256": "bea5b389b05a6301582adaf7bdb84440df359be3ec3c3b780ebc20b2e2ad38f9",
+      "capturedAt": "2026-09-24T04:31:44.516Z"
     },
     "n8n-tags": {
       "framework": "n8n",
@@ -124,32 +124,32 @@
       "label": "Latest repository tag",
       "url": "https://github.com/n8n-io/n8n",
       "latestTag": "v1",
-      "latestTagSha": "28dd85aaf2bf184226e1ffddd34196c9eb7b68f1",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "latestTagSha": "9a00ed398cdf0774b93ae5f3c46d564725dc590e",
+      "capturedAt": "2026-09-24T04:31:44.516Z"
     },
     "github-workflow-syntax-doc": {
       "framework": "github",
       "type": "http",
       "label": "Workflow syntax reference",
       "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax",
-      "sha256": "413d83616cdbaf05a6bd0d291a1526a0776c00e68f4ba415568c3ed4b68eb5b2",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "sha256": "3f4fd11f22b5f657879eb1a2a91eb24d53a385ae068dbcd8f5f2240cd99726a5",
+      "capturedAt": "2026-09-24T04:35:53.675Z"
     },
     "github-events-doc": {
       "framework": "github",
       "type": "http",
       "label": "Workflow events reference",
       "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows",
-      "sha256": "340c203cff7632267e92c1a0cd2f64f0a686503797a83f8ea777b51bbd6e2fd4",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "sha256": "d9ff1391fb678e587e3bc757e8c29a0c860793afcc8c2cf3a9a434dfb9db5663",
+      "capturedAt": "2026-09-24T04:35:53.675Z"
     },
     "github-oidc-doc": {
       "framework": "github",
       "type": "http",
       "label": "OIDC hardening reference",
       "url": "https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-cloud-providers",
-      "sha256": "e2a8a99c9e883a45c17ea3f308f858314de2b2e6d1f1e03ce8b35e2eca91c3bb",
-      "capturedAt": "2026-09-15T18:29:23.937Z"
+      "sha256": "8e0a6084b5675b90210aa5ba3987fab38b70b1db49953f48733478ab11e31f09",
+      "capturedAt": "2026-09-24T04:35:53.675Z"
     }
   }
 }

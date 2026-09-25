@@ -2,7 +2,11 @@
 # APort Claude Code hook: reads tool_name + tool_input from JSON stdin (path-based Read uses guardrail).
 # maps to APort policy, calls guardrail, outputs hookSpecificOutput deny or exit 0.
 # Exit 0 with no output = allow; exit 0 with hookSpecificOutput deny = block.
-# Exit 2 with stderr also blocks, but Claude Code ignores JSON on exit 2.
+# Exit 2 also blocks (reason taken from permissionDecisionReason when present, else stderr);
+# this hook always exits 0 with JSON so the structured reason reaches Claude.
+# A hook that exceeds the settings.json "timeout" does NOT block in Claude Code (the call
+# continues through the normal permission flow), so the installer's timeout must stay
+# above the evaluator's own timeouts (see bin/frameworks/claude-code.sh).
 # Output format: Claude Code official schema (hookSpecificOutput.permissionDecision), NOT Cursor format.
 
 set -e
@@ -194,8 +198,10 @@ case "$TOOL_NAME_NORM" in
         fi
         :
         ;;
-    artifact | endconversation | sendfeedback)
+    artifact | endconversation | sendfeedback | reportfindings | subagenthandback)
         # Claude Code internal UX/feedback tools do not act on the user's system.
+        # ReportFindings renders review findings in the transcript; SubagentHandback
+        # delivers a subagent's final report to its parent conversation (auto mode).
         exit 0
         ;;
     readmcpresourcetool)
@@ -206,8 +212,8 @@ case "$TOOL_NAME_NORM" in
         # Search/list/read tools without a single file_path: allow without evaluator
         exit 0
         ;;
-    taskget | tasklist | taskoutput | cronlist | schedulewakeup | pushnotification)
-        # Read-only task/cron queries and notifications: allow without evaluator
+    taskget | tasklist | taskoutput | cronlist | listagents | schedulewakeup | pushnotification)
+        # Read-only task/cron/agent queries and notifications: allow without evaluator
         exit 0
         ;;
     enterplanmode | exitplanmode)

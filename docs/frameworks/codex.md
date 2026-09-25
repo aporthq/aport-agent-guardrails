@@ -19,6 +19,15 @@ Use `--global` if you want the hook in `~/.codex/hooks.json` instead of the curr
 npx @aporthq/aport-agent-guardrails codex --global
 ```
 
+**Prerequisites:** `jq` on the PATH Codex uses. The hook denies every tool call with `oap.missing_dependency` when `jq` is missing.
+
+**Beta limits, stated plainly.** The Codex hook denies two things Codex does routinely, and warn mode does not lift either of them because they are hook-level denials, not policy denials:
+
+- `apply_patch` calls that touch more than one file (`oap.multi_path_write_unsupported`). Ask Codex to split patches so each call edits one file.
+- `Glob`, `List`, `LS` and `LSP` calls, with or without a path (`oap.metadata_enumeration_unsupported`, or `oap.missing_file_path` when no target is given). Directory listings therefore have to come from shell commands such as `ls`, which the command policy judges.
+
+`--enforcement=warn` still helps with everything else: policy denials such as a `blocked_patterns` hit or a path outside `allowed_paths` are recorded and allowed while you tune the passport.
+
 Hosted passport setup is the recommended path for signed decisions and centralized audit:
 
 ```bash
@@ -27,7 +36,18 @@ APORT_QUICK_HOSTED=1 \
 npx --yes @aporthq/aport-agent-guardrails codex --non-interactive
 ```
 
+Non-interactive local passport (framework defaults, no prompts):
+
+```bash
+npx --yes @aporthq/aport-agent-guardrails codex --mode=local --non-interactive \
+  --output ~/.aport/codex/aport/passport.json
+```
+
+Interactive local passport: run `npx @aporthq/aport-agent-guardrails codex`, choose `3. Create local passport file`, and answer the wizard. Keep `Spawn sub-agents and tasks?` at `Y` (the Codex default); the collaboration tools (`spawn_agent`, `send_message`, `wait_agent` and the rest) map to `agent.session.create.v1` and are denied without that capability.
+
 Hook wiring is project-local by default, but APort state is not. Hosted API keys, mode settings, local passports, and audit files default to `~/.aport/codex/aport` so they are not written into the repository.
+
+To put that state elsewhere, set `APORT_CODEX_CONFIG_DIR` when running the installer. It writes `APORT_CODEX_CONFIG_DIR=<dir>` into the hook command in `hooks.json`, so the hook finds the same directory at run time without any change to Codex's environment. `mode` and `reset` read the variable too. For a passport outside that directory, set `APORT_PASSPORT_FILE` and `APORT_ALLOW_EXTERNAL_PASSPORT_FILE=1`; without the second variable the hook ignores an external path (`bin/lib/framework-hook-paths.sh`).
 
 ## How it works
 
@@ -47,26 +67,32 @@ The hook wrapper is `bin/aport-codex-hook.sh`, which delegates to the shared `bi
 
 | Codex tool family | APort policy |
 |-------------------|--------------|
-| `Bash`, shell, exec-like local tools | `system.command.execute.v1` |
+| `shell`, `local_shell`, `exec_command`, `unified_exec`, `container_exec`, `js_repl`, `code_mode_exec` and other shell or exec tools | `system.command.execute.v1` |
 | `apply_patch`, write/edit/delete tools | `data.file.write.v1` |
-| path-based read tools | `data.file.read.v1` |
-| `WebFetch`, `WebSearch` | `web.fetch.v1` |
+| `read_file`, `view_image`, `grep` and other path-based reads and content searches | `data.file.read.v1` |
+| `web_fetch`, `web_search`, `webrun`, `browser`, `open_url`, `fetch_url`, `http_request`, `computer_use` | `web.fetch.v1` |
 | MCP tools and MCP resource reads | `mcp.tool.execute.v1` |
-| agent/task/subagent requests | `agent.session.create.v1` |
-| `Grep` and other path-based content searches | `data.file.read.v1` |
-| search/list/glob metadata tools without path, pattern, or include targets | allowed without evaluator |
+| `spawn_agent`, `send_message`, `wait_agent` and the other collaboration tools | `agent.session.create.v1` |
+| `Glob`, `List`, `LS`, `LSP` | denied by the hook: `oap.metadata_enumeration_unsupported` with a target, `oap.missing_file_path` without |
+| `TodoRead`, `ToolSearch`, `update_plan`, `request_user_input`, `write_stdin`, `memory_operators` and other `memory_*` tools | allowed without evaluator: session bookkeeping, plan updates, prompts to the user, stdin to a process the hook already judged, and Codex's own memory store |
+
+Codex adds tools faster than this table changes. A name that is not listed is routed by what its payload carries, which is the evidence the policies judge anyway. A `url` goes to the web policy. A `file_path` or `path` with `content`, `edits` or `new_string` goes to the write policy, a `file_path` or `path` alone to the read policy. A `command`, `cmd` or `script` with no path or URL goes to the command policy, which judges that string with `allowed_commands` and `blocked_patterns`. Nothing is inferred from the name: `execute_sql` with a `command` is judged as a command, and `read_secret_from_vault` with only a `key` is denied with `oap.unknown_tool` like any other payload the hook cannot place. Set `APORT_CODEX_TOOL_FALLBACK=off` in the hook's environment to skip payload routing and deny every unlisted name.
+
+Timeouts: `shell` and `local_shell` calls that carry no `timeout_ms` are judged under Codex's 10 s default (`DEFAULT_EXEC_COMMAND_TIMEOUT_MS`), because that default kills the process. `exec_command` and `unified_exec` get no default: the process outlives the call and `write_stdin` can keep driving it. A passport that sets `limits["system.command.execute"].max_execution_time` therefore denies `exec_command` and `unified_exec` calls without an explicit `timeout_ms` (`oap.missing_required_context`), and any call whose timeout exceeds the limit (`oap.timeout_exceeded`). Drop the limit or use `shell`.
 
 Unknown effectful tools fail closed in enforce mode. File read/write tools that
 do not expose an evaluable path also fail closed rather than silently bypassing
 policy. `apply_patch` payloads that touch more than one file fail closed in the
 beta hook because a single local evaluator call can authorize only one path
 without producing misleading partial audit records. Split multi-file patches
-while using the beta hook. Path-scoped metadata enumeration tools such as
-`Glob`, `List`, and `LS` fail closed because the hook cannot authorize every
-expanded result before the host returns filenames. `WebSearch` is network-backed
+while using the beta hook. `Glob`, `List`, `LS` and `LSP` fail closed whether
+or not a path is supplied, because the hook cannot authorize every expanded
+result before the host returns filenames. `WebSearch` is network-backed
 but may not expose a concrete destination URL; in local enforce mode APort fails
 closed when the hook cannot verify a URL or domain against passport limits. Use
 hosted mode or warn mode while tuning search-heavy workflows.
+
+Shell commands are judged by text only: `allowed_commands` is a prefix match; `blocked_patterns` uses word-boundary and glob matching, case-insensitive: a single word such as `sudo` matches only as a whole word (it does not block `sudoku`), an entry containing `*` or `?` is a glob, and a multi-word entry such as `rm -rf` matches as written; when `allowed_commands` is restrictive (not `*`), a command containing an unquoted `&&`, `||`, `;`, `|`, `&`, newline, `(`, `)`, `$(`, `<(`, `>(`, a `#` comment or `$'...'` quoting is denied with `oap.command_chain_unsupported`. The hook does not parse `git push` targets, files read by `cat` or written with `>`, or hosts contacted by `curl`; see [What the Bash policy does and does not see](../SECURITY_MODEL.md#what-the-bash-policy-does-and-does-not-see).
 
 ## Enforcement modes
 
@@ -80,7 +106,8 @@ Warn mode records the original deny decision locally or in APort hosted audit,
 then returns allow semantics with a warning. It applies only after APort
 completed policy evaluation; malformed hook input, invalid config, missing
 dependencies, and unmapped effectful tools still fail closed. Use warn mode only
-while tuning policy.
+while tuning policy. The multi-file `apply_patch` and `Glob`/`List`/`LS` denials
+described above are hook-level, so they stay denied in warn mode.
 
 ## Validate
 

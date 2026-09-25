@@ -28,9 +28,29 @@ export const CLAUDE_CODE_READ_TOOLS = [
   'TaskGet',
   'TaskList',
   'TaskOutput',
+  'ListAgents',
   'CronList',
   'TodoRead',
   'AskUserQuestion',
+] as const;
+
+/**
+ * Internal UX, bookkeeping and state-transition tools: no effect on the user's system,
+ * so the hook allows them without calling the evaluator. Any Claude Code tool absent
+ * from this list, CLAUDE_CODE_READ_TOOLS and CLAUDE_CODE_TO_GUARDRAIL_TOOL (and not an
+ * mcp__ tool) is denied as unknown (fail-closed); SendUserFile is one such tool today.
+ */
+export const CLAUDE_CODE_INTERNAL_TOOLS = [
+  'Artifact',
+  'EndConversation',
+  'SendFeedback',
+  'ReportFindings',
+  'SubagentHandback',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'ScheduleWakeup',
+  'PushNotification',
+  'TodoWrite',
 ] as const;
 
 /**
@@ -46,7 +66,6 @@ export const CLAUDE_CODE_TO_GUARDRAIL_TOOL: Record<string, ClaudeCodeGuardrailTo
   Edit: 'write',
   MultiEdit: 'write',
   NotebookEdit: 'write',
-  TodoWrite: 'write',
   ShareOnboardingGuide: 'write',
   WebSearch: 'websearch',
   WebFetch: 'websearch',
@@ -65,4 +84,5 @@ export const CLAUDE_CODE_TO_GUARDRAIL_TOOL: Record<string, ClaudeCodeGuardrailTo
   RemoteTrigger: 'session.create',
   CronCreate: 'session.create',
   CronDelete: 'session.create',
+  Workflow: 'session.create',
 };

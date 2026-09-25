@@ -380,3 +380,33 @@ sanitize_log_value() {
 
     echo "$value"
 }
+
+# Normalize a context object for the hosted verify API. The hosted schema for system.command.execute.v1 accepts
+# `shell` only as one of bash, sh, zsh, fish, powershell, cmd. Hooks build the context from harness payloads, where
+# the shell is often absent (empty string) or a path (/bin/bash); both were rejected with HTTP 400
+# context_validation_failed and surfaced to the agent as oap.evaluation_error. Trust decisions about the override
+# are made earlier by aport_hook_shell_override_is_trusted; this only shapes what the API sees.
+# Shape a hook-built context to the hosted verify API's schema. Keyed on the resolved policy id, so every tool
+# that maps to the command policy (bash, terminal, run_terminal_cmd, execute_command, ...) gets the same shaping.
+# The API accepts `shell` only from a fixed enum; anything else is dropped rather than rejected with HTTP 400.
+normalize_api_context() {
+    local policy_id="${1:-}"
+    local context_json="${2:-{\}}"
+    if ! command -v jq > /dev/null 2>&1; then
+        printf '%s' "$context_json"
+        return 0
+    fi
+    case "$policy_id" in
+        system.command.execute*)
+            printf '%s' "$context_json" | jq -c '
+              if (.shell | type) == "string" then
+                (.shell |= (split("/") | last))
+                | if (.shell | IN("bash", "sh", "zsh", "fish", "powershell", "cmd")) then . else del(.shell) end
+              else del(.shell) end
+            ' 2> /dev/null || printf '%s' "$context_json"
+            ;;
+        *)
+            printf '%s' "$context_json"
+            ;;
+    esac
+}

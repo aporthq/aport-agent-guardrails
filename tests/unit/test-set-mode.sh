@@ -16,6 +16,20 @@ echo ""
 echo "  Unit — aport set-mode"
 echo ""
 
+REUSE_HOME="$TEST_DIR/reuse-home"
+mkdir -p "$REUSE_HOME"
+if HOME="$REUSE_HOME" "$MODE_HELPER" claude-code --mode=api --reuse-from=codex > "$TEST_DIR/reuse-flag.out" 2>&1; then
+    echo "FAIL: set-mode should reject --reuse-from, which is an install option" >&2
+    cat "$TEST_DIR/reuse-flag.out" >&2
+    exit 1
+fi
+grep -q "install option" "$TEST_DIR/reuse-flag.out" || {
+    echo "FAIL: set-mode should explain that --reuse-from belongs to the installer" >&2
+    cat "$TEST_DIR/reuse-flag.out" >&2
+    exit 1
+}
+echo "  ✅ set-mode rejects --reuse-from with the install command to run instead"
+
 HELP_HOME="$TEST_DIR/help-home"
 mkdir -p "$HELP_HOME"
 HOME="$HELP_HOME" "$MODE_HELPER" langchain --help > "$TEST_DIR/langchain-help.out"

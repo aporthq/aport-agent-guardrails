@@ -15,7 +15,7 @@ source "$LIB/guardrail-mode.sh"
 # shellcheck source=lib/framework-setup.sh
 source "$LIB/framework-setup.sh"
 
-SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n)
+SUPPORTED_FRAMEWORKS=("${APORT_SUPPORTED_FRAMEWORKS[@]}")
 
 usage() {
     cat << 'EOF'
@@ -60,6 +60,10 @@ if [[ "$is_supported" != true ]]; then
 fi
 
 parse_guardrail_mode_args "$@"
+if [[ -n "${APORT_REUSE_PASSPORT_FROM_CLI:-}" ]]; then
+    log_error "--reuse-from is an install option, not a mode option. Run: aport-agent-guardrails $framework --reuse-from=${APORT_REUSE_PASSPORT_FROM_CLI}"
+    exit 1
+fi
 if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -gt 0 ]]; then
     if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -eq 1 && ("${APORT_FRAMEWORK_ARGS[0]}" == "--help" || "${APORT_FRAMEWORK_ARGS[0]}" == "-h") ]]; then
         usage

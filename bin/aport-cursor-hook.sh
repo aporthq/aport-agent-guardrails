@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # APort Cursor hook: reads JSON from stdin, maps tool to APort policy, calls guardrail.
-# Handles all Cursor hook events: beforeShellExecution, preToolUse, beforeMCPExecution,
-# beforeReadFile, subagentStart.
-# Output: JSON with "permission": "allow"|"deny"; optional native and legacy message fields.
-# Exit: 0 = allow, 2 = block (deny). Other exits = hook error (Cursor may fail-open).
+# Handles the Cursor permission hooks: beforeShellExecution, preToolUse,
+# beforeMCPExecution, beforeReadFile, beforeTabFileRead (opt-in registration),
+# subagentStart. Reference: https://cursor.com/docs/hooks
+# Output: JSON with "permission": "allow"|"deny" plus user_message/agent_message
+# on deny; legacy allowed/agentMessage/reason fields are kept for older consumers.
+# Exit: 0 = allow, 2 = block (deny). Other exits = hook error. Cursor fails open on
+# those unless the hooks.json entry sets failClosed: true (the installer does).
 #
 # Cursor preToolUse tool names vary by Cursor version. Keep mappings conservative
 # and covered by tests rather than assuming every host event is always emitted.
@@ -137,22 +140,35 @@ safe_jq() {
 }
 
 # Detect hook event type from input fields and route accordingly.
-# Cursor sends different JSON shapes per hook event:
-#   beforeShellExecution: { "command": "...", "cwd": "..." }
-#   preToolUse:           { "tool_name": "Shell|Read|Write|...", "tool_input": {...} }
-#   beforeMCPExecution:   { "tool_name": "...", "tool_input": {...}, "mcp_server_name": "..." }
-#   beforeReadFile:       { "file_path": "...", "content": "..." }
-#   subagentStart:        { "subagent_id": "...", "subagent_type": "...", "task": "..." }
-# We detect by checking for distinguishing fields.
+# Every Cursor hook payload carries hook_event_name plus conversation_id,
+# generation_id, model, cursor_version, workspace_roots, user_email and
+# transcript_path. Event-specific fields (Cursor hooks reference, 2026-09):
+#   beforeShellExecution: { "command": "...", "cwd": "...", "sandbox": false }
+#   preToolUse:           { "tool_name": "Shell|Read|Write|Grep|Delete|Task|MCP:<tool>",
+#                           "tool_input": {...}, "tool_use_id": "...", "cwd": "...",
+#                           "agent_message": "..." }
+#   beforeMCPExecution:   { "tool_name": "...", "tool_input": "<json string>" | {...},
+#                           "mcp_server_name": "...",
+#                           HTTP/SSE: "url" + "mcp_server_url"; stdio: "command" (launch string) }
+#   beforeReadFile:       { "file_path": "...", "content": "...", "attachments": [...] }
+#   beforeTabFileRead:    { "file_path": "...", "content": "..." } (Tab completions, no attachments)
+#   subagentStart:        { "subagent_id": "...", "subagent_type": "...", "task": "...",
+#                           "parent_conversation_id": "...", "tool_call_id": "...", ... }
+# Route on hook_event_name first; the field heuristics below cover older payloads
+# that omit it. The top-level "command" of a stdio MCP payload is the server launch
+# string, not a shell command, so the MCP branch must win before the shell branch.
 
 GUARDRAIL_TOOL=""
 CONTEXT_JSON="{}"
 
-# Check for hook_event_name first (newer Cursor versions include it)
+# hook_event_name is part of every documented Cursor payload; older builds may omit it.
 HOOK_EVENT="$(echo "$INPUT" | jq -r '.hook_event_name // ""' 2> /dev/null)"
 TOOL_NAME="$(echo "$INPUT" | jq -r '.tool_name // ""' 2> /dev/null)"
 
-if [ "$HOOK_EVENT" = "beforeReadFile" ] || { [ -z "$HOOK_EVENT" ] && [ -z "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.file_path and .content' &> /dev/null; }; then
+if [ "$HOOK_EVENT" = "beforeReadFile" ] || [ "$HOOK_EVENT" = "beforeTabFileRead" ] || { [ -z "$HOOK_EVENT" ] && [ -z "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.file_path and .content' &> /dev/null; }; then
+    # beforeReadFile (Agent) and beforeTabFileRead (Tab completions) share the
+    # same file_path/content input and the same permission output. Only
+    # file_path is evaluated; content and attachments are never forwarded.
     FILE_PATH="$(echo "$INPUT" | jq -r '.file_path // ""' 2> /dev/null || true)"
     if ! aport_hook_try_read_evaluation_from_file_path "$FILE_PATH"; then
         allow

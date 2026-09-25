@@ -289,6 +289,112 @@ grep -q "protected-paths must be a comma-separated single-line list" "$out11" ||
 }
 echo "  ✅ protected-path input rejects CR/LF injection"
 
+# YAML parse helper: prefers PyYAML, falls back to js-yaml from the repo, else skips.
+parse_yaml() {
+    if python3 -c 'import yaml' 2> /dev/null; then
+        python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$1"
+    elif NODE_PATH="$REPO_ROOT/node_modules" node -e 'require("js-yaml")' 2> /dev/null; then
+        NODE_PATH="$REPO_ROOT/node_modules" node -e 'require("js-yaml").load(require("fs").readFileSync(process.argv[1], "utf8"))' "$1"
+    else
+        echo "  (no YAML parser available; skipping parse of $1)"
+    fi
+}
+
+PROTECT_REPO="$TEST_DIR/protect-project"
+mkdir -p "$PROTECT_REPO"
+git init -q "$PROTECT_REPO"
+PROTECT_WORKFLOW="$PROTECT_REPO/.github/workflows/aport-guard.yml"
+out12="$TEST_DIR/github-12.txt"
+"$DISPATCHER" github --project-dir "$PROTECT_REPO" > "$out12" 2>&1
+if grep -q "protect-default-branch" "$PROTECT_WORKFLOW"; then
+    echo "FAIL: default-branch protection must be opt-in" >&2
+    cat "$PROTECT_WORKFLOW" >&2
+    exit 1
+fi
+grep -q "^concurrency:" "$PROTECT_WORKFLOW" && grep -q "cancel-in-progress: \${{ github.event_name == 'pull_request' }}" "$PROTECT_WORKFLOW" || {
+    echo "FAIL: workflow should cancel superseded pull_request runs only" >&2
+    cat "$PROTECT_WORKFLOW" >&2
+    exit 1
+}
+parse_yaml "$PROTECT_WORKFLOW" || {
+    echo "FAIL: default generated workflow must be valid YAML" >&2
+    cat "$PROTECT_WORKFLOW" >&2
+    exit 1
+}
+echo "  ✅ default workflow parses and leaves default-branch protection off"
+
+out13="$TEST_DIR/github-13.txt"
+"$DISPATCHER" github --project-dir "$PROTECT_REPO" --force --protect-default-branch > "$out13" 2>&1
+grep -q "protect-default-branch: true" "$PROTECT_WORKFLOW" || {
+    echo "FAIL: --protect-default-branch should pass the protect-default-branch input to the Action" >&2
+    cat "$PROTECT_WORKFLOW" >&2
+    exit 1
+}
+if grep -q "name: Protect default branch" "$PROTECT_WORKFLOW"; then
+    echo "FAIL: protection belongs to the Action; no inline step should be rendered" >&2
+    cat "$PROTECT_WORKFLOW" >&2
+    exit 1
+fi
+grep -q "Default-branch protection" "$out13" || {
+    echo "FAIL: expected next steps to mention default-branch protection" >&2
+    cat "$out13" >&2
+    exit 1
+}
+parse_yaml "$PROTECT_WORKFLOW" || {
+    echo "FAIL: workflow with default-branch protection must be valid YAML" >&2
+    cat "$PROTECT_WORKFLOW" >&2
+    exit 1
+}
+echo "  ✅ --protect-default-branch passes the input to the Action and renders parseable YAML"
+
+out14="$TEST_DIR/github-14.txt"
+APORT_GITHUB_PROTECT_DEFAULT_BRANCH=true "$DISPATCHER" github --project-dir "$PROTECT_REPO" --force > "$out14" 2>&1
+grep -q "protect-default-branch: true" "$PROTECT_WORKFLOW" || {
+    echo "FAIL: APORT_GITHUB_PROTECT_DEFAULT_BRANCH=true should enable the protect-default-branch input" >&2
+    cat "$PROTECT_WORKFLOW" >&2
+    exit 1
+}
+out15="$TEST_DIR/github-15.txt"
+set +e
+APORT_GITHUB_PROTECT_DEFAULT_BRANCH=maybe "$DISPATCHER" github --project-dir "$PROTECT_REPO" --force > "$out15" 2>&1
+e15=$?
+set -e
+[[ "$e15" -ne 0 ]] || {
+    echo "FAIL: invalid APORT_GITHUB_PROTECT_DEFAULT_BRANCH value should be rejected" >&2
+    cat "$out15" >&2
+    exit 1
+}
+echo "  ✅ APORT_GITHUB_PROTECT_DEFAULT_BRANCH env toggles and validates"
+
+REPO_WORKFLOW="$REPO_ROOT/.github/workflows/aport-repository-guard.yml"
+parse_yaml "$REPO_WORKFLOW" || {
+    echo "FAIL: repository guard workflow must be valid YAML" >&2
+    exit 1
+}
+grep -Eq "uses: aporthq/policy-verify-action@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_WORKFLOW" || {
+    echo "FAIL: repository guard workflow should pin the action to a commit SHA with a version comment" >&2
+    exit 1
+}
+grep -q "vars.APORT_PROTECT_DEFAULT_BRANCH == 'true'" "$REPO_WORKFLOW" || {
+    echo "FAIL: repository guard workflow should gate default-branch protection on a repository variable" >&2
+    exit 1
+}
+# At the v1.0.11 pin the Action ignores protect-default-branch, so push must never fail the run: the enforce
+# step is gated on the event alone and the push warning step runs regardless of earlier step outcomes.
+grep -q "github.event_name != 'push' &&" "$REPO_WORKFLOW" || {
+    echo "FAIL: repository guard workflow must not fail push events at the v1.0.11 pin" >&2
+    exit 1
+}
+if grep -Eq "^[[:space:]]+\(github.event_name != 'push' \|\| vars.APORT_PROTECT_DEFAULT_BRANCH == 'true'\) &&" "$REPO_WORKFLOW"; then
+    echo "FAIL: the push-failing condition must stay in the comment until the pin honours protect-default-branch" >&2
+    exit 1
+fi
+grep -A3 "name: Record push audit warning" "$REPO_WORKFLOW" | grep -q "always()" || {
+    echo "FAIL: the push audit warning step must run with always()" >&2
+    exit 1
+}
+echo "  ✅ repository guard workflow parses, pins by SHA, and gates default-branch protection"
+
 echo ""
 echo "  All GitHub setup tests passed."
 echo ""
