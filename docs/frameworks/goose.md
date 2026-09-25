@@ -26,6 +26,12 @@ APORT_QUICK_HOSTED=1 \
 npx --yes @aporthq/aport-agent-guardrails goose --non-interactive
 ```
 
+Non-interactive local passport: `npx --yes @aporthq/aport-agent-guardrails goose --mode=local --non-interactive` (add `--output <path>` to choose the file). Interactive local passport: run the installer without flags and choose `3. Create local passport file`.
+
+**Prerequisites:** `jq` on the PATH Goose uses; the hook denies every tool call with `oap.missing_dependency` without it.
+
+To keep state somewhere other than `~/.aport/goose`, set `APORT_GOOSE_CONFIG_DIR` when running the installer. The generated plugin wrapper script exports the same value, so the hook uses that directory at run time. `mode` and `reset` read the variable too. A passport outside that directory needs `APORT_PASSPORT_FILE` plus `APORT_ALLOW_EXTERNAL_PASSPORT_FILE=1`.
+
 ## How it works
 
 Goose loads Open Plugins from `.agents/plugins/<plugin-name>` or `~/.agents/plugins/<plugin-name>`. APort writes:
@@ -64,7 +70,12 @@ one concrete read target at a time. Local web and MCP checks enforce the
 passport's domain/server/tool allowlists and MCP timeout limits when the hook
 payload supplies that context; loopback, link-local, private, and metadata IP
 literals are blocked before configurable allowlists are applied. Missing
-required context fails closed when a restrictive list is configured.
+required context fails closed when a restrictive list is configured. Shell
+commands are judged by text only: `allowed_commands` is a prefix match; `blocked_patterns` uses word-boundary and glob matching, case-insensitive: a single word such as `sudo` matches only as a whole word (it does not block `sudoku`), an entry containing `*` or `?` is a glob, and a multi-word entry such as `rm -rf` matches as written; when `allowed_commands` is restrictive (not `*`), a command containing an unquoted `&&`, `||`, `;`, `|`, `&`, newline, `(`, `)`, `$(`, `<(`, `>(`, a `#` comment or `$'...'` quoting is denied with `oap.command_chain_unsupported`. The hook does not parse `git push`
+targets, files read by `cat` or written with `>`, or hosts contacted by `curl`;
+see [What the Bash policy does and does not see](../SECURITY_MODEL.md#what-the-bash-policy-does-and-does-not-see).
+`developer__shell` carries no timeout, so a passport that sets `limits["system.command.execute"].max_execution_time` denies every shell call with `oap.missing_required_context`; leave that limit out of a Goose passport. Directory-enumeration denials are hook-level and stay denied in
+warn mode.
 
 ## Enforcement modes
 

@@ -85,6 +85,10 @@ resolve_agentsmd_enforcement() {
 # Used by framework setup scripts (claude-code.sh, cursor.sh) to avoid duplicating logic.
 # Requires: log_info (from common.sh), run_passport_wizard (from passport.sh).
 setup_from_agentsmd_or_wizard() {
+    if [ -n "${APORT_PASSPORT_REUSED:-}" ]; then
+        log_info "Using passport reused from ${APORT_PASSPORT_REUSED_FROM:-another framework}; the wizard is skipped."
+        return 0
+    fi
     if resolve_agentsmd_enforcement 2> /dev/null; then
         if [ -n "$AGENTSMD_AGENT_ID" ]; then
             log_info "Found AGENTS.md enforcement block with agent_id: $AGENTSMD_AGENT_ID"

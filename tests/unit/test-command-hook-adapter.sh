@@ -121,6 +121,62 @@ jq -e '
 }
 echo "  ✅ Shell session decision context stores metadata only"
 
+# Codex adds tools faster than the routing list is updated: names that say what they do reach a policy instead
+# of a hard oap.unknown_tool deny, names that say nothing still fail closed, and the fallback can be switched off.
+run_hook "Codex webrun reaches the web policy instead of unknown_tool" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"webrun","tool_input":{"url":"https://example.com/page"}}' \
+    '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+run_hook "Codex update_plan is session bookkeeping and is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"update_plan","tool_input":{"plan":[{"step":"x","status":"pending"}]}}' \
+    '. == {}'
+
+run_hook "Codex local_shell maps to the shell policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"local_shell","tool_input":{"command":"rm -rf /tmp/test"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+# Unlisted Codex tools are routed by payload shape, never by name: a url is a web call, a path with content a
+# write, a path alone a read, a command a shell call, anything else unknown.
+run_hook "Codex fallback routes an unlisted tool with a url to the web policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
+    '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+run_hook "Codex fallback routes webrun {url} to the web policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"webrun","tool_input":{"url":"https://example.com/"}}' \
+    '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+# execute_sql carries only a command, so the command policy judges that string (allowed_commands,
+# blocked_patterns); nothing in the name is trusted. That is the fallback's contract, stated here on purpose.
+run_hook "Codex fallback judges an unlisted tool that carries only a command by the command policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"execute_sql","tool_input":{"command":"rm -rf /tmp/test"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+run_hook "Codex fallback still fails closed on a payload that says nothing" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"frobnicate","tool_input":{"x":1}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+run_hook "Codex fallback: a name that sounds like a read but carries no path is unknown" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"read_secret_from_vault","tool_input":{"key":"db/creds"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+CODEX_FALLBACK_OFF_OUT="$TEST_DIR/out-codex-fallback-off.json"
+printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
+    | APORT_CODEX_TOOL_FALLBACK=off APORT_CODEX_CONFIG_DIR="$TEST_DIR" "$CODEX" > "$CODEX_FALLBACK_OFF_OUT" 2> /dev/null || true
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))' "$CODEX_FALLBACK_OFF_OUT" > /dev/null || {
+    echo "FAIL: APORT_CODEX_TOOL_FALLBACK=off should keep the strict list only" >&2
+    cat "$CODEX_FALLBACK_OFF_OUT" >&2
+    exit 1
+}
+echo "  ✅ Codex tool fallback can be switched off"
+
 run_hook "Codex exec_command maps to shell policy" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la"}}' \
@@ -340,10 +396,50 @@ run_hook "Codex shell enforces configured timeout when supplied" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status","timeoutMs":2000}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.timeout_exceeded"))'
 
-run_hook "Codex shell requires timeout evidence when max execution time is configured" \
+# exec_command is a unified-exec session: the process outlives the call, so there is no bound and no default.
+# Without timeout evidence it stays denied when the passport sets max_execution_time.
+run_hook "Codex exec_command without a timeout is unbounded and still requires timeout evidence" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+
+# The legacy shell tool kills at DEFAULT_EXEC_COMMAND_TIMEOUT_MS (10000 ms), so that is the timeout evidence the
+# hook supplies for it. Against max_execution_time 1 it must be denied as exceeded, never as missing.
+run_hook "Codex shell without a timeout is judged by the Codex default against max_execution_time" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"shell","tool_input":{"command":"git status"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.timeout_exceeded"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_command_timeout_limit_30",
+  "agent_id": "ap_command_timeout_limit_30",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "system.command.execute"}],
+  "limits": {
+    "system.command.execute": {
+      "allowed_commands": ["git"],
+      "max_execution_time": 30
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex shell without a timeout is allowed under a limit above the Codex default and records 10s" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"shell","tool_input":{"command":"git status"}}' \
+    '. == {}'
+jq -e '.guardrail_tool == "bash" and .context.timeout == 10' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex shell without a timeout should record the 10s default, got:" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex shell without a timeout carries the 10s Codex default"
 
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 

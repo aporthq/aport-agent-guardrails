@@ -154,21 +154,37 @@ aport_maybe_configure_hosted_passport() {
 
     local selected_mode_lower
     selected_mode_lower="$(printf '%s' "$selected_mode" | tr '[:upper:]' '[:lower:]')"
+    local requested_reuse="${APORT_REUSE_PASSPORT_FROM_CLI:-${APORT_REUSE_PASSPORT_FROM:-}}"
+    if [[ -n "$requested_reuse" && -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
+        log_error "--reuse-from and --agent-id name two different passports; pass one of them"
+        exit 1
+    fi
+
     if [[ "$selected_mode_lower" = "local" ]]; then
+        # Local mode still benefits from an existing local passport on this device; hosted entries are not offered.
+        # Nothing reused (return 1) means the wizard runs next; an explicit request that cannot be honoured exits
+        # inside the callee, and that exit is not caught here.
+        if aport_maybe_reuse_device_passport "$framework" "$config_dir" local; then :; fi
         return 1
     fi
 
-    if [[ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
-        export APORT_AGENT_ID="$APORT_HOSTED_AGENT_ID_CLI"
-        return 0
+    # Precedence: an explicit --reuse-from beats an agent id inherited from the environment and beats this
+    # framework's own saved config, so a stale or rotated key can be replaced from another install without a reset.
+    if [[ -z "$requested_reuse" ]]; then
+        if [[ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
+            export APORT_AGENT_ID="$APORT_HOSTED_AGENT_ID_CLI"
+            return 0
+        fi
+        [[ -n "${APORT_AGENT_ID:-}" ]] && return 0
+        aport_try_reuse_existing_hosted_config "$config_dir" && return 0
     fi
 
-    if [[ -n "${APORT_AGENT_ID:-}" ]]; then
-        return 0
-    fi
-
-    if aport_try_reuse_existing_hosted_config "$config_dir"; then
-        return 0
+    # A passport another framework already has on this device: the explicit request, or a menu before creating a
+    # new one. Hosted reuse configures APORT_AGENT_ID (return 0). Local reuse copies the file and sets
+    # APORT_PASSPORT_REUSED so the caller skips the wizard (return 1 keeps the caller on its local path).
+    if aport_maybe_reuse_device_passport "$framework" "$config_dir"; then
+        [[ -n "${APORT_AGENT_ID:-}" ]] && return 0
+        return 1
     fi
 
     if [[ -n "$noninteractive" ]]; then
@@ -217,3 +233,7 @@ aport_maybe_configure_hosted_passport() {
             ;;
     esac
 }
+
+# Passport reuse needs aport_quick_hosted_mode_file_value and aport_quick_hosted_is_valid_agent_id from above.
+# shellcheck source=passport-reuse.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)/passport-reuse.sh"

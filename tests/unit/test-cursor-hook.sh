@@ -1,6 +1,7 @@
 #!/bin/bash
 # Unit tests for Cursor hook script: tests all hook event types (beforeShellExecution,
-# preToolUse with Shell/Read/Write/Delete/Task/MCP, beforeMCPExecution, subagentStart).
+# preToolUse with Shell/Read/Write/Delete/Task/MCP, beforeMCPExecution, beforeReadFile,
+# beforeTabFileRead, subagentStart). Payload shapes follow https://cursor.com/docs/hooks.
 # Uses test passport and guardrail; hook reads stdin and calls guardrail.
 
 set -e
@@ -142,6 +143,35 @@ printf '%s' "$FALLBACK_JSON" | "$JQ_BIN" -e '
     exit 1
 }
 echo "  ✅ no-jq Cursor response fallback: valid escaped JSON"
+
+# The no-jq hooks.json writer builds one entry with the configured timeout, the same value the jq path uses.
+NOJQ_HOOKS="$TEST_DIR/no-jq-hooks.json"
+(
+    # Only the two functions under test are loaded; sourcing the whole installer would run it.
+    eval "$(awk '
+        /^aport_cursor_tab_read_hook_enabled\(\) \{/ || /^_write_cursor_hooks_file\(\) \{/ { p = 1 }
+        p && /<< EOF$/ { h = 1 }
+        p { print }
+        p && h && /^EOF$/ { h = 0 }
+        p && !h && /^}$/ { p = 0 }
+    ' "$REPO_ROOT/bin/frameworks/cursor.sh")"
+    APORT_HOOK_MARKER="__aport_hook"
+    APORT_HOOK_TIMEOUT=42
+    # The writer's no-jq branch still needs sed and cat: a PATH holding only those, and no jq.
+    TOOLS="$NO_JQ_PATH/writer-tools"
+    mkdir -p "$TOOLS"
+    ln -sf "$(command -v sed)" "$TOOLS/sed"
+    ln -sf "$(command -v cat)" "$TOOLS/cat"
+    PATH="$TOOLS"
+    hash -r
+    APORT_CURSOR_TAB_READ_HOOK=1 _write_cursor_hooks_file "$NOJQ_HOOKS" "/tmp/aport cursor \"hook\".sh"
+)
+"$JQ_BIN" -e '[.hooks[] | .[] | select(.__aport_hook == true)] | length == 6 and all(.timeout == 42 and .failClosed == true)' "$NOJQ_HOOKS" > /dev/null || {
+    echo "FAIL: the no-jq hooks.json writer must carry APORT_HOOK_TIMEOUT on every event, got:" >&2
+    cat "$NOJQ_HOOKS" >&2
+    exit 1
+}
+echo "  ✅ no-jq Cursor hooks.json writer uses the configured timeout"
 MULTIBYTE_RESULT="$(
     APORT_HOOK_STDIN_MAX_BYTES=4 APORT_HOOK_STDIN_CHUNK_BYTES=8 \
         aport_read_stdin_with_timeout < <(printf '\360\237\230\200\360\237\230\200')
@@ -209,6 +239,19 @@ run_hook "beforeShellExecution: missing command fails closed" \
 run_hook "preToolUse Shell: allow (ls)" \
     '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
 
+# Full documented preToolUse payload: base fields plus tool_use_id, cwd, agent_message
+# and tool_input.working_directory. None of the extra fields may change the result.
+run_hook "preToolUse Shell: documented payload with base fields allows (ls)" \
+    '{"hook_event_name":"preToolUse","conversation_id":"conv-1","generation_id":"gen-1","model":"test-model","model_id":"test","model_params":[{"id":"effort","value":"max"}],"cursor_version":"2.0.0","workspace_roots":["/repo"],"user_email":null,"transcript_path":null,"tool_name":"Shell","tool_input":{"command":"ls -la","working_directory":"/repo"},"tool_use_id":"abc123","cwd":"/repo","agent_message":"Listing files"}' 0 '"permission":"allow"'
+
+run_hook "beforeShellExecution: documented payload with cwd and sandbox denies (rm -rf)" \
+    '{"hook_event_name":"beforeShellExecution","conversation_id":"conv-1","generation_id":"gen-1","cursor_version":"2.0.0","workspace_roots":["/repo"],"command":"rm -rf /tmp/x","cwd":"/repo","sandbox":false}' 2 '"permission":"deny"'
+jq -e '.permission == "deny" and (.user_message | type == "string") and (.agent_message | type == "string")' "$LAST_HOOK_OUTPUT" > /dev/null || {
+    echo "FAIL: Cursor deny must carry permission plus user_message and agent_message" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
 run_hook "preToolUse run_terminal_cmd: allow (ls)" \
     '{"tool_name":"run_terminal_cmd","tool_input":{"args":{"command":"ls -la"}}}' 0 '"permission":"allow"'
 
@@ -254,6 +297,41 @@ run_hook "preToolUse Read: deny (.env sensitive path)" \
 
 run_hook "preToolUse present_file: deny (.env sensitive path)" \
     '{"tool_name":"present_file","tool_input":{"path":"/repo/.env.local"}}' 2 '"permission":"deny"'
+
+# --- beforeReadFile / beforeTabFileRead (documented file_path + content payloads) ---
+CURSOR_BASE_FIELDS='"conversation_id":"conv-1","generation_id":"gen-1","model":"test-model","cursor_version":"2.0.0","workspace_roots":["/repo"],"user_email":null,"transcript_path":null'
+
+run_hook "beforeReadFile: allow (allowed path, attachments ignored)" \
+    "{\"hook_event_name\":\"beforeReadFile\",$CURSOR_BASE_FIELDS,\"file_path\":\"$CURSOR_ALLOWED_READ\",\"content\":\"cursor read fixture\",\"attachments\":[{\"type\":\"rule\",\"file_path\":\"/repo/.cursor/rules/base.mdc\"}]}" 0 '"permission":"allow"'
+
+run_hook "beforeReadFile: deny (.env sensitive path)" \
+    '{"hook_event_name":"beforeReadFile","file_path":"/repo/.env.local","content":"SECRET=1"}' 2 '"permission":"deny"'
+grep -q 'oap.blocked_pattern' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected sensitive path deny for beforeReadFile" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
+run_hook "beforeReadFile: legacy payload without hook_event_name still routes as read" \
+    '{"file_path":"/repo/.env.local","content":"SECRET=1"}' 2 '"permission":"deny"'
+
+# beforeTabFileRead (Tab completions) shares the read contract: file_path + content in,
+# permission out. It must never fall through to the unrecognized-input deny.
+run_hook "beforeTabFileRead: allow (allowed path)" \
+    "{\"hook_event_name\":\"beforeTabFileRead\",$CURSOR_BASE_FIELDS,\"file_path\":\"$CURSOR_ALLOWED_READ\",\"content\":\"cursor read fixture\"}" 0 '"permission":"allow"'
+
+run_hook "beforeTabFileRead: deny (.env sensitive path)" \
+    '{"hook_event_name":"beforeTabFileRead","file_path":"/repo/.env.local","content":"SECRET=1"}' 2 '"permission":"deny"'
+grep -q 'oap.blocked_pattern' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: beforeTabFileRead should use the read policy, not fail as unrecognized input" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+if grep -q 'oap.unrecognized_input' "$LAST_HOOK_OUTPUT"; then
+    echo "FAIL: beforeTabFileRead must be a recognized Cursor event" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+fi
 
 # --- preToolUse: Grep/search reads ---
 run_hook "preToolUse Grep: missing path fails closed" \
@@ -410,6 +488,31 @@ grep -q 'oap.mcp_tool_not_allowed' "$LAST_HOOK_OUTPUT" || {
 
 run_hook "legacy MCP event preserves top-level server metadata" \
     '{"tool_name":"issues.list","server":"github","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
+
+# Documented beforeMCPExecution shapes: tool_input is a JSON params string,
+# mcp_server_name names the server, HTTP/SSE servers add url + mcp_server_url,
+# stdio servers add a top-level "command" launch string that is not a shell command.
+run_hook "beforeMCPExecution: stdio server with JSON-string tool_input allows on allowlist" \
+    '{"hook_event_name":"beforeMCPExecution","tool_name":"issues.list","tool_input":"{\"query\":\"test\"}","mcp_server_name":"github","command":"npx -y @modelcontextprotocol/server-github"}' 0 '"permission":"allow"'
+
+run_hook "beforeMCPExecution: HTTP server with mcp_server_url allows on allowlist" \
+    '{"hook_event_name":"beforeMCPExecution","tool_name":"issues.list","tool_input":{"query":"test"},"mcp_server_name":"github","url":"https://mcp.example.test/sse","mcp_server_url":"https://mcp.example.test/sse"}' 0 '"permission":"allow"'
+
+run_hook "beforeMCPExecution: stdio launch command does not bypass server allowlist" \
+    '{"hook_event_name":"beforeMCPExecution","tool_name":"issues.list","tool_input":"{}","mcp_server_name":"evil","command":"ls -la"}' 2 '"permission":"deny"'
+grep -q 'oap.mcp_server_not_allowed' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: stdio MCP payload must be evaluated as mcp.tool, not as a shell command" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
+run_hook "beforeMCPExecution: non-JSON tool_input string fails closed" \
+    '{"hook_event_name":"beforeMCPExecution","tool_name":"issues.list","tool_input":"not json","mcp_server_name":"github"}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected invalid_tool_arguments for non-JSON MCP tool_input" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"

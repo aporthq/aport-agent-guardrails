@@ -82,6 +82,8 @@ if [[ -z "$POLICY_ID" ]]; then
     echo "Error: Tool '$TOOL_NAME' is not mapped to a policy pack" >&2
     exit 1
 fi
+# Shape hook-built context to the hosted schema (a path-form `shell` is rejected with HTTP 400 otherwise).
+CONTEXT_JSON="$(normalize_api_context "$POLICY_ID" "$CONTEXT_JSON")"
 
 # Call Node.js evaluator with API
 if [ -n "$DEBUG_APORT" ]; then

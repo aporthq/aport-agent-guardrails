@@ -163,6 +163,15 @@ cat > "$CURSOR_DIR/hooks.json" << 'EOF'
     ],
     "preToolUse": [
       {"command":"/tmp/aport-cursor-hook.sh","__aport_hook":true,"timeout":10}
+    ],
+    "beforeReadFile": [
+      {"command":"/tmp/aport-cursor-hook.sh","__aport_hook":true,"timeout":10,"failClosed":true}
+    ],
+    "beforeTabFileRead": [
+      {"command":"/tmp/aport-cursor-hook.sh","__aport_hook":true,"timeout":10,"failClosed":true}
+    ],
+    "afterFileEdit": [
+      {"command":"/usr/local/bin/custom-after-edit.sh"}
     ]
   }
 }
@@ -177,17 +186,19 @@ if [[ -d "$CURSOR_DIR/aport" ]]; then
     exit 1
 fi
 
-CURSOR_APORT_COUNT=$(jq -r '[
-    .hooks.beforeShellExecution[]?,
-    .hooks.preToolUse[]?,
-    .hooks.beforeMCPExecution[]?,
-    .hooks.subagentStart[]?
-] | map(select(.__aport_hook == true)) | length' "$CURSOR_DIR/hooks.json")
+# Every event, including beforeReadFile and beforeTabFileRead: an entry left behind would point at the removed
+# script with failClosed and block reads.
+CURSOR_APORT_COUNT=$(jq -r '[.hooks // {} | .[] | .[]? | select(.__aport_hook == true)] | length' "$CURSOR_DIR/hooks.json")
 if [[ "$CURSOR_APORT_COUNT" -ne 0 ]]; then
-    echo "FAIL: expected marker-owned Cursor hook entries to be removed" >&2
+    echo "FAIL: expected marker-owned Cursor hook entries to be removed from every event" >&2
     cat "$CURSOR_DIR/hooks.json" >&2
     exit 1
 fi
+jq -e '(.hooks | has("beforeReadFile") | not) and (.hooks | has("beforeTabFileRead") | not) and (.hooks.afterFileEdit | length == 1)' "$CURSOR_DIR/hooks.json" > /dev/null || {
+    echo "FAIL: emptied events must be dropped and a custom event must survive reset" >&2
+    cat "$CURSOR_DIR/hooks.json" >&2
+    exit 1
+}
 
 CURSOR_UNMARKED_COUNT=$(jq -r '[.hooks.beforeShellExecution[]? | select(.command == "/opt/custom/aport-cursor-hook.sh")] | length' "$CURSOR_DIR/hooks.json")
 if [[ "$CURSOR_UNMARKED_COUNT" -ne 0 ]]; then

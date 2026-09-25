@@ -19,9 +19,10 @@ Expected output includes:
 
 ## Step 2: Show recent decisions
 
+The audit log is `<config dir>/aport/audit.log`, next to the passport that Step 1 printed. `~/.claude/aport/` is the Claude Code default; if `APORT_CLAUDE_CODE_CONFIG_DIR` is set, use that directory instead.
+
 ```bash
 cat ~/.claude/aport/audit.log 2>/dev/null | tail -10 || echo "No audit log found."
-```
 
 Report the results to the user.
 

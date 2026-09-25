@@ -50,6 +50,17 @@ parse_guardrail_mode_args() {
                 APORT_GUARDRAIL_API_URL_CLI="$2"
                 shift
                 ;;
+            --reuse-from=*)
+                APORT_REUSE_PASSPORT_FROM_CLI="${1#*=}"
+                ;;
+            --reuse-from)
+                if [[ -z "${2:-}" ]]; then
+                    echo "[aport] ERROR: --reuse-from requires a framework name, a passport.json path, or a hosted agent id" >&2
+                    return 1
+                fi
+                APORT_REUSE_PASSPORT_FROM_CLI="$2"
+                shift
+                ;;
             --enforcement=*)
                 APORT_ENFORCEMENT_CLI="${1#*=}"
                 ;;

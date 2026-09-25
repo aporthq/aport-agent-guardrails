@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.34] - 2026-09-24
+
+### Added
+- **Second-pass review record** at `docs/reviews/2026-09-24-second-pass-review-1.0.34.md`: twenty-one findings on this release's own changes, each tied to its fix and test. Behaviour changes from that pass: an explicit `--reuse-from` beats an inherited `APORT_AGENT_ID`; the reuse menu never offers to copy over an existing passport and an explicit overwrite keeps a `.bak`; the reuse copy refuses symlinked destinations; `mode` rejects `--reuse-from`; the Codex unknown-tool fallback routes by payload shape, never by name; the Claude Code no-timeout default follows `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; hook timeouts for Claude Code and Cursor are `APORT_API_TIMEOUT` plus 15 s; an unusable `APORT_API_TIMEOUT` falls back to 15 s instead of denying every call; `reset cursor` strips APort entries from every hook event; the repository-guard workflow never fails push runs at the v1.0.11 pin; hosted-API context shaping is keyed on the policy id so `terminal` and friends get it too.
+- **Passport reuse across frameworks:** Installers now find passports the other frameworks already have on the device (hosted ids from `guardrail-mode.env`, local `passport.json` files) and offer them before the hosted/local menu. Non-interactive installs opt in with `--reuse-from=<framework|passport.json path|agent_id>` (env `APORT_REUSE_PASSPORT_FROM`); an explicit `--reuse-from` also replaces a stale key saved by the same framework. See `docs/PASSPORT_REUSE.md`.
+- **Default-branch protection through the Action:** `github --protect-default-branch` (env `APORT_GITHUB_PROTECT_DEFAULT_BRANCH=true`) now passes the `protect-default-branch` input to `aporthq/policy-verify-action` (1.1.0 or newer), which fails the check on a force push or a direct push to the default branch and sets the `push-classification` output. Generated workflows gain a `concurrency` group that cancels superseded `pull_request` runs.
+- **Cursor `beforeTabFileRead`:** Routed through the read policy; opt in to registering it with `APORT_CURSOR_TAB_READ_HOOK=1`.
+- **Claude Code tools:** `ListAgents`, `ReportFindings` and `SubagentHandback` are allowed without the evaluator; `SendUserFile` stays fail-closed. The Node package exports `CLAUDE_CODE_INTERNAL_TOOLS`.
+- **OpenClaw plugin contract test** (`tests/unit/test-openclaw-plugin-contract.sh`) and a rewritten `docs/OPENCLAW_COMPATIBILITY.md` for OpenClaw 2026.9.x (Node 24.16+ host requirement documented).
+
+### Changed
+- **Docs:** What the Bash policy does and does not see (`allowed_commands` prefix match, `blocked_patterns` word-boundary and glob match, no visibility into redirects, `curl` or `git push` refspecs), the pairing with a harness sandbox, a GitHub ruleset and a scoped token; per-framework `APORT_<FRAMEWORK>_CONFIG_DIR` install directories; `jq` as a prerequisite for the Claude Code hook; the Codex hook's beta limits stated in the README table; DeerFlow 2.1 and n8n docs rewritten to the current upstream shape; framework drift baseline refreshed for issue #107.
+- **Claude Code hook timeout** raised from 10 to 30 seconds: Claude Code documents that a timed-out PreToolUse hook does not block, and the hosted evaluator request alone may take 15 seconds.
+- **Claude Code `tool_input.timeout`** is milliseconds and is now converted to seconds before the `max_execution_time` check; the `mcp_server` object Claude Code 2.1.274+ sends is read by name instead of being stringified.
+
+### Fixed
+- **Hosted mode denied every shell command** from Codex and Claude Code with `oap.evaluation_error`: the context carried `shell: ""` or a path such as `/bin/bash`, which the verify API schema rejects (HTTP 400 `context_validation_failed`). The API-bound context is now shaped to the schema (`normalize_api_context`).
+- **Hosted mode then denied ordinary shell commands** with `oap.limit_exceeded`: the policy requires timeout evidence once a passport sets `max_execution_time`, and neither harness sends one on a plain call. The hook now supplies the harness default as evidence where the call is bounded by it: Claude Code 120 s (Bash default 120000 ms); Codex `shell`/`local_shell` 10 s (`DEFAULT_EXEC_COMMAND_TIMEOUT_MS`). Codex `exec_command`/`unified_exec` sessions outlive the call and get no default, a malformed timeout key or a background/persistent call gets no default, and Cursor, Gemini CLI and Goose shell tools carry no timeout; all of those stay denied under a passport that sets `max_execution_time`, which is the limit doing its job.
+- **Hosted evaluator request bound:** `src/evaluator.js` now aborts the verify request after `APORT_API_TIMEOUT` seconds (default 15), so it always finishes inside the Claude Code hook timeout of 30 s instead of failing open when the API stalls.
+- **Cursor:** `beforeTabFileRead` was denied as unrecognised input.
+- **Codex tool routing:** `webrun`, `local_shell`, `write_stdin`, `update_plan`, `request_user_input`, `computer_use`, the memory operators and other current Codex tools were denied with `oap.unknown_tool`. They now route to the shell, web, read, write or session policy they belong to, and a tool whose name plainly says what it does (`*shell*`, `*web*`, `*patch*`, `*read*`, `*agent*` and so on) is judged by that policy instead of refused; names that say nothing still fail closed. `APORT_CODEX_TOOL_FALLBACK=off` keeps the strict list only.
+
 ## [1.0.33] - 2026-09-12
 
 ### Added

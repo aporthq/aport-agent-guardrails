@@ -371,6 +371,26 @@ fi
 GUARDRAIL_TOOL=""
 CONTEXT_JSON="{}"
 
+# The shape of an unknown Codex tool's payload: shell, web, write, read, or empty when nothing is recognisable
+# or the fallback is off. Looks at tool_input/input/args like aport_hook_context_from_payload does.
+codex_payload_shape() {
+    [ "${APORT_CODEX_TOOL_FALLBACK:-on}" != "off" ] || return 0
+    printf '%s' "$1" | jq -r '
+      def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
+      def str(v): (v | type) == "string" and (v | length) > 0;
+      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
+      (str($ti.command) or str($ti.cmd) or str($ti.script)) as $cmd |
+      (str($ti.url)) as $url |
+      (str($ti.file_path) or str($ti.path)) as $path |
+      (str($ti.content) or ($ti.edits | type) == "array" or str($ti.new_string)) as $content |
+      if $url then "web"
+      elif $path and $content then "write"
+      elif $path then "read"
+      elif $cmd then "shell"
+      else "" end
+    ' 2> /dev/null || true
+}
+
 map_shell() {
     GUARDRAIL_TOOL="bash"
     if aport_hook_payload_has_malformed_shell_command_aliases "$INPUT"; then
@@ -379,7 +399,7 @@ map_shell() {
     if aport_hook_payload_has_conflicting_shell_command_aliases "$INPUT"; then
         emit_response "deny" "system.command.execute" "oap.invalid_tool_arguments" "Shell tool supplied conflicting command aliases"
     fi
-    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" shell)"
+    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" shell "$TOOL_NORM" "$FRAMEWORK")"
     local command_text shell_override
     command_text="$(printf '%s' "$CONTEXT_JSON" | jq -r '.command // ""' 2> /dev/null || true)"
     shell_override="$(printf '%s' "$CONTEXT_JSON" | jq -r '.shell // ""' 2> /dev/null || true)"
@@ -604,22 +624,24 @@ map_goose_text_editor() {
 case "$FRAMEWORK" in
     codex)
         case "$TOOL_NORM" in
-            bash | shell | exec | execcommand | exec_command | unifiedexec | unified_exec)
+            bash | shell | exec | execcommand | exec_command | unifiedexec | unified_exec | localshell | local_shell | containerexec | container_exec | jsrepl | js_repl | codemodeexec | code_mode_exec)
                 map_shell
                 ;;
             applypatch | apply_patch | write | edit | multiedit | notebookedit | delete | strreplace)
                 map_file_write
                 ;;
-            read | readfile | read_file | viewimage | view_image | grep | grepsearch | grep_search)
+            read | readfile | read_file | viewimage | view_image | grep | grepsearch | grep_search | grepfiles | grep_files)
                 map_file_read
                 ;;
-            webfetch | web_fetch | websearch | web_search)
+            webfetch | web_fetch | websearch | web_search | webrun | web_run | browser | browse | openurl | open_url | fetchurl | fetch_url | httprequest | http_request | computeruse | computer_use)
                 map_web
                 ;;
-            glob | list | ls | lsp)
+            glob | list | ls | lsp | listdir | list_dir)
                 map_metadata_or_path_read
                 ;;
-            todoread | toolsearch)
+            todoread | toolsearch | tool_search | updateplan | update_plan | requestuserinput | request_user_input | writestdin | write_stdin | memoryoperators | memory_*)
+                # Session bookkeeping, plan updates, user prompts, stdin to an already-authorized process, and
+                # Codex's own memory store: no new effect outside the session, nothing for a policy to judge.
                 emit_response "allow" "" "" ""
                 ;;
             mcp__* | mcp:* | callmcptool | call_mcp_tool | readmcpresourcetool | read_mcp_resource_tool)
@@ -632,7 +654,19 @@ case "$FRAMEWORK" in
                 emit_response "deny" "hook.tool.map" "oap.missing_tool_name" "Codex $HOOK_EVENT payload did not include tool_name"
                 ;;
             *)
-                emit_response "deny" "hook.tool.map" "oap.unknown_tool" "Unknown Codex tool: $ORIGINAL_TOOL"
+                # Codex adds tools faster than this list is updated. A name that is not listed is routed by what
+                # its payload carries, which is the evidence the policies judge anyway: a command and no file or
+                # URL is a shell call, a URL is a web call, a path with content is a write, a path alone is a
+                # read. A payload that says nothing recognisable still fails closed. Names are never guessed
+                # from: "execute_sql" with a command is judged by the command policy against that string.
+                # Set APORT_CODEX_TOOL_FALLBACK=off to keep the strict list only.
+                case "$(codex_payload_shape "$INPUT")" in
+                    shell) map_shell ;;
+                    web) map_web ;;
+                    write) map_file_write ;;
+                    read) map_file_read ;;
+                    *) emit_response "deny" "hook.tool.map" "oap.unknown_tool" "Unknown Codex tool: $ORIGINAL_TOOL" ;;
+                esac
                 ;;
         esac
         ;;

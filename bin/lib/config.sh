@@ -26,6 +26,9 @@ get_config_dir() {
 }
 
 # Default passport path per framework (config_dir/aport/passport.json). Used by wizard and evaluator.
+# The frameworks the installers know. One list: the dispatcher, set-mode and passport reuse all read it.
+APORT_SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n opencode)
+
 get_default_passport_path() {
     local framework="${1:-}"
     local config_dir

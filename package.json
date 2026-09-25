@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "description": "APort Repository Guard and pre-action authorization guardrails for GitHub, Claude Code, Cursor, Codex, Gemini CLI, Goose, OpenClaw, LangChain, CrewAI, DeerFlow, and n8n",
   "workspaces": [
     "packages/*",

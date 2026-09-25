@@ -1,5 +1,14 @@
 # @aporthq/aport-agent-guardrails-claude-code
 
+## 1.0.34
+
+### Patch Changes
+
+- Review the Claude Code PreToolUse hook against the current upstream hooks reference (framework drift issue #107). Raise the registered hook `timeout` from 10 to 30 seconds because Claude Code now documents that a timed-out PreToolUse command hook does not block and the hosted evaluator request alone may take 15 seconds. Convert the Bash/PowerShell/Monitor `tool_input.timeout` from milliseconds to seconds before the `max_execution_time` check. Read the `mcp_server` object (`name`, `source`) that Claude Code 2.1.274+ sends for MCP tools instead of stringifying it. Allow the new read-only and internal tools `ListAgents`, `ReportFindings` and `SubagentHandback`; `SendUserFile` stays unmapped and denied. Export `CLAUDE_CODE_INTERNAL_TOOLS` from the Node package, drop the stale `TodoWrite: write` mapping there, add `Workflow`, and document the output contract, permission-mode behaviour and settings precedence in `docs/frameworks/claude-code.md`.
+- Updated dependencies
+- Updated dependencies
+  - @aporthq/aport-agent-guardrails-core@1.0.34
+
 ## 1.0.33
 
 ### Patch Changes

@@ -8,7 +8,7 @@
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](package.json)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](python/aport_guardrails/pyproject.toml)
-[![OpenClaw](https://img.shields.io/badge/OpenClaw-%3E%3D2026.3.0-blue.svg)](extensions/openclaw-aport/package.json)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-%3E%3D2026.4.11-blue.svg)](extensions/openclaw-aport/package.json)
 
 <p>
   <a href="https://www.npmjs.com/package/@aporthq/aport-agent-guardrails">npm</a> •
@@ -103,6 +103,14 @@ APORT_QUICK_HOSTED=1 \
 npx --yes @aporthq/aport-agent-guardrails claude-code --non-interactive
 ```
 
+Both forms create a hosted passport. For a non-interactive install with a local passport file, pass `--mode=local --non-interactive` (add `--output <path>` to pick the file). The wizard then writes a passport with the framework defaults and asks nothing:
+
+```bash
+npx --yes @aporthq/aport-agent-guardrails claude-code --mode=local --non-interactive
+```
+
+`--non-interactive` with none of the hosted flags falls back to the same local path. For an interactive local passport, run the installer without flags, choose `3. Create local passport file` at the passport prompt and answer the wizard; keep `Spawn sub-agents and tasks?` at `Y` for Claude Code, otherwise every Agent and Task call is denied. Step-by-step: [docs/QUICKSTART.md](docs/QUICKSTART.md#interactive-local-passport-step-by-step).
+
 ### Why Developers and teams trust APort
 
 - **Deterministic enforcement:** runtime hook, not prompt instructions
@@ -157,7 +165,7 @@ The security concern is that agent tools and skills can execute sensitive action
 | **CrewAI** | `crewai` | [docs/frameworks/crewai.md](docs/frameworks/crewai.md) | **Python:** released hook adapter by default; native `GuardrailProvider` mode for CrewAI builds with native provider support | `npx @aporthq/aport-agent-guardrails crewai` then `pip install aport-agent-guardrails-crewai` + `aport-crewai setup` |
 | **DeerFlow** | `deerflow` | [docs/frameworks/deerflow.md](docs/frameworks/deerflow.md) | **Python:** generic OAP provider wiring in DeerFlow config | `npx @aporthq/aport-agent-guardrails deerflow` then follow printed `uv`/config steps |
 | **n8n** | `n8n` | [docs/frameworks/n8n.md](docs/frameworks/n8n.md) | *Setup available; custom node coming soon* | `npx @aporthq/aport-agent-guardrails n8n` |
-| **Codex CLI** | `codex` | [docs/frameworks/codex.md](docs/frameworks/codex.md) | Beta command hook: repo-local `.codex/hooks.json` for `PreToolUse`; Bash, `apply_patch`, MCP, and local function tools. State stays in `~/.aport/codex`. | `npx @aporthq/aport-agent-guardrails codex` |
+| **Codex CLI** | `codex` | [docs/frameworks/codex.md](docs/frameworks/codex.md) | Beta command hook: repo-local `.codex/hooks.json` for `PreToolUse`; Bash, `apply_patch`, MCP, and local function tools. State stays in `~/.aport/codex`. **Beta limits:** `apply_patch` calls touching more than one file and every `Glob`/`List`/`LS` call are denied by the hook, and warn mode does not lift those two denials. `webrun`, `local_shell`, `write_stdin`, `update_plan`, `request_user_input`, `computer_use` and memory tools are mapped; a tool name not in the list is routed by its payload (a `url`, a path with or without content, a `command`) before being denied as `oap.unknown_tool`. `APORT_CODEX_TOOL_FALLBACK=off` keeps the strict list. | `npx @aporthq/aport-agent-guardrails codex` |
 | **Gemini CLI** | `gemini` / `gemini-cli` | [docs/frameworks/gemini-cli.md](docs/frameworks/gemini-cli.md) | Beta command hook: `.gemini/settings.json` `BeforeTool` hook for shell, file, web, and MCP tools. | `npx @aporthq/aport-agent-guardrails gemini` |
 | **Goose** | `goose` | [docs/frameworks/goose.md](docs/frameworks/goose.md) | Beta Goose Open Plugin: project-scoped `.agents/plugins/aport-guardrail` with blocking `PreToolUse`; secrets/state stay in `~/.aport/goose`. | `npx @aporthq/aport-agent-guardrails goose` |
 | **opencode** | `opencode` | [docs/frameworks/opencode.md](docs/frameworks/opencode.md) | Gated; current setup exits with an explanation until plugin API smoke tests pass. | — |
@@ -175,7 +183,7 @@ Install via `npx @aporthq/aport-agent-guardrails <framework>` (or choose when pr
 
 ## 🚀 Quick Start
 
-**Prerequisites:** For the setup wizard you need **Node 18+** (or use the Python CLI below). `jq` is needed for local/bash guardrail. No clone required.
+**Prerequisites:** For the setup wizard you need **Node 18+** (or use the Python CLI below). **`jq` is required** by the Claude Code, Cursor, Codex, Gemini CLI and Goose hooks and by the local evaluator: if `jq` is missing, the hook denies every tool call (`APort: jq is required`), in warn mode too. Install it before setup (`brew install jq` or `apt install jq`). No clone required.
 
 **1. Run the setup** — For repositories, generate the GitHub Action. For local runtimes, choose your framework when prompted (or pass it). Same public npm package.
 
@@ -241,6 +249,23 @@ npx @aporthq/aport-agent-guardrails mode cursor --enforcement=enforce
 npx @aporthq/aport-agent-guardrails mode langchain --mode=api --enforcement=warn
 ```
 
+**Install into a custom directory.** Each framework's config directory can be moved with one environment variable. The installer, the `mode` and `reset` commands, and the Python `aport setup` CLI all read it (`get_config_dir` in `bin/lib/config.sh`):
+
+| Framework | Variable | Default |
+|-----------|----------|---------|
+| Claude Code | `APORT_CLAUDE_CODE_CONFIG_DIR` | `~/.claude` |
+| Cursor | `APORT_CURSOR_CONFIG_DIR` | `~/.cursor` |
+| Codex CLI | `APORT_CODEX_CONFIG_DIR` | `~/.aport/codex` |
+| Gemini CLI | `APORT_GEMINI_CLI_CONFIG_DIR` | `~/.aport/gemini-cli` |
+| Goose | `APORT_GOOSE_CONFIG_DIR` | `~/.aport/goose` |
+| OpenClaw | `APORT_OPENCLAW_CONFIG_DIR` (the `openclaw` installer itself prompts for the directory) | `~/.openclaw` |
+| LangChain, CrewAI, DeerFlow | `APORT_LANGCHAIN_CONFIG_DIR`, `APORT_CREWAI_CONFIG_DIR`, `APORT_DEERFLOW_CONFIG_DIR` | `~/.aport/<framework>` |
+| n8n | `APORT_N8N_CONFIG_DIR` | `~/.n8n` |
+
+Passport, `guardrail-mode.env`, the runtime copy and the audit log all land in `<dir>/aport/`. Example: `APORT_CLAUDE_CODE_CONFIG_DIR=/srv/agent/claude npx @aporthq/aport-agent-guardrails claude-code`. For Codex, Gemini CLI and Goose the installer writes the variable into the hook command or wrapper script, so nothing else is needed. For Claude Code and Cursor the settings file stores only the hook path and the hook reads the variable at run time, so export it in the environment the host is launched from; otherwise the hook falls back to `~/.claude` or `~/.cursor` and denies every call when no passport or mode file is there. The Python runtime packages do not read these variables; pass `config_path` to the provider or callback instead.
+
+To point a hook at a passport outside its config directory, set `APORT_PASSPORT_FILE` and also `APORT_ALLOW_EXTERNAL_PASSPORT_FILE=1`. Without the second variable the hook ignores an `APORT_PASSPORT_FILE` that is not under its config directory (`bin/lib/framework-hook-paths.sh`). The guard exists because GUI hosts can inherit a stale variable from another framework's session, which would otherwise swap in a different passport. `APORT_DECISION_FILE` and `APORT_AUDIT_LOG` are subject to the same in-directory rule and have no override.
+
 **2. Hosted passport (optional)** — The installer can create a hosted passport during setup. If you already have an `agent_id` from [aport.io](https://aport.io), use it to skip passport creation: `npx @aporthq/aport-agent-guardrails <framework> <agent_id>`. See [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md).
 
 **3. Test that policy runs** — After setup, the guardrail runs automatically when your agent uses tools (Cursor hook, LangChain callback, OpenClaw plugin, etc.). To try allow/deny from the command line (any framework), use the installed `aport-guardrail` command (Node) or call the evaluator from Python; both use your existing passport from the APort framework state dir (e.g. `~/.cursor/aport/`, `~/.aport/langchain/aport/`, `~/.aport/codex/aport/`).
@@ -281,6 +306,8 @@ Your framework doc describes where hook config and APort state are stored for th
 **Runtime hook/plugin (recommended):** The host invokes APort before supported tool calls execute. This repo ships runtime integrations for Claude Code, Cursor, OpenClaw, LangChain, CrewAI, Codex CLI, Gemini CLI, Goose, DeerFlow setup, and n8n setup. Exact coverage depends on what each host exposes.
 **AGENTS.md:** Agent is *instructed* to call the guardrail; best-effort only. Runtime hooks ignore repository-controlled AGENTS.md passport settings by default so a checked-out repo cannot swap in a permissive passport. Set `APORT_TRUST_REPO_POLICY=1` only for repositories whose AGENTS.md policy you intentionally trust.
 
+**What the shell policy sees:** For Bash-style tools the evaluator receives only the command string. `allowed_commands` is a prefix match. `blocked_patterns` uses word-boundary and glob matching, case-insensitive: a single word such as `sudo` matches only as a whole word (it does not block `sudoku`), an entry containing `*` or `?` is a glob, and a multi-word entry such as `rm -rf` matches as written. When `allowed_commands` is restrictive (not `*`), a command containing an unquoted `&&`, `||`, `;`, `|`, `&`, newline, `(`, `)`, `$(`, `<(`, `>(`, a `#` comment or `$'...'` quoting is denied with `oap.command_chain_unsupported`. It does not parse `git push` remotes or branches, does not see files read by `cat .env` or written with `>`, and does not apply `web.fetch` domain limits to `curl`. Path and domain limits apply to the host's own Read/Write/Edit/WebFetch tools. A passport that sets `max_execution_time` denies shell tools with no timeout (Cursor, Gemini CLI, Goose, Codex `exec_command`); Claude Code Bash and Codex `shell` fall back to their harness defaults of 120 s and 10 s. For unattended agents pair APort with a harness sandbox, a ruleset on the default branch, and a scoped token; details in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md#what-the-bash-policy-does-and-does-not-see).
+
 ---
 
 ## 🔌 Verification methods (local vs API)
@@ -292,7 +319,7 @@ Your framework doc describes where hook config and APort state are stored for th
 | Mode | Best for | Full OAP? | Network |
 |------|----------|-----------|---------|
 | **API (default)** | Production, full policy parity, new policy packs without code changes | ✅ | Yes (api.aport.io or self-hosted) |
-| **Local (bash)** | Privacy, offline, air-gapped | Subset only (hand-coded limits for exec, messaging, repo) | No |
+| **Local (bash)** | Privacy, offline, air-gapped | Subset only (hand-coded limits for exec, file read/write, web fetch, MCP, sessions, messaging, repo; see [what the Bash policy sees](docs/SECURITY_MODEL.md#what-the-bash-policy-does-and-does-not-see)) | No |
 
 **API mode** can use either a **local passport file** (sent in the request body; not stored) or **agent_id only**: set `APORT_AGENT_ID` to your hosted passport’s agent ID and the API fetches the passport from the registry — no passport JSON file needed. See [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md).
 
@@ -549,6 +576,7 @@ Use the framework-specific doc for where config and passport live and for any ex
 | [GitHub Protection](docs/GITHUB_PROTECTION.md) | Protect PR/push workflows with hosted OAP verification and explicit release checks |
 | [Hosted passport setup](docs/HOSTED_PASSPORT_SETUP.md) | Use passport from aport.io with any supported framework: `npx ... <framework> <agent_id>` or choose hosted in wizard |
 | [Verification methods (local vs API)](docs/VERIFICATION_METHODS.md) | Deep dive: bash vs API evaluator |
+| [Security model](docs/SECURITY_MODEL.md) | Threat model, what the Bash policy does and does not see, default sensitive read paths |
 | [Tool / Policy Mapping](docs/TOOL_POLICY_MAPPING.md) | Tool names → policy packs |
 | [QuickStart: OpenClaw Plugin](docs/QUICKSTART_OPENCLAW_PLUGIN.md) | One-command OpenClaw setup |
 | [OpenClaw Local Integration](docs/OPENCLAW_LOCAL_INTEGRATION.md) | API, Python example |
@@ -557,6 +585,9 @@ Use the framework-specific doc for where config and passport live and for any ex
 | **Frameworks** | Per-framework setup and how guardrails run |
 | → [Claude Code](docs/frameworks/claude-code.md) | PreToolUse hook, `~/.claude/settings.json` |
 | → [Cursor](docs/frameworks/cursor.md) | beforeShellExecution / preToolUse hooks, `~/.cursor/hooks.json` |
+| → [Codex CLI](docs/frameworks/codex.md) | Beta `PreToolUse` command hook, `.codex/hooks.json` |
+| → [Gemini CLI](docs/frameworks/gemini-cli.md) | Beta `BeforeTool` command hook, `.gemini/settings.json` |
+| → [Goose](docs/frameworks/goose.md) | Beta Open Plugin with blocking `PreToolUse` |
 | → [OpenClaw](docs/frameworks/openclaw.md) | `before_tool_call` plugin |
 | → [LangChain / LangGraph](docs/frameworks/langchain.md) | `APortCallback` handler |
 | → [CrewAI](docs/frameworks/crewai.md) | Released hook adapter by default; native provider mode when available |

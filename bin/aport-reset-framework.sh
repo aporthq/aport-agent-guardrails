@@ -289,14 +289,11 @@ cleanup_cursor_hooks() {
             (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-cursor-hook\\.sh($|[[:space:]])"));
         def strip_aport_hooks:
             (. // []) | map(select(is_aport_cursor_hook | not));
-        .hooks.beforeShellExecution = ((.hooks.beforeShellExecution // []) | strip_aport_hooks) |
-        .hooks.preToolUse = ((.hooks.preToolUse // []) | strip_aport_hooks) |
-        .hooks.beforeMCPExecution = ((.hooks.beforeMCPExecution // []) | strip_aport_hooks) |
-        .hooks.subagentStart = ((.hooks.subagentStart // []) | strip_aport_hooks) |
-        if ((.hooks.beforeShellExecution // []) | length) == 0 then del(.hooks.beforeShellExecution) else . end |
-        if ((.hooks.preToolUse // []) | length) == 0 then del(.hooks.preToolUse) else . end |
-        if ((.hooks.beforeMCPExecution // []) | length) == 0 then del(.hooks.beforeMCPExecution) else . end |
-        if ((.hooks.subagentStart // []) | length) == 0 then del(.hooks.subagentStart) else . end |
+        # Every event, not a hand-kept list: an APort entry left under any event (beforeReadFile,
+        # beforeTabFileRead, or one added later) would keep pointing at the removed script with failClosed.
+        .hooks = ((.hooks // {}) | with_entries(
+            if (.value | type) == "array" then .value |= strip_aport_hooks else . end
+        ) | with_entries(select((.value | type) != "array" or (.value | length) > 0))) |
         if ((.hooks // {}) | keys | length) == 0 then del(.hooks) else . end
     ' "$hooks_file" > "$tmpfile"; then
         if ! backup_file "$hooks_file"; then

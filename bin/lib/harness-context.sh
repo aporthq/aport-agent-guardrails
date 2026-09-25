@@ -292,7 +292,18 @@ aport_hook_context_from_payload() {
     local default_tool="${3:-}"
     local event_hint="${4:-}"
 
-    jq -c --arg default_tool "$default_tool" --arg kind "$kind" --arg event_hint "$event_hint" '
+    # Claude Code's own kill bound for a Bash call that carries no timeout: BASH_DEFAULT_TIMEOUT_MS, capped by
+    # BASH_MAX_TIMEOUT_MS, else its documented 120000 ms. The hook inherits these from Claude Code's environment,
+    # so the evidence matches the bound the command really runs under. Rounded up so it never understates.
+    local claude_default_timeout=120
+    if [[ "${BASH_DEFAULT_TIMEOUT_MS:-}" =~ ^[0-9]+$ ]]; then
+        claude_default_timeout=$(((BASH_DEFAULT_TIMEOUT_MS + 999) / 1000))
+    fi
+    if [[ "${BASH_MAX_TIMEOUT_MS:-}" =~ ^[0-9]+$ ]] && (((BASH_MAX_TIMEOUT_MS + 999) / 1000 < claude_default_timeout)); then
+        claude_default_timeout=$(((BASH_MAX_TIMEOUT_MS + 999) / 1000))
+    fi
+
+    jq -c --arg default_tool "$default_tool" --arg kind "$kind" --arg event_hint "$event_hint" --argjson claude_default_timeout "$claude_default_timeout" '
       def obj(v):
         if (v | type) == "object" then v
         elif (v | type) == "string" then (try (v | fromjson) catch {})
@@ -416,15 +427,49 @@ aport_hook_context_from_payload() {
       ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
       if $kind == "shell" then
         (
-          safe_timeout($ti.timeout // $ti.timeout_seconds // $ti.timeoutSeconds // .timeout // null) //
-          safe_timeout_ms($ti.timeout_ms // $ti.timeoutMs // .timeout_ms // .timeoutMs // null)
+          # The raw values are bound once, so the unit-aware chain and the "carries a timeout key" guard below
+          # can never disagree about which fields count.
+          ($ti.timeout_seconds // $ti.timeoutSeconds // .timeout // null) as $raw_s |
+          ($ti.timeout_ms // $ti.timeoutMs // .timeout_ms // .timeoutMs // null) as $raw_ms |
+          ($ti.timeout // null) as $raw_tool_timeout |
+          # Claude Code Bash/PowerShell/Monitor send tool_input.timeout in milliseconds;
+          # every other harness sends seconds. The evaluator compares seconds.
+          (if $event_hint == "claude-code" then
+             (safe_timeout_ms($raw_tool_timeout) // safe_timeout($raw_s))
+           else
+             safe_timeout($raw_tool_timeout // $raw_s)
+           end) //
+          safe_timeout_ms($raw_ms) //
+          # A call that carries no timeout at all runs under the harness default, and that default is what
+          # the policy judges; without it a passport that sets max_execution_time denies every ordinary
+          # shell command, because the rule requires context.timeout. The default applies only when the
+          # call is bounded by it: not when a timeout key is present but malformed (left null, so the
+          # evidence check denies), not for a background or persistent call (nothing bounds it), and not
+          # for harness tools whose "timeout" is a yield window rather than a kill.
+          #   claude-code Bash/PowerShell/Monitor: BASH_DEFAULT_TIMEOUT_MS (capped by BASH_MAX_TIMEOUT_MS),
+          #     120000 ms when unset; computed in bash above and passed in as $claude_default_timeout.
+          #   codex shell/local_shell: DEFAULT_EXEC_COMMAND_TIMEOUT_MS = 10000 ms hard kill.
+          #   codex exec_command/unified_exec: the process outlives the call (write_stdin can drive it);
+          #     no default, the passport must not set max_execution_time or the call must carry timeout_ms.
+          #   cursor, gemini-cli, goose: their shell tools carry no timeout; treated as unbounded.
+          (
+            ($raw_tool_timeout != null or $raw_s != null or $raw_ms != null) as $has_timeout_key |
+            (($ti.run_in_background == true) or ($ti.persistent == true) or ($ti.background == true)) as $unbounded |
+            if $has_timeout_key or $unbounded then null
+            elif $event_hint == "claude-code" then $claude_default_timeout
+            elif $event_hint == "codex" and ($default_tool | IN("shell", "bash", "local_shell", "localshell", "container_exec", "containerexec")) then 10
+            else null
+            end
+          )
         ) as $command_timeout |
+        # `shell` is emitted only when the call names one, as a basename: the hosted schema rejects "" and paths.
         ({
           command: (
             .command // $ti.command // $ti.cmd // $ti.script // $ti.shell_command // ""
-          ),
-          shell: (.shell // $ti.shell // "")
-        } + (if $command_timeout == null then {} else {timeout: $command_timeout} end))
+          )
+        }
+        + (if $command_timeout == null then {} else {timeout: $command_timeout} end)
+        + (((.shell // $ti.shell // "") | tostring) as $sh | if $sh == "" then {} else {shell: ($sh | split("/") | last)} end))
       elif $kind == "file_read" then
         {
           file_path: first_string([
@@ -513,9 +558,13 @@ aport_hook_context_from_payload() {
         ) as $native_tool |
         (
           $mcp.server_name // $mcp.server // $mcp.url //
-          .mcp_server_name // .mcp_server //
+          .mcp_server_name // (if (.mcp_server | type) == "string" then .mcp_server else null end) //
           (if $event == "beforemcpexecution" then (.server // .url) else null end) //
           $parsed.server //
+          # Claude Code (v2.1.274+) sends mcp_server as {name, source}; use the host-reported
+          # name when the tool name carries no mcp__<server>__ prefix to parse.
+          (if (.mcp_server | type) == "object" and ((.mcp_server.name // "") | type) == "string" and (.mcp_server.name // "") != ""
+             then .mcp_server.name else null end) //
           (if $allows_input_routing then ($ti.server // $ti.mcp_server // $ti.mcp_server_name) else null end) //
           ""
         ) as $raw_server |

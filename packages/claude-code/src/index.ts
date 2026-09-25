@@ -12,6 +12,7 @@ import { Evaluator, toolToPackId } from '@aporthq/aport-agent-guardrails-core';
 export { Evaluator, toolToPackId };
 export {
   CLAUDE_CODE_READ_TOOLS,
+  CLAUDE_CODE_INTERNAL_TOOLS,
   CLAUDE_CODE_TO_GUARDRAIL_TOOL,
   type ClaudeCodeGuardrailToolId,
 } from './claudeCodeTools.js';

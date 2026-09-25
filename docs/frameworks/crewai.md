@@ -46,6 +46,8 @@ npx -y @aporthq/aport-agent-guardrails crewai \
   --non-interactive
 ```
 
+`APORT_CREWAI_CONFIG_DIR` is read by both installers and by the `mode` and `reset` commands. The runtime adapter does not read it; point `config_path` at `<dir>/config.yaml` or set `passport_path` in that config.
+
 Install the released CrewAI adapter:
 
 ```bash
