@@ -127,6 +127,145 @@ run_hook "Codex webrun reaches the web policy instead of unknown_tool" \
     '{"hook_event_name":"PreToolUse","tool_name":"webrun","tool_input":{"url":"https://example.com/page"}}' \
     '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
 
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex image_gen.imagegen reaches image generation policy without prompt text" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"secret_should_not_persist","num_last_images_to_include":0}}' \
+    '. == {}'
+if grep -q 'secret_should_not_persist' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: image generation decision context must not persist prompt text" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '
+  .original_tool == "image_gen.imagegen"
+  and .guardrail_tool == "image.generate"
+  and .decision.policy_id == "media.image.generate.v1"
+  and .context.provider == "openai"
+  and .context.prompt_length == 25
+  and .context.output_count == 1
+  and .context.output_format == "png"
+  and (.context | has("prompt") | not)
+  and (.context | has("referenced_image_paths") | not)
+' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: image generation should be authorized as sanitized media metadata" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex image generation records provider metadata only"
+
+run_hook "Codex image_genimagegen concatenated host name reaches image generation policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_genimagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '. == {}'
+
+run_hook "Codex image generation enforces previous-image reference count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit the last image","num_last_images_to_include":1}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.referenced_image_limit_exceeded"))'
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-prompt-limit-test.json"
+jq '.limits["media.image.generate"].max_prompt_length = 10' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation enforces prompt length limit" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"this prompt is too long"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.prompt_too_large"))'
+mv "$TEST_DIR/aport/passport.before-image-prompt-limit-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-output-count-test.json"
+jq '.limits["media.image.generate"].max_output_images = 1' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation enforces output image count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","n":2}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.output_image_limit_exceeded"))'
+mv "$TEST_DIR/aport/passport.before-image-output-count-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-format-test.json"
+jq '.limits["media.image.generate"].allowed_output_formats = ["png"]' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation enforces output format allowlist" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","output_format":"gif"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.output_format_not_allowed"))'
+mv "$TEST_DIR/aport/passport.before-image-format-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-missing-limit-test.json"
+jq 'del(.limits["media.image.generate"].max_prompt_length)' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation fails closed when required media limits are missing" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_limit"))'
+mv "$TEST_DIR/aport/passport.before-image-missing-limit-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-provider-test.json"
+jq '.limits["media.image.generate"].allowed_providers = ["openai"]' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+APORT_IMAGE_GENERATION_PROVIDER=blocked-provider run_hook "Codex image generation enforces provider allowlist" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.provider_not_allowed"))'
+mv "$TEST_DIR/aport/passport.before-image-provider-test.json" "$TEST_DIR/aport/passport.json"
+
+run_hook "Codex image generation with referenced local paths fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit this","referenced_image_paths":["/tmp/source.png"]}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.multi_policy_tool_unsupported"))'
+
+run_hook "Codex image generation rejects malformed referenced_image_paths" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit this","referenced_image_paths":"/tmp/source.png"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects malformed referenced image entries" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit this","referenced_image_paths":["/tmp/source.png",17]}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects malformed previous-image count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit the last image","num_last_images_to_include":"many"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects fractional output count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","n":1.5}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects non-positive output count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","output_count":0}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-capability-test.json"
+jq 'del(.capabilities[] | select(.id == "media.image.generate"))' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation requires media.image.generate capability" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_capability"))'
+mv "$TEST_DIR/aport/passport.before-image-capability-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-unsupported-limit-test.json"
+jq '.limits["media.image.generate"].unsupported_limit = true' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation rejects unsupported media limits" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unsupported_limit"))'
+mv "$TEST_DIR/aport/passport.before-image-unsupported-limit-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-format-limit-test.json"
+jq '.limits["media.image.generate"].allowed_output_formats = "png"' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation rejects malformed output format limits" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_limit"))'
+mv "$TEST_DIR/aport/passport.before-image-format-limit-test.json" "$TEST_DIR/aport/passport.json"
+
 run_hook "Codex update_plan is session bookkeeping and is allowed" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"update_plan","tool_input":{"plan":[{"step":"x","status":"pending"}]}}' \
