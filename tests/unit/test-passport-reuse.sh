@@ -73,6 +73,16 @@ if aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null
 [[ "${APORT_PASSPORT_REUSED:-}" = "1" ]] || fail "wizard skip flag missing after --reuse-from"
 unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM APORT_PASSPORT_REUSE_DECIDED APORT_REUSE_PASSPORT_FROM_CLI
 
+# Local reuse must clear inherited hosted state. Otherwise callers see the stale APORT_AGENT_ID and install API
+# mode for a different passport than the local one that was just copied.
+export APORT_REUSE_PASSPORT_FROM_CLI=cursor APORT_AGENT_ID=ap_stalehosted1234567890abcdef123456 APORT_API_KEY=apk_stale_key APORT_API_URL=https://stale.example
+if aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null; then fail "local reuse with stale hosted env must return 1 (local path)"; fi
+[[ -z "${APORT_AGENT_ID:-}" ]] || fail "local reuse must clear stale APORT_AGENT_ID"
+[[ -z "${APORT_API_KEY:-}" ]] || fail "local reuse must clear stale APORT_API_KEY"
+[[ -z "${APORT_API_URL:-}" ]] || fail "local reuse must clear stale APORT_API_URL"
+grep -q local-cursor "$HOME/.claude/aport/passport.json" || fail "local reuse with stale hosted env did not copy the local passport"
+unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM APORT_PASSPORT_REUSE_DECIDED APORT_REUSE_PASSPORT_FROM_CLI
+
 # 6. Non-interactive with --reuse-from=<framework> (hosted): configured as hosted.
 export APORT_REUSE_PASSPORT_FROM_CLI=codex
 aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null || fail "hosted reuse must return 0"

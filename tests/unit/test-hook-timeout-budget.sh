@@ -110,15 +110,22 @@ for script in "$REPO_ROOT/bin/frameworks/claude-code.sh" "$REPO_ROOT/bin/framewo
                 ;;
         esac
     done
-    # An explicit APORT_HOOK_TIMEOUT still wins, so an operator can raise it.
+    # An explicit APORT_HOOK_TIMEOUT can raise the budget, but cannot lower it below the evaluator bound plus
+    # the safety margin. Claude Code does not block on hook timeout, so a low override would fail open.
     got="$(APORT_HOOK_TIMEOUT=90 budget_for "$script" "45")"
     [[ "$got" = "90" ]] || fail "$name should honour an explicit APORT_HOOK_TIMEOUT, got $got"
+    got="$(APORT_HOOK_TIMEOUT=5 budget_for "$script" "15")"
+    [[ "$got" = "30" ]] || fail "$name should clamp low explicit APORT_HOOK_TIMEOUT to 30, got $got"
+    got="$(APORT_HOOK_TIMEOUT=30 budget_for "$script" "45")"
+    [[ "$got" = "60" ]] || fail "$name should clamp explicit APORT_HOOK_TIMEOUT below raised evaluator budget to 60, got $got"
     echo "PASS: $name derives a safe hook budget for every APORT_API_TIMEOUT"
 done
 
 # 4. The Claude Code settings file carries the derived budget, not a hardcoded one that could drift below it.
 grep -q '"timeout": ${APORT_HOOK_TIMEOUT}' "$REPO_ROOT/bin/frameworks/claude-code.sh" \
     || fail "the no-jq settings fallback in claude-code.sh must write the derived timeout, not a literal"
-echo "PASS: the settings writers use the derived budget"
+grep -q 'APORT_API_TIMEOUT=$APORT_EVALUATOR_TIMEOUT' "$REPO_ROOT/bin/frameworks/claude-code.sh" \
+    || fail "Claude Code hook command must bind the evaluator timeout used to derive the static hook timeout"
+echo "PASS: the settings writers use the derived budget and bind the evaluator timeout"
 
 echo "PASS: hook timeout budget"

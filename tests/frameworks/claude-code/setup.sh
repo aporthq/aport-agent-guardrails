@@ -89,6 +89,10 @@ if command -v jq &> /dev/null; then
         echo "FAIL: Claude Code hook should point to stable APort runtime, got: $HOOK_CMD" >&2
         exit 1
     fi
+    if [[ "$HOOK_CMD" != APORT_API_TIMEOUT=15* ]]; then
+        echo "FAIL: hook command should bind the evaluator timeout used for the installed timeout, got: $HOOK_CMD" >&2
+        exit 1
+    fi
     [[ -x "$CLAUDE_DIR/aport/runtime/bin/aport-claude-code-hook.sh" ]] || {
         echo "FAIL: expected stable Claude Code runtime hook at $CLAUDE_DIR/aport/runtime/bin/aport-claude-code-hook.sh" >&2
         exit 1
@@ -119,6 +123,12 @@ if command -v jq &> /dev/null; then
     DERIVED_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true and .timeout == 60)] | length' "$DERIVED_DIR/settings.json")
     if [[ "$DERIVED_COUNT" -ne 1 ]]; then
         echo "FAIL: APORT_API_TIMEOUT=45 should install a 60 s hook timeout" >&2
+        jq -c '.hooks.PreToolUse' "$DERIVED_DIR/settings.json" >&2
+        exit 1
+    fi
+    DERIVED_CMD=$(jq -r '.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true) | .command // empty' "$DERIVED_DIR/settings.json" | head -n 1)
+    if [[ "$DERIVED_CMD" != APORT_API_TIMEOUT=45* ]]; then
+        echo "FAIL: APORT_API_TIMEOUT=45 install should bind evaluator timeout in the hook command, got: $DERIVED_CMD" >&2
         jq -c '.hooks.PreToolUse' "$DERIVED_DIR/settings.json" >&2
         exit 1
     fi
