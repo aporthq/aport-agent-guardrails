@@ -203,7 +203,10 @@ write_decision() {
     if [ -n "${CONTEXT_SUMMARY:-}" ]; then
         audit_context=" context=\"${CONTEXT_SUMMARY}\""
     fi
-    audit_entry="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$decision_id allow=$allow policy=$policy_id code=$deny_code${audit_context}"
+    # The harness that made the call. Self-reported by the hook, recorded for audit only, never an authorization
+    # input. Restricted to a safe charset so a hostile value cannot forge another field in the line.
+    audit_framework="$(printf '%s' "${APORT_HOOK_FRAMEWORK:-}" | LC_ALL=C tr -cd 'A-Za-z0-9._-' | head -c 40)"
+    audit_entry="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME${audit_framework:+ framework=$audit_framework} decision_id=$decision_id allow=$allow policy=$policy_id code=$deny_code${audit_context}"
 
     if [ "$allow" = "false" ]; then
         echo "$audit_entry" >> "$AUDIT_LOG" 2> /dev/null || true

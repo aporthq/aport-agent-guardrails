@@ -112,7 +112,10 @@ if [ -f "$DECISION_FILE" ]; then
     DENY_CODE=$(jq -r '.reasons[0].code // "unknown"' "$DECISION_FILE" 2> /dev/null || echo "unknown")
     DENY_MSG=$(jq -r '.reasons[0].message // ""' "$DECISION_FILE" 2> /dev/null | tr '\n' ' ' | head -c 200 | sed 's/"/\\"/g')
     DENY_MSG="$(sanitize_log_value "$DENY_MSG" reason)"
-    AUDIT_LINE="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME decision_id=$DECISION_ID allow=$ALLOW policy=$POLICY_ID code=$DENY_CODE"
+    # The harness that made the call. Self-reported by the hook, recorded for audit only, never an authorization
+    # input. Restricted to a safe charset so a hostile value cannot forge another field in the line.
+    AUDIT_FRAMEWORK="$(printf '%s' "${APORT_HOOK_FRAMEWORK:-}" | LC_ALL=C tr -cd 'A-Za-z0-9._-' | head -c 40)"
+    AUDIT_LINE="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME${AUDIT_FRAMEWORK:+ framework=$AUDIT_FRAMEWORK} decision_id=$DECISION_ID allow=$ALLOW policy=$POLICY_ID code=$DENY_CODE"
     [ -n "$DENY_MSG" ] && AUDIT_LINE="${AUDIT_LINE} reason=\"$DENY_MSG\""
     echo "$AUDIT_LINE" >> "$AUDIT_LOG" 2> /dev/null || true
 fi
