@@ -49,11 +49,22 @@ for tool in terminal run_terminal_cmd execute_command; do
     [ "$out" = '{"command":"ls","shell":"zsh"}' ] || fail "$tool (policy $policy) must get its shell basenamed: $out"
 done
 
-# The builder itself never emits an empty shell, and basenames a path, so the local evaluator and the hosted one
-# see the same value.
+# The builder never emits an empty shell, and it keeps the RAW path when the call names one. The basename is
+# taken here, in normalize_api_context, on the way to the hosted API and nowhere earlier: the trust check in
+# aport_hook_shell_override_is_trusted has to see the whole path, or "/tmp/bash" basenames to "bash", passes
+# as a trusted interpreter, and the host runs an attacker-controlled binary while APort judges the command.
 out="$(aport_hook_context_from_payload '{"tool_name":"Bash","tool_input":{"command":"ls"}}' shell bash claude-code)"
 [[ "$out" != *'"shell"'* ]] || fail "the builder must not emit shell when the call names none: $out"
 out="$(aport_hook_context_from_payload '{"tool_name":"Bash","tool_input":{"command":"ls","shell":"/bin/zsh"}}' shell bash claude-code)"
-[[ "$out" == *'"shell":"zsh"'* ]] || fail "the builder must basename a shell path: $out"
+[[ "$out" == *'"shell":"/bin/zsh"'* ]] || fail "the builder must keep the raw shell path for the trust check: $out"
+[[ "$(normalize_api_context system.command.execute.v1 "$out" | jq -r '.shell')" = "zsh" ]] \
+    || fail "the API context must still receive the basename"
+# A planted interpreter keeps its path all the way to the trust check, so it cannot masquerade as /bin/bash.
+out="$(aport_hook_context_from_payload '{"tool_name":"Bash","tool_input":{"command":"ls","shell":"/tmp/bash"}}' shell bash claude-code)"
+[[ "$out" == *'"shell":"/tmp/bash"'* ]] || fail "the builder must not collapse /tmp/bash to bash: $out"
+# shellcheck source=../../bin/lib/hook-runtime.sh
+source "$REPO_ROOT/bin/lib/hook-runtime.sh"
+if aport_hook_shell_override_is_trusted "/tmp/bash"; then fail "/tmp/bash must not be trusted"; fi
+aport_hook_shell_override_is_trusted "/bin/bash" || fail "/bin/bash must be trusted"
 
 echo "PASS: api context normalization"

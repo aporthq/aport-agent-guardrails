@@ -15,7 +15,15 @@ source "$LIB/guardrail-mode.sh"
 # shellcheck source=lib/framework-setup.sh
 source "$LIB/framework-setup.sh"
 
-SUPPORTED_FRAMEWORKS=("${APORT_SUPPORTED_FRAMEWORKS[@]}")
+# Mode switching is only meaningful where an enforcement hook exists, so the gated targets that the
+# installer accepts (to explain why they are not enabled) are filtered out here rather than listed a
+# second time. Reporting "enforce mode" for a framework with no hook would promise protection that is
+# not installed.
+SUPPORTED_FRAMEWORKS=()
+for _fw in "${APORT_SUPPORTED_FRAMEWORKS[@]}"; do
+    aport_framework_is_gated "$_fw" || SUPPORTED_FRAMEWORKS+=("$_fw")
+done
+unset _fw
 
 usage() {
     cat << 'EOF'
@@ -54,8 +62,13 @@ for supported in "${SUPPORTED_FRAMEWORKS[@]}"; do
     fi
 done
 if [[ "$is_supported" != true ]]; then
-    log_error "Unsupported framework: $framework"
-    echo "Supported: ${SUPPORTED_FRAMEWORKS[*]}" >&2
+    if aport_framework_is_gated "$framework"; then
+        log_error "$framework has no APort enforcement hook yet, so there is no mode to switch."
+        echo "Run: aport-agent-guardrails $framework    (it explains what is still missing)" >&2
+    else
+        log_error "Unsupported framework: $framework"
+        echo "Supported: ${SUPPORTED_FRAMEWORKS[*]}" >&2
+    fi
     exit 1
 fi
 

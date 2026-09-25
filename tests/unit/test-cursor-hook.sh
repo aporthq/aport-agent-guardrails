@@ -333,6 +333,28 @@ if grep -q 'oap.unrecognized_input' "$LAST_HOOK_OUTPUT"; then
     exit 1
 fi
 
+# A read hook with no path has no evidence, so it must deny. Both events are documented to carry file_path;
+# a payload without one used to return {"permission":"allow"} because the shared read helper returns nonzero
+# and the branch called allow().
+run_hook "beforeTabFileRead: missing file_path denies instead of allowing" \
+    '{"hook_event_name":"beforeTabFileRead","content":"SECRET=1"}' 2 '"permission":"deny"'
+grep -q 'oap.missing_file_path' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: beforeTabFileRead with no path should deny oap.missing_file_path" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
+run_hook "beforeTabFileRead: empty file_path denies" \
+    '{"hook_event_name":"beforeTabFileRead","file_path":"","content":"SECRET=1"}' 2 '"permission":"deny"'
+
+run_hook "beforeReadFile: missing file_path denies instead of allowing" \
+    '{"hook_event_name":"beforeReadFile","content":"SECRET=1"}' 2 '"permission":"deny"'
+grep -q 'oap.missing_file_path' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: beforeReadFile with no path should deny oap.missing_file_path" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
 # --- preToolUse: Grep/search reads ---
 run_hook "preToolUse Grep: missing path fails closed" \
     '{"tool_name":"Grep","tool_input":{"pattern":"TODO"}}' 2 '"permission":"deny"'

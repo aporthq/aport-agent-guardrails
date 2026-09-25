@@ -462,14 +462,18 @@ aport_hook_context_from_payload() {
             end
           )
         ) as $command_timeout |
-        # `shell` is emitted only when the call names one, as a basename: the hosted schema rejects "" and paths.
+        # `shell` is emitted only when the call names one, and it keeps the RAW value the harness sent,
+        # path and all. aport_hook_shell_override_is_trusted has to see the full path: basenaming here
+        # turned "/tmp/bash" into "bash" and let an attacker-controlled interpreter pass as trusted while
+        # APort judged only the nominal command. The hosted enum (bash, sh, zsh, fish, powershell, cmd)
+        # rejects "" and paths, so the basename is taken later, in normalize_api_context, on the way out.
         ({
           command: (
             .command // $ti.command // $ti.cmd // $ti.script // $ti.shell_command // ""
           )
         }
         + (if $command_timeout == null then {} else {timeout: $command_timeout} end)
-        + (((.shell // $ti.shell // "") | tostring) as $sh | if $sh == "" then {} else {shell: ($sh | split("/") | last)} end))
+        + (((.shell // $ti.shell // "") | tostring) as $sh | if $sh == "" then {} else {shell: $sh} end))
       elif $kind == "file_read" then
         {
           file_path: first_string([

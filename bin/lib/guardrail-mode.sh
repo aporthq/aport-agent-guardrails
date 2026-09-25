@@ -51,6 +51,13 @@ parse_guardrail_mode_args() {
                 shift
                 ;;
             --reuse-from=*)
+                # An empty suffix is refused like the separated form with no argument. Storing "" would read
+                # as "not provided" at every later check, so a non-interactive setup would mint a new passport
+                # despite the operator explicitly asking to reuse one.
+                if [[ -z "${1#*=}" ]]; then
+                    echo "[aport] ERROR: --reuse-from requires a framework name, a passport.json path, or a hosted agent id" >&2
+                    return 1
+                fi
                 APORT_REUSE_PASSPORT_FROM_CLI="${1#*=}"
                 ;;
             --reuse-from)

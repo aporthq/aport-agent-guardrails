@@ -286,7 +286,11 @@ echo
 
 # Upgrade hint (show once per day)
 HINT_FILE="$HOME/.openclaw/.last-status-upgrade-hint"
-if [ ! -f "$HINT_FILE" ] || [ $(($(date +%s) - $(stat -f %m "$HINT_FILE" 2> /dev/null || stat -c %Y "$HINT_FILE" 2> /dev/null || echo 0))) -gt 86400 ]; then
+# GNU stat reads -f as "show filesystem status" and prints filesystem fields for %m, so it has to be tried
+# after -c, not before, or the arithmetic below sees a filesystem value instead of an mtime.
+HINT_MTIME="$(stat -c %Y "$HINT_FILE" 2> /dev/null || stat -f %m "$HINT_FILE" 2> /dev/null || echo 0)"
+case "$HINT_MTIME" in '' | *[!0-9]*) HINT_MTIME=0 ;; esac
+if [ ! -f "$HINT_FILE" ] || [ $(($(date +%s) - HINT_MTIME)) -gt 86400 ]; then
     echo "💰 Upgrade to APort Cloud?"
     echo "   You're using APort Local (free tier) - perfect for individual developers!"
     echo

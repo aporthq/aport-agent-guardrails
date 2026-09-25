@@ -86,12 +86,22 @@ aport_apply_reused_passport() {
             mkdir -p "$dest_dir"
             chmod 700 "$dest_dir" 2> /dev/null || true
             if [[ "$ref" != "$dest" ]]; then
-                # An explicit --reuse-from may replace a passport that is already there; keep the old one.
+                # Both copies are checked explicitly. Callers invoke this function inside an `if` or after a
+                # `||`, which turns errexit off for everything it runs, so an unchecked `cp` that failed would
+                # fall straight through to the success log and `return 0`: a failed backup would report a
+                # backup that is not there while the destination is overwritten anyway, and a failed
+                # destination copy would set the reuse flags and skip the wizard with no passport in place.
                 if [[ -f "$dest" ]]; then
-                    cp "$dest" "$dest.bak"
+                    if ! cp "$dest" "$dest.bak"; then
+                        log_error "Could not back up the existing passport to $dest.bak; leaving $dest unchanged"
+                        return 1
+                    fi
                     log_info "Existing passport kept at $dest.bak"
                 fi
-                cp "$ref" "$dest"
+                if ! cp "$ref" "$dest"; then
+                    log_error "Could not copy $ref to $dest"
+                    return 1
+                fi
             fi
             chmod 600 "$dest" 2> /dev/null || true
             export APORT_PASSPORT_REUSED=1

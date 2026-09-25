@@ -841,4 +841,54 @@ if [[ -e "$SYMLINK_TARGET_DIR/aport/guardrail-mode.env" ]]; then
 fi
 
 echo "  ✅ set-mode preserves passports and updates enforcement"
+
+# A gated framework has no APort enforcement hook yet, so there is no mode to switch. The installer still
+# accepts the name (to explain why it is not enabled), but reporting "enforce mode" for it would promise
+# protection that is not installed.
+set +e
+APORT_OPENCODE_CONFIG_DIR="$TEST_DIR/set-mode-opencode" "$MODE_HELPER" opencode --mode=api ap_1234567890abcdef1234567890abcdef \
+    > "$TEST_DIR/set-mode-gated.out" 2> "$TEST_DIR/set-mode-gated.err"
+GATED_EXIT=$?
+set -e
+if [[ "$GATED_EXIT" -eq 0 ]]; then
+    echo "FAIL: set-mode must refuse a gated framework instead of reporting a mode for it" >&2
+    cat "$TEST_DIR/set-mode-gated.out" >&2 || true
+    cat "$TEST_DIR/set-mode-gated.err" >&2 || true
+    exit 1
+fi
+grep -qi "no APort enforcement hook" "$TEST_DIR/set-mode-gated.err" || {
+    echo "FAIL: the refusal must say why opencode has no mode to switch" >&2
+    cat "$TEST_DIR/set-mode-gated.err" >&2 || true
+    exit 1
+}
+if [[ -e "$TEST_DIR/set-mode-opencode/aport/guardrail-mode.env" ]]; then
+    echo "FAIL: a refused gated framework must not get a mode file" >&2
+    exit 1
+fi
+# The "Supported:" listing an unknown framework prints must not advertise a gated one either.
+set +e
+"$MODE_HELPER" definitely-not-a-framework > /dev/null 2> "$TEST_DIR/set-mode-unknown.err"
+set -e
+grep -q "^Supported:.*opencode" "$TEST_DIR/set-mode-unknown.err" && {
+    echo "FAIL: the supported-framework listing must not include a gated framework" >&2
+    cat "$TEST_DIR/set-mode-unknown.err" >&2
+    exit 1
+}
+echo "  ✅ set-mode refuses gated frameworks with a clear message"
+
+# The frameworks that do have hooks are still accepted.
+for supported in claude-code cursor codex openclaw; do
+    "$MODE_HELPER" "$supported" --help > /dev/null 2>&1 || true
+    set +e
+    APORT_CONFIG_DIR="$TEST_DIR/set-mode-supported-$supported" "$MODE_HELPER" "$supported" --enforcement=warn \
+        > /dev/null 2> "$TEST_DIR/set-mode-supported-$supported.err"
+    SUPPORTED_EXIT=$?
+    set -e
+    grep -qi "Unsupported framework\|no APort enforcement hook" "$TEST_DIR/set-mode-supported-$supported.err" && {
+        echo "FAIL: $supported must remain a valid mode target (exit $SUPPORTED_EXIT)" >&2
+        cat "$TEST_DIR/set-mode-supported-$supported.err" >&2
+        exit 1
+    }
+done
+echo "  ✅ frameworks with hooks are still accepted"
 echo ""
