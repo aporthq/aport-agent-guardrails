@@ -574,6 +574,72 @@ map_web() {
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
 }
 
+map_codex_image_generation() {
+    local image_context referenced_count
+
+    image_context="$(printf '%s' "$INPUT" | jq -c --arg provider "${APORT_IMAGE_GENERATION_PROVIDER:-openai}" '
+      def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
+      def str_field($name; v):
+        if v == null then ""
+        elif (v | type) == "string" then v
+        else error($name + " must be a string")
+        end;
+      def positive_int_field($name; v):
+        if v == null then 1
+        elif (v | type) == "number" and v > 0 and (v | floor) == v then v
+        elif (v | type) == "string" and (v | test("^[1-9][0-9]*$")) then (v | tonumber)
+        else error($name + " must be a positive integer")
+        end;
+      def nonnegative_int_field($name; v):
+        if v == null then 0
+        elif (v | type) == "number" and v >= 0 and (v | floor) == v then v
+        elif (v | type) == "string" and (v | test("^[0-9]+$")) then (v | tonumber)
+        else error($name + " must be a non-negative integer")
+        end;
+      def local_reference_count($ti):
+        if (($ti | has("referenced_image_paths")) | not) or $ti.referenced_image_paths == null then 0
+        elif ($ti.referenced_image_paths | type) == "array"
+          and ($ti.referenced_image_paths | all(type == "string" and length > 0))
+        then ($ti.referenced_image_paths | length)
+        else error("referenced_image_paths must be an array of non-empty strings")
+        end;
+      def first_present($ti; $keys):
+        reduce $keys[] as $key (null;
+          if . != null then .
+          elif ($ti | has($key)) and $ti[$key] != null then {key: $key, value: $ti[$key]}
+          else null
+          end
+        );
+      (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
+      ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
+      local_reference_count($ti) as $local_refs |
+      nonnegative_int_field("num_last_images_to_include"; $ti.num_last_images_to_include) as $last_refs |
+      (first_present($ti; ["n", "num_images", "output_count"])) as $output_count_field |
+      {
+        provider: $provider,
+        prompt_length: (str_field("prompt"; $ti.prompt) | length),
+        referenced_image_count: ($local_refs + $last_refs),
+        local_referenced_image_count: $local_refs,
+        output_count: positive_int_field(($output_count_field.key // "output_count"); $output_count_field.value),
+        output_format: (str_field("output_format"; ($ti.output_format // $ti.format)) | if . == "" then "png" else ascii_downcase end)
+      }
+      + (if str_field("model"; $ti.model) != "" then {model: str_field("model"; $ti.model)} else {} end)
+      + (if str_field("size"; $ti.size) != "" then {size: str_field("size"; $ti.size)} else {} end)
+      + (if str_field("aspect_ratio"; $ti.aspect_ratio) != "" then {aspect_ratio: str_field("aspect_ratio"; $ti.aspect_ratio)} else {} end)
+    ' 2> /dev/null || true)"
+    if [ -z "$image_context" ]; then
+        emit_response "deny" "media.image.generate" "oap.invalid_tool_arguments" "Image generation payload could not be parsed"
+    fi
+    referenced_count="$(printf '%s' "$image_context" | jq -r '.local_referenced_image_count // 0' 2> /dev/null || echo 0)"
+    case "$referenced_count" in "" | *[!0-9]*) referenced_count=0 ;; esac
+    if [ "$referenced_count" -gt 0 ]; then
+        emit_response "deny" "media.image.generate" "oap.multi_policy_tool_unsupported" "Codex image generation with referenced local images needs both file-read and image-generation authorization; this hook cannot safely evaluate both in one decision"
+    fi
+
+    GUARDRAIL_TOOL="image.generate"
+    CONTEXT_JSON="$(printf '%s' "$image_context" | jq -c 'del(.local_referenced_image_count)')"
+}
+
 map_mcp() {
     if aport_hook_payload_has_conflicting_mcp_routing_aliases "$INPUT"; then
         emit_response "deny" "mcp.tool.execute" "oap.invalid_tool_arguments" "MCP tool supplied conflicting server or tool aliases"
@@ -700,14 +766,17 @@ case "$FRAMEWORK" in
             bash | shell | exec | execcommand | exec_command | unifiedexec | unified_exec | localshell | local_shell | containerexec | container_exec | jsrepl | js_repl | codemodeexec | code_mode_exec)
                 map_shell
                 ;;
-            applypatch | apply_patch | write | edit | multiedit | notebookedit | delete | strreplace)
+            applypatch | apply_patch | write | edit | multiedit | notebookedit | delete | strreplace | str_replace)
                 map_file_write
                 ;;
             read | readfile | read_file | viewimage | view_image | grep | grepsearch | grep_search | grepfiles | grep_files)
                 map_file_read
                 ;;
-            webfetch | web_fetch | websearch | web_search | webrun | web_run | browser | browse | openurl | open_url | fetchurl | fetch_url | httprequest | http_request | computeruse | computer_use)
+            webfetch | web_fetch | websearch | web_search | webrun | web_run | web.run | browser | browse | openurl | open_url | fetchurl | fetch_url | httprequest | http_request | computeruse | computer_use)
                 map_web
+                ;;
+            image_gen.imagegen | image_genimagegen | imagegen | image_generate | imagegeneration | image_generation)
+                map_codex_image_generation
                 ;;
             glob | list | ls | lsp | listdir | list_dir)
                 map_metadata_or_path_read
@@ -715,12 +784,12 @@ case "$FRAMEWORK" in
             writestdin | write_stdin)
                 map_codex_write_stdin
                 ;;
-            todoread | toolsearch | tool_search | updateplan | update_plan | requestuserinput | request_user_input | memoryoperators | memory_*)
+            todoread | toolsearch | tool_search | toolsearchtool | tool_search_tool | tool_search.tool_search_tool | updateplan | update_plan | requestuserinput | request_user_input | getgoal | get_goal | creategoal | create_goal | updategoal | update_goal | memoryoperators | memory_*)
                 # Session bookkeeping, plan updates, user prompts, and Codex's own memory store: no new effect
                 # outside the session, nothing for a policy to judge.
                 emit_response "allow" "" "" ""
                 ;;
-            mcp__* | mcp:* | callmcptool | call_mcp_tool | readmcpresourcetool | read_mcp_resource_tool)
+            mcp__* | mcp:* | callmcptool | call_mcp_tool | readmcpresource | read_mcp_resource | readmcpresourcetool | read_mcp_resource_tool | listmcpresources | list_mcp_resources | listmcpresourcetemplates | list_mcp_resource_templates)
                 map_mcp
                 ;;
             agent | task | subagent | subagentstart | subagent_start | sendmessage | send_message | collaboration.sendmessage | collaboration.send_message | followuptask | followup_task | collaboration.followuptask | collaboration.followup_task | waitagent | wait_agent | collaboration.waitagent | collaboration.wait_agent | interruptagent | interrupt_agent | collaboration.interruptagent | collaboration.interrupt_agent | spawnagent | spawn_agent | collaboration.spawnagent | collaboration.spawn_agent | sendinput | send_input | collaboration.sendinput | collaboration.send_input | closeagent | close_agent | collaboration.closeagent | collaboration.close_agent | resumeagent | resume_agent | collaboration.resumeagent | collaboration.resume_agent | listagents | list_agents | collaboration.listagents | collaboration.list_agents)

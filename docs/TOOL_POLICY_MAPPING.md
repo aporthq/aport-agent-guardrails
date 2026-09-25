@@ -21,6 +21,7 @@ plugin has its own host-specific mapping in
 | `mcp.tool.*`, `mcp.*` | `mcp.tool.execute.v1` | API / evaluator |
 | `agent.session.*`, `session.create`, `session.*`, `cron`, `sessions_spawn`, `sessions_send`, `sessions_yield`, `subagents`, `session_status` | `agent.session.create.v1` | API / evaluator |
 | `sessions_list`, `sessions_history`, `view` | `data.file.read.v1` | API / evaluator |
+| `image.generate`, `image_gen.imagegen`, `image_genimagegen`, `image_generation`, `image_generate`, `imagegeneration`, `imagegen` | `media.image.generate.v1` | `local-overrides` or API |
 | `websearch`, `web_search`, `webfetch`, `web_fetch` | `web.fetch.v1` | API / evaluator |
 | `browser`, `web.browser` | `web.browser.v1` | API / evaluator |
 | `agent.tool.*`, `tool.register`, `tool.*` | `agent.tool.register.v1` | API / evaluator |

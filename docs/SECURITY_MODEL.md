@@ -83,6 +83,7 @@ The local evaluator (`bin/aport-guardrail-bash.sh`) gets a tool name and a small
 | Write, Edit, MultiEdit, NotebookEdit, single-file `apply_patch` | `file_path` | `data.file.write`: `allowed_paths`, `blocked_paths` (path prefix), `allowed_extensions` |
 | Read, and Grep with a `file_path` | `file_path` | `data.file.read`: `allowed_paths`, `blocked_patterns` (substring), `max_file_size`, plus the built-in sensitive-path list below |
 | WebFetch, WebSearch with a URL | `url` or `domain` | `web.fetch`: `allowed_domains`, `blocked_domains`, `allowed_methods` |
+| Image generation | provider and generation metadata only | `media.image.generate`: `allowed_providers`, `max_prompt_length`, `max_referenced_images`, `max_output_images`, `allowed_output_formats` |
 | MCP tools | server and tool name | `mcp.tool.execute`: `allowed_servers`, `allowed_tools`, `allowed_tool_prefixes`, `max_timeout` |
 | Agent, Task, Skill, team and cron tools | session metadata | `agent.session.create`; the capability must be in the passport or the call is denied with `oap.unknown_capability` |
 | Bash, shell, exec tools | the command string | `system.command.execute`, described next |
@@ -96,6 +97,8 @@ The local evaluator (`bin/aport-guardrail-bash.sh`) gets a tool name and a small
 5. `blocked_patterns`, word-boundary and glob matching, case-insensitive. A single word such as `sudo` matches only as a whole word (it does not block `sudoku`); an entry containing `*` or `?` is a glob; a multi-word entry such as `rm -rf` matches as written.
 
 **Timeouts.** `limits["system.command.execute"].max_execution_time` (seconds) is compared with the timeout the host sends on the call. Claude Code sends `tool_input.timeout` in milliseconds and the hook converts it; other hosts send seconds. A call that carries no timeout is judged under the harness default when the harness has one and the call is bounded by it: Claude Code Bash, PowerShell and Monitor get 120 s (the 120000 ms default); Codex `shell` and `local_shell` get 10 s. Codex `exec_command` and `unified_exec` get no default because the process outlives the call. Cursor, Gemini CLI and Goose shell tools carry no timeout and are treated as unbounded. A call whose timeout key is present but malformed, or that sets `run_in_background` or `persistent`, gets no default either. With no timeout value the evaluator denies with `oap.missing_required_context`; a value above the limit is denied with `oap.timeout_exceeded`. In short: a passport that sets `max_execution_time` blocks unbounded tools. Drop the limit or use a bounded tool.
+
+**Image generation.** `media.image.generate.v1` sees provider, optional model/size/aspect ratio, prompt length, referenced image count, output count, and output format. It does not receive raw prompt text, image bytes, or local image paths. The local evaluator requires `limits["media.image.generate"]` to include `allowed_providers`, `max_prompt_length`, `max_referenced_images`, `max_output_images`, and `allowed_output_formats`; missing or malformed limits deny with `oap.invalid_limit`. Referenced local image paths are denied by the Codex adapter with `oap.multi_policy_tool_unsupported`, because a safe edit flow needs both `data.file.read.v1` for each local input image and `media.image.generate.v1` for the generation request.
 
 **What it does not see.** The shell policy pattern-matches text. It does not model what the command does:
 
@@ -186,7 +189,7 @@ APort's three-layer security model:
 
 **Local Mode:**
 - Policies embedded in bash script (hand-coded for core policies)
-- Covers: system.command.execute, data.file.read, data.file.write, web.fetch, mcp.tool.execute, agent.session.create, messaging.message.send, and a subset of code.repository.merge and code.release.publish
+- Covers: system.command.execute, data.file.read, data.file.write, web.fetch, media.image.generate, mcp.tool.execute, agent.session.create, messaging.message.send, and a subset of code.repository.merge and code.release.publish
 - New policies require script updates
 
 **Optional: Custom policies:**
@@ -197,6 +200,7 @@ APort's three-layer security model:
 - `system.command.execute.v1` - Shell commands (allowlist, 50+ blocked patterns, passport `allowed_paths` override)
 - `data.file.read.v1` / `data.file.write.v1` - File access control
 - `web.fetch.v1` / `web.browser.v1` - Web requests and browser automation
+- `media.image.generate.v1` - Image generation provider, prompt-length, reference-count, output-count and format limits
 - `messaging.message.send.v1` - Message rate limits, recipient allowlist
 - `code.repository.merge.v1` - PR size, branch restrictions
 - `finance.payment.charge.v1` - Transaction amounts, approval requirements

@@ -118,6 +118,7 @@ Reviewed against official Codex hook docs: <https://learn.chatgpt.com/docs/hooks
 | single-target `apply_patch`, `Write`, `Edit`, `MultiEdit`, delete/replace aliases | `write` | `data.file.write.v1` |
 | path-based `Read`, `read_file`, `view_image`, `Grep` | `read` | `data.file.read.v1` |
 | `WebFetch`, `WebSearch` | `websearch` | `web.fetch.v1` |
+| `image_gen.imagegen` / `image_genimagegen` | `image.generate` | `media.image.generate.v1` |
 | MCP tools and resource reads | `mcp.tool` | `mcp.tool.execute.v1` |
 | `Agent`, `Task`, subagent/send-message aliases | `session.create` | `agent.session.create.v1` |
 | `PostToolUse` | — | Silent allow; APort does not forward tool output |
@@ -208,6 +209,7 @@ Custom LangChain tools must use names that match a prefix/substring in `tool-pac
 | `data.file.read.v1` | `data.file.read` | |
 | `data.file.write.v1` | `data.file.write` | |
 | `web.fetch.v1` | `web.fetch` | WebSearch/WebFetch |
+| `media.image.generate.v1` | `media.image.generate` | Codex image generation |
 | `web.browser.v1` | `web.browser` | Browser automation (no separate `cron.v1`) |
 | `agent.session.create.v1` | `agent.session.create` | Subagents, tasks, **cron** guardrail alias `cron` |
 | `mcp.tool.execute.v1` | `mcp.tool.execute` | |
@@ -225,11 +227,12 @@ There is **no** `cron.v1` policy; scheduled-task tools map to `agent.session.cre
 | `packages/core` and `python/.../tool-pack-mapping.json` identical | Enforced in `tests/unit/test-tool-pack-mapping.sh` |
 | Bash `resolve_policy_id_from_tool_name` fail-closed on unknown | Yes — JSON `default` is **not** applied in bash (adapters still use default) |
 | Hooks fail-closed on unknown host tools | Claude Code, Cursor, Codex, Gemini CLI, Goose |
+| Declared harness tool surface has no `oap.unknown_tool` regressions | Enforced in `tests/unit/test-harness-tool-surface.sh` |
 | `cronlist` → read, not session | Fixed (avoid bare `cron` prefix) |
 | OpenClaw `cronlist` before `cron*` match | Fixed (explicit tool names only) |
 | Published npm tarball includes mapping JSON | `python/aport_guardrails/core/tool-pack-mapping.json` in root `package.json` `files` |
 
-**Known DRY debt (acceptable for now):** host hooks (`aport-*-hook.sh`) duplicate case lists; OpenClaw uses `tool-mapping.js`. Both must stay aligned with `tool-pack-mapping.json` when adding tools. `claudeCodeTools.ts` is documentation-only.
+**Known DRY debt (acceptable for now):** host hooks (`aport-*-hook.sh`) duplicate case lists; OpenClaw uses `tool-mapping.js`. Both must stay aligned with `tool-pack-mapping.json` when adding tools. `tests/unit/test-harness-tool-surface.sh` exercises the declared host surface through the real hooks to catch drift. `claudeCodeTools.ts` is documentation-only.
 
 **Prefix caveat:** bare `agent` prefix matches any tool name starting with `agent` (e.g. hypothetical `agentic_search`). Prefer explicit host names in hooks.
 
@@ -240,6 +243,8 @@ There is **no** `cron.v1` policy; scheduled-task tools map to `agent.session.cre
 | Test | Coverage |
 |------|----------|
 | `tests/unit/test-tool-pack-mapping.sh` | JSON resolution (Claude/OpenClaw/DeerFlow names) |
+| `tests/unit/test-harness-tool-surface.sh` | Declared Claude Code, Cursor, Codex, Gemini CLI and Goose tool names do not reach `oap.unknown_tool` |
+| `tests/unit/test-command-hook-adapter.sh` | Shared Codex/Gemini CLI/Goose adapter policy routing and fail-closed behavior |
 | `tests/unit/test-claude-code-hook.sh` | Claude hook allow/deny |
 | `tests/unit/test-cursor-hook.sh` | Cursor hook |
 | `tests/extensions/openclaw-aport.test.js` | `mapToolToPolicy()` |

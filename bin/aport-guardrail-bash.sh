@@ -274,6 +274,8 @@ if [ -n "$CONTEXT_JSON" ] && [ "$CONTEXT_JSON" != "{}" ]; then
         CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.file_path // .path // ""' 2> /dev/null || true)
     elif [[ "$POLICY_ID" == "web.fetch.v1" ]]; then
         CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.url // ""' 2> /dev/null || true)
+    elif [[ "$POLICY_ID" == "media.image.generate.v1" ]]; then
+        CONTEXT_SUMMARY=$(echo "$CONTEXT_JSON" | jq -r '.provider // ""' 2> /dev/null || true)
     elif [[ "$POLICY_ID" == "web.browser.v1" ]]; then
         ACTION=$(echo "$CONTEXT_JSON" | jq -r '.action // ""' 2> /dev/null || true)
         URL=$(echo "$CONTEXT_JSON" | jq -r '.url // ""' 2> /dev/null || true)
@@ -351,6 +353,8 @@ elif [[ "$POLICY_ID" == "code.release.publish"* ]]; then
     LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["code.release.publish"] then .["code.release.publish"] else ({allowed_repos, allowed_extensions} | with_entries(select(.value != null))) end')
 elif [[ "$POLICY_ID" == "mcp.tool.execute"* ]]; then
     LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["mcp.tool.execute"] then .["mcp.tool.execute"] else ({allowed_servers, allowed_tools, allowed_tool_prefixes, max_timeout} | with_entries(select(.value != null))) end')
+elif [[ "$POLICY_ID" == "media.image.generate"* ]]; then
+    LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["media.image.generate"] then .["media.image.generate"] else ({allowed_providers, max_prompt_length, max_referenced_images, max_output_images, allowed_output_formats} | with_entries(select(.value != null))) end')
 elif [[ "$POLICY_ID" == "web.fetch"* ]]; then
     LIMITS=$(echo "$PASSPORT" | jq '.limits | if .["web.fetch"] then .["web.fetch"] else ({allowed_domains, blocked_domains, allowed_methods, max_requests_per_min, max_requests_per_minute} | with_entries(select(.value != null))) end')
 else
@@ -490,6 +494,25 @@ validate_string_array_limits() {
     for limit_key in "$@"; do
         validate_string_array_limit "$limit_key"
     done
+}
+
+configured_integer_limit() {
+    local limit_key="$1"
+    local min_value="$2"
+    local raw
+    raw="$(echo "$LIMITS" | jq -c --arg key "$limit_key" 'if has($key) then .[$key] else empty end' 2> /dev/null || true)"
+    if [ -z "$raw" ]; then
+        return 1
+    fi
+    if ! jq -en --argjson value "$raw" --arg min "$min_value" '
+        if ($value | type) == "number" then (($value | floor) == $value and $value >= ($min | tonumber))
+        elif ($value | type) == "string" then ($value | test("^[0-9]+$") and (($value | tonumber) >= ($min | tonumber)))
+        else false
+        end
+    ' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "$limit_key must be an integer greater than or equal to $min_value when configured"
+    fi
+    jq -nr --argjson value "$raw" 'if ($value | type) == "number" then ($value | floor | tostring) else $value end'
 }
 
 configured_file_size_limit_bytes() {
@@ -2325,6 +2348,99 @@ if [[ "$POLICY_ID" == "web.fetch.v1" ]]; then
     fi
 
     enforce_web_fetch_rate_limit
+fi
+
+if [[ "$POLICY_ID" == "media.image.generate.v1" ]]; then
+    PROVIDER=$(echo "$CONTEXT_JSON" | jq -r '.provider // ""' 2> /dev/null || true)
+    PROMPT_LENGTH=$(echo "$CONTEXT_JSON" | jq -r '.prompt_length // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
+    REFERENCED_IMAGE_COUNT=$(echo "$CONTEXT_JSON" | jq -r '.referenced_image_count // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
+    OUTPUT_COUNT=$(echo "$CONTEXT_JSON" | jq -r '.output_count // empty | if type == "number" then tostring elif type == "string" then . else empty end' 2> /dev/null || true)
+    OUTPUT_FORMAT=$(echo "$CONTEXT_JSON" | jq -r '.output_format // ""' 2> /dev/null || true)
+
+    if echo "$LIMITS" | jq -e 'type != "object"' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "media.image.generate limits must be an object when configured"
+    fi
+    UNSUPPORTED_MEDIA_LIMITS=$(echo "$LIMITS" | jq -r '
+        keys - ["allowed_providers", "max_prompt_length", "max_referenced_images", "max_output_images", "allowed_output_formats"]
+        | join(", ")
+    ' 2> /dev/null || true)
+    if [ -n "$UNSUPPORTED_MEDIA_LIMITS" ]; then
+        write_decision false "$POLICY_ID" "oap.unsupported_limit" "media.image.generate local mode cannot enforce configured limit(s): $UNSUPPORTED_MEDIA_LIMITS"
+    fi
+
+    validate_string_array_limits allowed_providers allowed_output_formats
+    if ! echo "$LIMITS" | jq -e '(.allowed_providers | type) == "array"' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "allowed_providers is required and must be an array"
+    fi
+    if ! echo "$LIMITS" | jq -e '(.allowed_output_formats | type) == "array"' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "allowed_output_formats is required and must be an array"
+    fi
+
+    if [ -z "$PROVIDER" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Image generation provider is required for local enforcement"
+    fi
+    if printf '%s' "$PROVIDER" | grep -q '[[:cntrl:]]'; then
+        write_decision false "$POLICY_ID" "oap.invalid_provider" "Image generation provider contains control characters"
+    fi
+    if [ -z "$PROMPT_LENGTH" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Image generation prompt_length is required for local enforcement"
+    fi
+    case "$PROMPT_LENGTH" in
+        "" | *[!0-9]*) write_decision false "$POLICY_ID" "oap.invalid_tool_arguments" "Image generation prompt_length must be a positive integer" ;;
+    esac
+    if [ "$PROMPT_LENGTH" -le 0 ] 2> /dev/null; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Image generation prompt_length must be greater than zero"
+    fi
+    if [ -z "$REFERENCED_IMAGE_COUNT" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Image generation referenced_image_count is required for local enforcement"
+    fi
+    case "$REFERENCED_IMAGE_COUNT" in
+        "" | *[!0-9]*) write_decision false "$POLICY_ID" "oap.invalid_tool_arguments" "Image generation referenced_image_count must be a non-negative integer" ;;
+    esac
+    if [ -z "$OUTPUT_COUNT" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Image generation output_count is required for local enforcement"
+    fi
+    case "$OUTPUT_COUNT" in
+        "" | *[!0-9]*) write_decision false "$POLICY_ID" "oap.invalid_tool_arguments" "Image generation output_count must be a positive integer" ;;
+    esac
+    if [ "$OUTPUT_COUNT" -le 0 ] 2> /dev/null; then
+        write_decision false "$POLICY_ID" "oap.invalid_tool_arguments" "Image generation output_count must be greater than zero"
+    fi
+    if [ -z "$OUTPUT_FORMAT" ]; then
+        write_decision false "$POLICY_ID" "oap.missing_required_context" "Image generation output_format is required for local enforcement"
+    fi
+
+    ALLOWED_PROVIDERS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_providers | type) == "array" then .allowed_providers else [] end' 2> /dev/null || echo "[]")
+    if ! is_allowed_by_patterns "$PROVIDER" "$ALLOWED_PROVIDERS_JSON"; then
+        write_decision false "$POLICY_ID" "oap.provider_not_allowed" "Image generation provider '$PROVIDER' is not in allowed list"
+    fi
+
+    if ! MAX_PROMPT_LENGTH="$(configured_integer_limit max_prompt_length 1)"; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "max_prompt_length is required and must be a positive integer"
+    fi
+    if ! jq -en --arg value "$PROMPT_LENGTH" --arg max "$MAX_PROMPT_LENGTH" '($value | tonumber) <= ($max | tonumber)' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.prompt_too_large" "Image generation prompt length exceeds max_prompt_length"
+    fi
+
+    if ! MAX_REFERENCED_IMAGES="$(configured_integer_limit max_referenced_images 0)"; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "max_referenced_images is required and must be a non-negative integer"
+    fi
+    if ! jq -en --arg value "$REFERENCED_IMAGE_COUNT" --arg max "$MAX_REFERENCED_IMAGES" '($value | tonumber) <= ($max | tonumber)' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.referenced_image_limit_exceeded" "Image generation referenced images exceed max_referenced_images"
+    fi
+
+    if ! MAX_OUTPUT_IMAGES="$(configured_integer_limit max_output_images 1)"; then
+        write_decision false "$POLICY_ID" "oap.invalid_limit" "max_output_images is required and must be a positive integer"
+    fi
+    if ! jq -en --arg value "$OUTPUT_COUNT" --arg max "$MAX_OUTPUT_IMAGES" '($value | tonumber) <= ($max | tonumber)' > /dev/null 2>&1; then
+        write_decision false "$POLICY_ID" "oap.output_image_limit_exceeded" "Image generation output count exceeds max_output_images"
+    fi
+
+    ALLOWED_OUTPUT_FORMATS_JSON=$(echo "$LIMITS" | jq -c 'if (.allowed_output_formats | type) == "array" then .allowed_output_formats else [] end' 2> /dev/null || echo "[]")
+    OUTPUT_FORMAT=$(printf '%s' "$OUTPUT_FORMAT" | tr '[:upper:]' '[:lower:]')
+    if ! is_allowed_by_patterns "$OUTPUT_FORMAT" "$ALLOWED_OUTPUT_FORMATS_JSON"; then
+        write_decision false "$POLICY_ID" "oap.output_format_not_allowed" "Image generation output format '$OUTPUT_FORMAT' is not in allowed list"
+    fi
 fi
 
 if [[ "$POLICY_ID" == "mcp.tool.execute.v1" ]]; then

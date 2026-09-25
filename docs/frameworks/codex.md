@@ -71,6 +71,7 @@ The hook wrapper is `bin/aport-codex-hook.sh`, which delegates to the shared `bi
 | `apply_patch`, write/edit/delete tools | `data.file.write.v1` |
 | `read_file`, `view_image`, `grep` and other path-based reads and content searches | `data.file.read.v1` |
 | `web_fetch`, `web_search`, `webrun`, `browser`, `open_url`, `fetch_url`, `http_request`, `computer_use` | `web.fetch.v1` |
+| `image_gen.imagegen` / `image_genimagegen` | `media.image.generate.v1` |
 | MCP tools and MCP resource reads | `mcp.tool.execute.v1` |
 | `spawn_agent`, `send_message`, `wait_agent` and the other collaboration tools | `agent.session.create.v1` |
 | `Glob`, `List`, `LS`, `LSP` | denied by the hook: `oap.metadata_enumeration_unsupported` with a target, `oap.missing_file_path` without |
@@ -78,6 +79,8 @@ The hook wrapper is `bin/aport-codex-hook.sh`, which delegates to the shared `bi
 | `write_stdin` | `system.command.execute` on its `chars` |
 
 `write_stdin` submits keystrokes into a session that `exec_command` or `unified_exec` opened. When that session is an interactive shell, the keystrokes are a new command, so the `chars` are evaluated against `system.command.execute` rather than waved through with the bookkeeping tools. A non-empty chunk must contain complete, non-whitespace terminal input. Partial chunks and whitespace/control-only chunks deny with `oap.partial_stdin_unsupported`, because APort cannot authorize split shell input or prove that a newline will not execute already-buffered text. The cost is that keystrokes bound for a pager or a REPL are judged by the command policy too, which can deny input no shell would have run.
+
+`image_gen.imagegen` is authorized as image generation, not as a generic web fetch. The hook sends metadata only to `media.image.generate.v1`: provider, optional model/size/aspect ratio, prompt length, referenced image count, output count, and output format. It never forwards raw prompt text, image contents, or local image paths. The passport must configure `limits["media.image.generate"].allowed_providers`, `max_prompt_length`, `max_referenced_images`, `max_output_images`, and `allowed_output_formats`; missing or malformed limits fail closed with `oap.invalid_limit`. Set `APORT_IMAGE_GENERATION_PROVIDER` if your hosted verifier should see a provider name other than `openai`. If the call includes `referenced_image_paths`, the hook denies with `oap.multi_policy_tool_unsupported` because the tool needs both local file-read and image-generation authorization and the shell hook can safely emit only one decision.
 
 An unmapped tool name is denied with `oap.unknown_tool`. Codex adds tools faster than this table changes, but a name nobody has mapped is a name nobody has decided the capability for, and the payload cannot decide it: a `url` field on a payment tool is not a web fetch, and a `command` field on a database tool is not a shell call. Add the name to the table instead of relying on a guess.
 
@@ -122,6 +125,7 @@ Local unit coverage:
 
 ```bash
 bash tests/unit/test-command-hook-adapter.sh
+bash tests/unit/test-harness-tool-surface.sh
 bash tests/frameworks/codex/setup.sh
 ```
 
