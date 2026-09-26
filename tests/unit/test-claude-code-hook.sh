@@ -1239,6 +1239,23 @@ jq -e '.guardrail_tool == "mcp.tool" and .context.mcp_server == "github" and .co
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 }
+# A parsed mcp__<server>__ tool name must agree with Claude's host-reported object name.
+OUT18M="$TEST_DIR/claude-deny-mcp-server-object-mismatch.txt"
+set +e
+echo '{"tool_name":"mcp__evil__issues.list","mcp_server":{"name":"github","source":"project"},"tool_input":{"id":"x"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT18M" 2> /dev/null
+EXIT18M=$?
+set -e
+[[ "$EXIT18M" -eq 0 ]] || {
+    echo "FAIL: MCP server mismatch should return a structured deny response, exit=$EXIT18M" >&2
+    cat "$OUT18M" >&2
+    exit 1
+}
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))' "$OUT18M" > /dev/null || {
+    echo "FAIL: MCP server mismatch should fail closed as invalid tool arguments, got:" >&2
+    cat "$OUT18M" >&2
+    exit 1
+}
 # Without an mcp__<server>__ prefix the host-reported name is the only server evidence.
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 OUT18B="$TEST_DIR/claude-allow-mcp-server-object-generic.txt"

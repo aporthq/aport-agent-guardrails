@@ -352,6 +352,21 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
         else
           $s
         end;
+      def strip_functions_prefix(v):
+        (v | tostring) as $original |
+        if ($original | ascii_downcase | startswith("functions.")) then $original[10:] else $original end;
+      def parse_mcp_tool_name($raw):
+        strip_functions_prefix($raw) as $name |
+        ($name | ascii_downcase) as $lower |
+        if ($lower | startswith("mcp__")) then
+          ($name | split("__")) as $parts |
+          if ($parts | length) >= 3 then {server: $parts[1], tool: ($parts[2:] | join("__"))} else {} end
+        elif ($lower | startswith("mcp:")) then
+          ($name[4:] | split(":")) as $parts |
+          if ($parts | length) >= 2 then {server: $parts[0], tool: ($parts[1:] | join(":"))} else {} end
+        else
+          {}
+        end;
       def argument_containers:
         [
           obj(.tool_input),
@@ -367,6 +382,7 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
       . as $root |
       (obj($root.mcp_context)) as $mcp |
       (($root.hook_event_name // $root.event // "") | ascii_downcase) as $event |
+      (parse_mcp_tool_name($root.tool_name // "")) as $parsed |
       ([
         $mcp.mcp_server,
         $mcp.mcp_server_name,
@@ -374,10 +390,35 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
         $mcp.server_name,
         $mcp.url,
         $root.mcp_server,
+        (if ($root.mcp_server | type) == "object" and (($root.mcp_server.name // "") | type) == "string" and ($root.mcp_server.name // "") != "" then $root.mcp_server.name else null end),
+        $root.mcp_server_name,
+        (if $event == "beforemcpexecution" then $root.server else null end),
+        (if $event == "beforemcpexecution" then $root.url else null end)
+      ] | map(select(type == "string" and length > 0)) | map(route(.)) | map(select(. != "")) | unique) as $host_servers |
+      ([
+        $mcp.mcp_tool,
+        $mcp.tool,
+        $mcp.tool_name,
+        $root.mcp_tool
+      ] | map(select(type == "string" and length > 0)) | unique) as $host_tools |
+      ([
+        $mcp.mcp_server,
+        $mcp.mcp_server_name,
+        $mcp.server,
+        $mcp.server_name,
+        $mcp.url,
+        $root.mcp_server,
+        (if ($root.mcp_server | type) == "object" and (($root.mcp_server.name // "") | type) == "string" and ($root.mcp_server.name // "") != "" then $root.mcp_server.name else null end),
         $root.mcp_server_name,
         (if $event == "beforemcpexecution" then $root.server else null end),
         (if $event == "beforemcpexecution" then $root.url else null end),
-        ($root | argument_containers[] | .mcp_server, .mcp_server_name, .server, .server_name)
+        (
+          $root | argument_containers[] |
+          (if (.mcp_server | type) == "object" and ((.mcp_server.name // "") | type) == "string" and (.mcp_server.name // "") != "" then .mcp_server.name else .mcp_server end),
+          .mcp_server_name,
+          .server,
+          .server_name
+        )
       ] | map(select(type == "string" and length > 0)) | map(route(.)) | map(select(. != "")) | unique) as $servers |
       ([
         $mcp.mcp_tool,
@@ -386,7 +427,76 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
         $root.mcp_tool,
         ($root | argument_containers[] | .mcp_tool, .tool, .name, .operation)
       ] | map(select(type == "string" and length > 0)) | unique) as $tools |
-      (($servers | length) > 1) or (($tools | length) > 1)
+      (($servers | length) > 1) or
+      (($tools | length) > 1) or
+      ((($parsed.server // "") != "") and (([$parsed.server] + $host_servers | unique) | length) > 1) or
+      ((($parsed.tool // "") != "") and (([$parsed.tool] + $host_tools | unique) | length) > 1)
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_conflicting_image_generation_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      def present_values($key):
+        [argument_containers[] | select(has($key) and .[$key] != null) | .[$key]];
+      def string_values($key):
+        present_values($key)
+        | map(if type == "string" then . else "__APORT_MALFORMED__" end)
+        | unique;
+      def format_values:
+        [argument_containers[] | (.output_format // .format // null) | select(. != null)]
+        | map(if type == "string" then ascii_downcase else "__APORT_MALFORMED__" end)
+        | unique;
+      def positive_int_values:
+        [argument_containers[] | (.n // .num_images // .output_count // null) | select(. != null)]
+        | map(
+            if type == "number" and . > 0 and (floor == .) then tostring
+            elif type == "string" and test("^[1-9][0-9]*$") then (tonumber | tostring)
+            else "__APORT_MALFORMED__"
+            end
+          )
+        | unique;
+      def nonnegative_int_values($key):
+        present_values($key)
+        | map(
+            if type == "number" and . >= 0 and (floor == .) then tostring
+            elif type == "string" and test("^[0-9]+$") then (tonumber | tostring)
+            else "__APORT_MALFORMED__"
+            end
+          )
+        | unique;
+      def referenced_path_values:
+        present_values("referenced_image_paths")
+        | map(
+            if type == "array" and all(type == "string" and length > 0) then tojson
+            else "__APORT_MALFORMED__"
+            end
+          )
+        | unique;
+      (
+        (string_values("prompt") | length) > 1 or
+        (format_values | length) > 1 or
+        (positive_int_values | length) > 1 or
+        (nonnegative_int_values("num_last_images_to_include") | length) > 1 or
+        (referenced_path_values | length) > 1
+      )
     ' <<< "$payload" > /dev/null 2>&1
 }
 
