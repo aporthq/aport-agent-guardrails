@@ -182,7 +182,7 @@ elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INP
     GUARDRAIL_TOOL="session.create"
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "subagentStart" "cursor")"
 
-elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -n "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.mcp_server_name // .server // .url' &> /dev/null; }; then
+elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -z "$HOOK_EVENT" ] && [ -n "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.mcp_server_name // .server // .url' &> /dev/null; }; then
     # beforeMCPExecution: MCP tool calls. Cursor's current native field is
     # mcp_server_name; server-qualified tool names are parsed by the shared
     # context helper. Do not trust ordinary tool_input.server values.
@@ -263,6 +263,9 @@ elif [ -n "$TOOL_NAME" ]; then
             CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
             ;;
         browser)
+            if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
+                deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting URL or domain aliases"
+            fi
             if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
                 deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting action aliases"
             fi

@@ -29,11 +29,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/guardrail-mode.sh
 source "$SCRIPT_DIR/lib/guardrail-mode.sh"
+# shellcheck source=lib/config.sh
+source "$SCRIPT_DIR/lib/config.sh"
 # shellcheck source=lib/quick-hosted.sh
 source "$SCRIPT_DIR/lib/quick-hosted.sh"
 
 APORT_PLUGIN_PATH="$REPO_ROOT/extensions/openclaw-aport"
-DEFAULT_CONFIG="${OPENCLAW_STATE_DIR:-${OPENCLAW_HOME:-$HOME/.openclaw}}"
+DEFAULT_CONFIG="$(get_config_dir openclaw)"
 
 is_noninteractive() {
 	[ -n "${APORT_NONINTERACTIVE:-${CI:-}}" ]
