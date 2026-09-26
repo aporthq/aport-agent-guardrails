@@ -208,6 +208,37 @@ grep -q '^APORT_API_URL=https://api.aport.io$' "$MODE_FILE" || {
 }
 echo "  ✅ guardrail mode config saved (api)"
 
+SYMLINK_HOOKS_DIR="$TEST_DIR/cursor-symlink-hooks"
+SYMLINK_STATE_DIR="$TEST_DIR/cursor-symlink-state"
+SYMLINK_TARGET="$TEST_DIR/cursor-symlink-target-hooks.json"
+mkdir -p "$SYMLINK_HOOKS_DIR" "$SYMLINK_STATE_DIR"
+printf '{"hooks":{}}\n' > "$SYMLINK_TARGET"
+ln -s "$SYMLINK_TARGET" "$SYMLINK_HOOKS_DIR/hooks.json"
+
+echo "  Test: Cursor setup rejects symlinked hooks.json..."
+set +e
+CURSOR_HOOKS_DIR="$SYMLINK_HOOKS_DIR" APORT_CURSOR_CONFIG_DIR="$SYMLINK_STATE_DIR" APORT_NONINTERACTIVE=1 \
+    "$DISPATCHER" --framework=cursor --output "$TEST_DIR/cursor-symlink-passport.json" --non-interactive --mode=api --api-url="https://api.aport.io" \
+    > "$TEST_DIR/cursor-setup-symlink.log" 2>&1
+SYMLINK_EXIT=$?
+set -e
+if [[ "$SYMLINK_EXIT" -eq 0 ]]; then
+    echo "FAIL: Cursor setup should reject symlinked hooks.json" >&2
+    cat "$TEST_DIR/cursor-setup-symlink.log" >&2
+    exit 1
+fi
+grep -q "Refusing to write through symlink" "$TEST_DIR/cursor-setup-symlink.log" || {
+    echo "FAIL: expected symlink refusal for Cursor hooks.json" >&2
+    cat "$TEST_DIR/cursor-setup-symlink.log" >&2
+    exit 1
+}
+if ! grep -q '{"hooks":{}}' "$SYMLINK_TARGET"; then
+    echo "FAIL: symlink target should not be overwritten" >&2
+    cat "$SYMLINK_TARGET" >&2
+    exit 1
+fi
+echo "  ✅ Cursor setup rejects symlinked hooks.json"
+
 echo ""
 echo "  Cursor setup integration test passed."
 echo ""

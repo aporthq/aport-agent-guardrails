@@ -96,7 +96,10 @@ run_setup() {
     # (project) and enterprise-managed files; cloud agents read only project,
     # team and enterprise hooks, never the user file written here.
     CURSOR_HOOKS_DIR="${CURSOR_HOOKS_DIR:-$HOME/.cursor}"
+    CURSOR_HOOKS_DIR="${CURSOR_HOOKS_DIR/#\~/$HOME}"
     CURSOR_HOOKS_FILE="$CURSOR_HOOKS_DIR/hooks.json"
+    refuse_symlink_path "$CURSOR_HOOKS_DIR" || exit 1
+    refuse_symlink_path "$CURSOR_HOOKS_FILE" || exit 1
     mkdir -p "$CURSOR_HOOKS_DIR"
     local tab_json=false
     aport_cursor_tab_read_hook_enabled && tab_json=true

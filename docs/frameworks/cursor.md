@@ -70,7 +70,7 @@ This runs setup and writes **`~/.cursor/hooks.json`** with fail-closed APort hoo
 
 Non-interactive local passport: `npx --yes @aporthq/aport-agent-guardrails cursor --mode=local --non-interactive` (add `--output <path>` to choose the file). Interactive local passport: choose `3. Create local passport file` at the passport prompt and keep `Spawn sub-agents and tasks?` at `Y`, since `subagentStart` maps to `agent.session.create.v1` and is denied without that capability.
 
-**Custom config directory:** set `APORT_CURSOR_CONFIG_DIR` when running the installer to put the runtime, passport, `guardrail-mode.env` and audit log under `<dir>/aport/`. `hooks.json` is still written to `~/.cursor` (override with `CURSOR_HOOKS_DIR`) and stores only the hook path, so also export `APORT_CURSOR_CONFIG_DIR` in the environment Cursor is launched from; the hook reads it at run time and otherwise falls back to `~/.cursor`. `mode` and `reset` read the same variable. A passport outside that directory needs `APORT_PASSPORT_FILE` plus `APORT_ALLOW_EXTERNAL_PASSPORT_FILE=1` (README, "Install into a custom directory").
+**Custom config directory:** set `APORT_CURSOR_CONFIG_DIR` when running the installer to put the runtime, passport, `guardrail-mode.env` and audit log under `<dir>/aport/`. `hooks.json` is still written to `~/.cursor` by default; set `CURSOR_HOOKS_DIR` when you need the hooks file somewhere else. The hooks file stores only the hook path, so also export `APORT_CURSOR_CONFIG_DIR` in the environment Cursor is launched from; the hook reads it at run time and otherwise falls back to `~/.cursor`. `mode` reads `APORT_CURSOR_CONFIG_DIR`; `reset` reads `APORT_CURSOR_CONFIG_DIR` for state and `CURSOR_HOOKS_DIR` for the hooks file. A passport outside the state directory needs `APORT_PASSPORT_FILE` plus `APORT_ALLOW_EXTERNAL_PASSPORT_FILE=1` (README, "Install into a custom directory").
 
 Default enforcement is `enforce` (fail-closed). To roll out in report-only mode, opt in explicitly:
 
@@ -177,7 +177,7 @@ Then run `bin/aport-status.sh` and `cat ~/.cursor/aport/audit.log` to confirm th
 
 ## Config
 
-- **Hooks file:** `~/.cursor/hooks.json` (user) or `.cursor/hooks.json` (project). The installer writes the former by default. Enterprise and team hook files take priority over both; see [Hook contract](#hook-contract).
+- **Hooks file:** `~/.cursor/hooks.json` (user) or `.cursor/hooks.json` (project). The installer writes the former by default; set `CURSOR_HOOKS_DIR` to write and later reset a different hooks directory. Enterprise and team hook files take priority over both; see [Hook contract](#hook-contract).
 - **Passport and default paths:** Each framework stores passport and evaluation data in its own default location. For Cursor the default is **`~/.cursor/aport/passport.json`** (with `decision.json`, `audit.log`, and `guardrail-mode.env` in `~/.cursor/aport/`). Hosted mode uses the `agent_id` and API key stored in `guardrail-mode.env`; it does not need a local passport JSON file. You can always choose a different local path: in the wizard the first question is the passport path (default shown in brackets); in non-interactive mode use **`--output /path/to/passport.json`**.
 - **Hook script:** `~/.cursor/aport/runtime/bin/aport-cursor-hook.sh` after setup. The installer copies the required runtime files there and puts that absolute path into `hooks.json`. The Cursor hook anchors config resolution to the Cursor config directory and loads `~/.cursor/aport/guardrail-mode.env` when present.
 
