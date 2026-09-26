@@ -420,6 +420,7 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
       (obj($root.mcp_context)) as $mcp |
       (($root.hook_event_name // $root.event // "") | ascii_downcase) as $event |
       (parse_mcp_tool_name($root.tool_name // "")) as $parsed |
+      ((($parsed.server // "") == "") and (($parsed.tool // "") == "")) as $use_argument_routing_aliases |
       ([
         $mcp.mcp_server,
         $mcp.mcp_server_name,
@@ -449,20 +450,20 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
         $root.mcp_server_name,
         (if $event == "beforemcpexecution" then $root.server else null end),
         (if $event == "beforemcpexecution" then $root.url else null end),
-        (
+        (if $use_argument_routing_aliases then (
           $root | argument_containers[] |
           (if (.mcp_server | type) == "object" and ((.mcp_server.name // "") | type) == "string" and (.mcp_server.name // "") != "" then .mcp_server.name else .mcp_server end),
           .mcp_server_name,
           .server,
           .server_name
-        )
+        ) else null end)
       ] | map(select(type == "string" and length > 0)) | map(route(.)) | map(select(. != "")) | unique) as $servers |
       ([
         $mcp.mcp_tool,
         $mcp.tool,
         $mcp.tool_name,
         $root.mcp_tool,
-        ($root | argument_containers[] | .mcp_tool, .tool, .name, .operation)
+        (if $use_argument_routing_aliases then ($root | argument_containers[] | .mcp_tool, .tool, .name, .operation) else null end)
       ] | map(select(type == "string" and length > 0)) | unique) as $tools |
       (($servers | length) > 1) or
       (($tools | length) > 1) or

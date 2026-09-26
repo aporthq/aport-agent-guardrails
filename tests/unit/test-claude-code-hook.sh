@@ -906,7 +906,7 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "limits": {
     "mcp.tool.execute": {
       "allowed_servers": ["github"],
-      "allowed_tools": ["issues.*"]
+      "allowed_tools": ["issues.*", "resource_create"]
     }
   },
   "regions": ["US"],
@@ -1279,7 +1279,7 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
   "limits": {
     "mcp.tool.execute": {
       "allowed_servers": ["github"],
-      "allowed_tools": ["issues.*"]
+      "allowed_tools": ["issues.*", "resource_create"]
     }
   },
   "regions": ["US"],
@@ -1300,6 +1300,23 @@ set -e
 }
 jq -e '.guardrail_tool == "mcp.tool" and .context.mcp_server == "github" and .context.mcp_tool == "issues.list"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
     echo "FAIL: mcp_server object must resolve to its name, got:" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+OUT18A="$TEST_DIR/claude-allow-qualified-mcp-tool-params.txt"
+set +e
+echo '{"tool_name":"mcp__github__resource_create","mcp_server":{"name":"github","source":"project"},"tool_input":{"name":"demo","operation":"create"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT18A" 2> /dev/null
+EXIT18A=$?
+set -e
+[[ "$EXIT18A" -eq 0 ]] && [[ ! -s "$OUT18A" ]] || {
+    echo "FAIL: qualified MCP tool arguments named name/operation should be treated as data, exit=$EXIT18A" >&2
+    cat "$OUT18A" >&2
+    exit 1
+}
+jq -e '.guardrail_tool == "mcp.tool" and .context.mcp_server == "github" and .context.mcp_tool == "resource_create"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: qualified MCP tool should use routing from tool_name, got:" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 }
