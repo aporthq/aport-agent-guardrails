@@ -160,6 +160,35 @@ APORT_GUARDRAIL_MODE=local
 EOF
 echo "  ✅ Claude warn-mode message: evidence plus enforce CTA"
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+OUT_WARN_BROWSER="$TEST_DIR/claude-warn-browser-interactive.txt"
+set +e
+echo '{"tool_name":"Browser","tool_input":{"url":"https://example.com/page","action":"click"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT_WARN_BROWSER" 2> /dev/null
+EXIT_WARN_BROWSER=$?
+set -e
+[[ "$EXIT_WARN_BROWSER" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Claude warn-mode interactive Browser denial, got $EXIT_WARN_BROWSER" >&2
+    cat "$OUT_WARN_BROWSER" >&2
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "deny"
+  and (.hookSpecificOutput.permissionDecisionReason | contains("oap.interactive_browser_unsupported"))
+' "$OUT_WARN_BROWSER" > /dev/null || {
+    echo "FAIL: Claude warn mode must not allow unsupported interactive Browser actions" >&2
+    cat "$OUT_WARN_BROWSER" >&2
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Claude warn-mode interactive Browser: hard deny"
+
 # 1. Allow: Read with allowed path (local evaluator)
 echo "  Test: Read tool -> allow (allowed path)..."
 OUT1="$TEST_DIR/claude-allow-read.txt"
@@ -994,6 +1023,22 @@ grep -q 'oap.invalid_url' "$OUT12C" || {
     exit 1
 }
 echo "  ✅ WebFetch Unicode-normalized loopback hostname: structured deny"
+
+echo "  Test: Browser conflicting root and tool_input URLs -> deny..."
+OUT12D="$TEST_DIR/claude-deny-browser-url-conflict.txt"
+echo '{"tool_name":"Browser","url":"https://allowed.example/","tool_input":{"url":"https://evil.example/","action":"navigate"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT12D" 2> /dev/null
+EXIT12D=$?
+[[ "$EXIT12D" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Browser URL conflict, got $EXIT12D" >&2
+    cat "$OUT12D" >&2
+    exit 1
+}
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))' "$OUT12D" > /dev/null || {
+    echo "FAIL: expected Browser URL conflict to fail closed" >&2
+    cat "$OUT12D" >&2
+    exit 1
+}
+echo "  ✅ Browser conflicting URL aliases: structured deny"
 
 # 13. PowerShell -> allow (maps to bash policy)
 echo "  Test: PowerShell -> allow..."

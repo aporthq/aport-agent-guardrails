@@ -534,6 +534,22 @@ grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
     exit 1
 }
 
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+run_hook "preToolUse Browser: interactive action still fails closed in warn mode" \
+    '{"hook_event_name":"preToolUse","tool_name":"Browser","tool_input":{"url":"https://example.com/page","action":"click"}}' 2 '"permission":"deny"'
+grep -q 'oap.interactive_browser_unsupported' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: Cursor warn mode must not allow unsupported interactive Browser actions" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Cursor warn-mode interactive Browser: hard deny"
+
 # --- preToolUse: MCP:<name> ---
 run_hook "preToolUse MCP:tool: allow" \
     '{"tool_name":"MCP:github_search","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
