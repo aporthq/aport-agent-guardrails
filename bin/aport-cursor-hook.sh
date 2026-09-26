@@ -263,6 +263,9 @@ elif [ -n "$TOOL_NAME" ]; then
             CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
             ;;
         browser)
+            if aport_hook_payload_has_malformed_browser_action_aliases "$INPUT"; then
+                deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser action aliases must be strings"
+            fi
             if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
                 deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting URL or domain aliases"
             fi

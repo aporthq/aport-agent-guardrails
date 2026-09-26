@@ -498,11 +498,11 @@ aport_hook_payload_has_conflicting_image_generation_aliases() {
         | map(if type == "string" then . else "__APORT_MALFORMED__" end)
         | unique;
       def format_values:
-        [argument_containers[] | (.output_format // .format // null) | select(. != null)]
+        [argument_containers[] | (.output_format, .format) | select(. != null)]
         | map(if type == "string" then ascii_downcase else "__APORT_MALFORMED__" end)
         | unique;
       def positive_int_values:
-        [argument_containers[] | (.n // .num_images // .output_count // null) | select(. != null)]
+        [argument_containers[] | (.n, .num_images, .output_count) | select(. != null)]
         | map(
             if type == "number" and . > 0 and (floor == .) then tostring
             elif type == "string" and test("^[1-9][0-9]*$") then (tonumber | tostring)

@@ -120,6 +120,9 @@ jq -e '
   and .allowed == true
   and (.user_message | contains("report-only mode allowed"))
   and (.user_message | contains("Evidence:"))
+  and (.user_message | contains("audit.log"))
+  and (.user_message | contains("session-decisions.jsonl"))
+  and ((.user_message | contains("decision.json")) | not)
   and (.user_message | contains("mode cursor --enforcement=enforce"))
   and ((.user_message | contains("Review or update the hosted passport")) | not)
 ' "$OUT_WARN" > /dev/null || {
@@ -530,6 +533,14 @@ run_hook "preToolUse Browser rejects conflicting root and tool_input URLs" \
     '{"hook_event_name":"preToolUse","tool_name":"Browser","url":"https://allowed.example/","tool_input":{"url":"https://evil.example/","action":"navigate"}}' 2 '"permission":"deny"'
 grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
     echo "FAIL: expected Cursor browser URL alias conflict to fail closed" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
+run_hook "preToolUse Browser rejects malformed action alias" \
+    '{"hook_event_name":"preToolUse","tool_name":"Browser","tool_input":{"url":"https://allowed.example/","action":{"type":"click"}}}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected Cursor browser malformed action to fail closed" >&2
     cat "$LAST_HOOK_OUTPUT" >&2
     exit 1
 }

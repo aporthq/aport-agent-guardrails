@@ -317,6 +317,11 @@ run_hook "Codex image generation rejects non-positive output count" \
     '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","output_count":0}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
 
+run_hook "Codex image generation rejects conflicting output count aliases" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","n":1,"num_images":100,"output_format":"png"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
 cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-capability-test.json"
 jq 'del(.capabilities[] | select(.id == "media.image.generate"))' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
 mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
@@ -800,6 +805,9 @@ run_hook "Codex warn mode allows with additionalContext" \
       and .hookSpecificOutput.additionalContext
       and (.systemMessage | contains("report-only mode allowed"))
       and (.systemMessage | contains("Evidence:"))
+      and (.systemMessage | contains("audit.log"))
+      and (.systemMessage | contains("session-decisions.jsonl"))
+      and ((.systemMessage | contains("decision.json")) | not)
       and (.systemMessage | contains("mode codex --enforcement=enforce"))
       and ((.systemMessage | contains("Review or update the hosted passport")) | not)'
 
@@ -2831,6 +2839,8 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 }
 EOF
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+jq '.limits["agent.session.create"].local_lease_ttl_seconds = 60' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
 run_hook "Codex ordinary spawn fills single session capacity before namespaced spawn" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"spawn_agent","session_id":"parent-session","tool_call_id":"multi-agent-baseline-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
@@ -2840,6 +2850,8 @@ run_hook "Codex namespaced spawn_agent respects max_concurrent" \
     '{"hook_event_name":"PreToolUse","tool_name":"multi_agent_v1.spawn_agent","session_id":"parent-session","tool_call_id":"multi-agent-namespaced-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+jq '.limits["agent.session.create"].local_lease_ttl_seconds = 1' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
 echo "  ✅ Codex namespaced multi-agent spawn consumes session capacity"
 
 run_hook "Codex spawn_agent without per-call id fails closed" \
