@@ -567,16 +567,33 @@ map_file_write() {
 }
 
 map_web() {
+    local web_url web_domain web_invalid_url
+
     if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
         emit_response "deny" "web.fetch" "oap.invalid_tool_arguments" "Web tool supplied conflicting URL or domain aliases"
     fi
     GUARDRAIL_TOOL="websearch"
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
+    web_invalid_url="$(printf '%s' "$CONTEXT_JSON" | jq -r 'if .invalid_url == true then "true" else "false" end' 2> /dev/null || echo false)"
+    if [ "$web_invalid_url" = "true" ]; then
+        emit_response "deny" "web.fetch" "oap.invalid_url" "Web tool URL contains ambiguous parser characters"
+    fi
+    web_url="$(printf '%s' "$CONTEXT_JSON" | jq -r '.url // ""' 2> /dev/null || true)"
+    web_domain="$(printf '%s' "$CONTEXT_JSON" | jq -r '.domain // ""' 2> /dev/null || true)"
+    if [ -z "$web_url" ] && [ -z "$web_domain" ]; then
+        emit_response "deny" "web.fetch" "oap.missing_required_context" "Web tool did not provide a URL or domain that APort can evaluate"
+    fi
+    if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ] && [ -z "$web_url" ]; then
+        emit_response "deny" "web.fetch" "oap.missing_required_context" "Hosted web.fetch verification requires a concrete URL; search-only or domain-only web calls need a dedicated policy"
+    fi
 }
 
 map_codex_browser() {
     local browser_action
 
+    if aport_hook_payload_has_malformed_browser_action_aliases "$INPUT"; then
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Browser action aliases must be strings"
+    fi
     if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
         emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting URL or domain aliases"
     fi
@@ -604,6 +621,9 @@ map_codex_browser() {
 map_codex_computer_use() {
     if aport_hook_payload_has_malformed_browser_action_aliases "$INPUT"; then
         emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use action aliases must be strings"
+    fi
+    if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting URL or domain aliases"
     fi
     if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
         emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting action aliases"
@@ -703,7 +723,21 @@ map_mcp() {
 
 map_codex_plugin_install() {
     GUARDRAIL_TOOL="mcp.tool"
-    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "mcp:codex:request_plugin_install")"
+    CONTEXT_JSON="$(printf '%s' "$INPUT" | jq -c '
+      def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
+      def keys_or_empty(v): if (v | type) == "object" then (v | keys | sort) else [] end;
+      (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
+      ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
+      {
+        server: "codex",
+        mcp_server: "codex",
+        tool: "request_plugin_install",
+        mcp_tool: "request_plugin_install",
+        parameters: {},
+        parameter_keys: keys_or_empty($ti),
+        parameter_count: (keys_or_empty($ti) | length)
+      }
+    ' 2> /dev/null || printf '{"server":"codex","mcp_server":"codex","tool":"request_plugin_install","mcp_tool":"request_plugin_install","parameters":{},"parameter_keys":[],"parameter_count":0}')"
 }
 
 map_session() {
@@ -838,7 +872,7 @@ aport_codex_stdin_has_shell_continuation() {
 }
 
 map_codex_write_stdin() {
-    local stdin_chars stdin_command stdin_info stdin_meta stdin_state stdin_line_state stdin_blank_state stdin_sentinel newline cr
+    local stdin_chars stdin_command stdin_info stdin_meta stdin_state stdin_line_state stdin_blank_state stdin_control_state stdin_sentinel newline cr
     newline='
 '
     cr="$(printf '\r')"
@@ -881,14 +915,15 @@ map_codex_write_stdin() {
         meta: [
           (if $s == "" then "empty" else "nonempty" end),
           (if ($s | test("[\r\n]$")) then "line" else "partial" end),
-          (if (($s | gsub("[ \t\r\n]"; "") | length) > 0) then "nonblank" else "blank" end)
+          (if (($s | gsub("[[:space:][:cntrl:]]"; "") | length) > 0) then "nonblank" else "blank" end),
+          (if ($s | test("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]")) then "terminal_control" else "no_terminal_control" end)
         ]
       }
-    ' 2> /dev/null || printf '{"chars":"","meta":["empty","partial","blank"]}')"
+    ' 2> /dev/null || printf '{"chars":"","meta":["empty","partial","blank","no_terminal_control"]}')"
     stdin_chars="$(printf '%s' "$stdin_info" | jq -r '(.chars // "") + "APORT_STDIN_END_MARKER"' 2> /dev/null || true)"
     stdin_chars="${stdin_chars%"$stdin_sentinel"}"
-    stdin_meta="$(printf '%s' "$stdin_info" | jq -r '(.meta // ["empty","partial","blank"]) | join("|")' 2> /dev/null || printf 'empty|partial|blank')"
-    IFS='|' read -r stdin_state stdin_line_state stdin_blank_state <<< "$stdin_meta"
+    stdin_meta="$(printf '%s' "$stdin_info" | jq -r '(.meta // ["empty","partial","blank","no_terminal_control"]) | join("|")' 2> /dev/null || printf 'empty|partial|blank|no_terminal_control')"
+    IFS='|' read -r stdin_state stdin_line_state stdin_blank_state stdin_control_state <<< "$stdin_meta"
     # Nothing typed is nothing to judge; the session itself was already authorized.
     if [ "$stdin_state" = "empty" ]; then
         emit_response "allow" "" "" ""
@@ -898,6 +933,9 @@ map_codex_write_stdin() {
     fi
     if aport_codex_stdin_has_shell_continuation "$stdin_chars"; then
         emit_response "deny" "system.command.execute" "oap.partial_stdin_unsupported" "Codex write_stdin sent shell continuation syntax; APort cannot authorize split shell input without session buffering"
+    fi
+    if [ "$stdin_control_state" = "terminal_control" ]; then
+        emit_response "deny" "system.command.execute" "oap.partial_stdin_unsupported" "Codex write_stdin sent terminal control characters; APort cannot prove no buffered shell command will execute"
     fi
     if [ "$stdin_blank_state" != "nonblank" ]; then
         emit_response "deny" "system.command.execute" "oap.partial_stdin_unsupported" "Codex write_stdin sent only terminal control characters; APort cannot prove no buffered shell command will execute"

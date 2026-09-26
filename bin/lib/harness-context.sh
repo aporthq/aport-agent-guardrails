@@ -692,6 +692,7 @@ aport_hook_context_from_payload() {
           $name == "subagent_start" or
           $name == "spawnagent" or
           $name == "spawn_agent" or
+          $name == "multi_agent_v1.spawn_agent" or
           $name == "collaboration.spawnagent" or
           $name == "collaboration.spawn_agent" or
           $name == "createagent" or
@@ -827,17 +828,31 @@ aport_hook_context_from_payload() {
         ((.hook_event_name // .event // $event_hint // "") | ascii_downcase) as $event |
         strip_functions_prefix($default_tool) as $default_tool_clean |
         ($default_tool_clean | ascii_downcase | gsub("\\s+"; "")) as $tool_key |
-        ($tool_key == "readmcpresourcetool" or $tool_key == "read_mcp_resource_tool") as $is_resource_read |
+        (
+          $tool_key == "readmcpresource" or
+          $tool_key == "read_mcp_resource" or
+          $tool_key == "readmcpresourcetool" or
+          $tool_key == "read_mcp_resource_tool"
+        ) as $is_resource_read |
+        ($tool_key == "listmcpresources" or $tool_key == "list_mcp_resources") as $is_resource_list |
+        ($tool_key == "listmcpresourcetemplates" or $tool_key == "list_mcp_resource_templates") as $is_resource_template_list |
         ($tool_key == "callmcptool" or $tool_key == "call_mcp_tool") as $is_generic_call |
-        ($is_resource_read or $is_generic_call) as $allows_input_routing |
+        ($is_resource_read or $is_resource_list or $is_resource_template_list or $is_generic_call) as $allows_input_routing |
         (parse_mcp_tool_name($default_tool)) as $parsed |
         (
-          if $event == "beforemcpexecution" and $default_tool_clean != "" and ($is_resource_read | not) and ($is_generic_call | not) then
+          if $event == "beforemcpexecution" and $default_tool_clean != "" and ($allows_input_routing | not) then
             $default_tool_clean
           else
             null
           end
         ) as $native_tool |
+        (
+          if $is_resource_read then "resources.read"
+          elif $is_resource_list then "resources.list"
+          elif $is_resource_template_list then "resources.templates.list"
+          else $default_tool
+          end
+        ) as $default_mcp_tool |
         (
           $mcp.server_name // $mcp.server // $mcp.url //
           .mcp_server_name // (if (.mcp_server | type) == "string" then .mcp_server else null end) //
@@ -861,12 +876,12 @@ aport_hook_context_from_payload() {
           tool: (
             $mcp.tool_name // $mcp.tool // $parsed.tool // $native_tool //
             $ti.tool // $ti.mcp_tool // $ti.name // $ti.operation // .mcp_tool // .tool //
-            (if $is_resource_read then "resources.read" else $default_tool end)
+            $default_mcp_tool
           ),
           mcp_tool: (
             $mcp.tool_name // $mcp.tool // $parsed.tool // $native_tool //
             $ti.tool // $ti.mcp_tool // $ti.name // $ti.operation // .mcp_tool // .tool //
-            (if $is_resource_read then "resources.read" else $default_tool end)
+            $default_mcp_tool
           ),
           parameters: {},
           parameter_keys: keys_or_empty($ti),
