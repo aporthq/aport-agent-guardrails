@@ -381,8 +381,8 @@ CONTEXT_JSON="{}"
 # Naming the tool is the operator's job; guessing is not a substitute for it.
 #
 # Even when the operator opts in, a payload that carries MORE THAN ONE effect-bearing field is "mixed" and
-# denies. Picking one effect means dropping the others unevaluated: {"command":"rm -rf /","url":"https://ok"}
-# used to route to web.fetch, drop the command, and return allow.
+# denies. Picking one effect means dropping the others unevaluated; a mixed command+URL payload must not be
+# approved only because its URL looks acceptable.
 #
 # Looks at tool_input/input/args and their args/arguments children like aport_hook_context_from_payload does.
 codex_payload_shape() {
@@ -747,18 +747,18 @@ has_mcp_context() {
 
 # Codex write_stdin submits keystrokes into a session started by exec_command or unified_exec. When that
 # session is an interactive shell, the keystrokes ARE a new command: grouping write_stdin with the
-# bookkeeping tools returned allow without ever looking at `chars`, so anything the shell allowlist denies
-# could be typed in after a bare `bash` was authorized. The characters are therefore evaluated as shell input
-# against system.command.execute, the same policy that judged the command that opened the session.
+# bookkeeping tools returned allow without ever looking at `chars`, so later shell input could bypass the
+# allowlist. The characters are therefore evaluated as shell input against system.command.execute, the same
+# policy that judged the command that opened the session.
 #
 # A non-empty chunk must end at a line boundary. A chunk that merely contains an earlier newline is still
-# incomplete evidence if more non-terminated text follows it: "echo ok\nrm -" now and "rf /tmp/x\n" later
-# would bypass a blocklist if each piece were judged independently. Control-only chunks can also execute a
-# command already buffered in the terminal. Without per-session terminal state, both cases fail closed.
+# incomplete evidence if more non-terminated text follows it. Split fragments can bypass a blocklist if each
+# piece is judged independently. Control-only chunks can also execute a command already buffered in the
+# terminal. Without per-session terminal state, both cases fail closed.
 #
-# A line terminator is not enough when shell syntax explicitly continues the line. "rm \\\n" followed by
-# "-rf /tmp/x\n" is one Bash command, as is a line ending inside an open quote. Without a trusted per-session
-# shell parser and buffer, the only safe answer is to reject those continued chunks before policy evaluation.
+# A line terminator is not enough when shell syntax explicitly continues the line. A trailing backslash or an
+# open quote can join the next chunk into the same shell command. Without a trusted per-session shell parser
+# and buffer, the only safe answer is to reject those continued chunks before policy evaluation.
 aport_codex_stdin_has_shell_continuation() {
     local input="$1"
     local body tmp slash_count=0 state="" escaped=0 i ch next_ch newline cr
@@ -838,13 +838,13 @@ map_codex_write_stdin() {
     newline='
 '
     cr="$(printf '\r')"
-    stdin_sentinel="APORT_STDIN_END_7f4f713d9b6a"
+    stdin_sentinel="APORT_STDIN_END_MARKER"
     stdin_chars="$(printf '%s' "$INPUT" | jq -r '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
       [$ti.chars, $ti.input, $ti.text, $ti.data, $ti.stdin]
       | map(select(type == "string"))
-      | ((.[0] // "") + "APORT_STDIN_END_7f4f713d9b6a")
+      | ((.[0] // "") + "APORT_STDIN_END_MARKER")
     ' 2> /dev/null || true)"
     stdin_chars="${stdin_chars%"$stdin_sentinel"}"
     stdin_meta="$(printf '%s' "$INPUT" | jq -r '
