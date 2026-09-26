@@ -239,6 +239,40 @@ describe("local evaluator", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("matches documented shell allowlist and blocked-pattern semantics locally", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const passport = JSON.parse(await readFile(passportPath, "utf8"));
+    passport.limits["system.command.execute"].allowed_commands = ["git"];
+    passport.limits["system.command.execute"].blocked_patterns = ["rm*"];
+    await writeFile(passportPath, JSON.stringify(passport), "utf8");
+
+    const prefixedExecutableDecision = evaluateLocalDecision({
+      policyName: "system.command.execute.v1",
+      context: { command: "github --version" },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(prefixedExecutableDecision.allow, false);
+    assert.strictEqual(prefixedExecutableDecision.reasons[0].code, "oap.command_not_allowed");
+
+    const globBlockedDecision = evaluateLocalDecision({
+      policyName: "system.command.execute.v1",
+      context: { command: "git rm -rf /tmp/x" },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(globBlockedDecision.allow, false);
+    assert.strictEqual(globBlockedDecision.reasons[0].code, "oap.blocked_pattern");
+
+    const chainedDecision = evaluateLocalDecision({
+      policyName: "system.command.execute.v1",
+      context: { command: "git status && rm -rf /tmp/x" },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(chainedDecision.allow, false);
+    assert.strictEqual(chainedDecision.reasons[0].code, "oap.command_chain_unsupported");
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("denies catastrophic commands even when the command allowlist is wildcard", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const passport = JSON.parse(await readFile(passportPath, "utf8"));

@@ -31,14 +31,106 @@ function validateCommandString(command) {
 
 function safePatternMatch(string, pattern) {
   if (!pattern) return false;
-  if (pattern.includes(" ")) return String(string).toLowerCase().includes(String(pattern).toLowerCase());
-  const escaped = String(pattern).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
-  return new RegExp(`(^|[^\\w])${escaped}([^\\w]|$)`, "i").test(String(string));
+  const value = String(string);
+  const rawPattern = String(pattern);
+  if (rawPattern.includes(" ") && !rawPattern.includes("*") && !rawPattern.includes("?")) {
+    return value.toLowerCase().includes(rawPattern.toLowerCase());
+  }
+  if (rawPattern.includes("*") || rawPattern.includes("?")) {
+    return new RegExp(globToRegex(rawPattern), "i").test(value);
+  }
+  const escaped = escapeRegExp(rawPattern);
+  return new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, "i").test(value);
 }
 
 function safePrefixMatch(string, prefix) {
   if (prefix === "*") return true;
-  return String(string).startsWith(String(prefix));
+  const value = String(string);
+  const rawPrefix = String(prefix);
+  if (!value.startsWith(rawPrefix)) return false;
+  const remainder = value.slice(rawPrefix.length);
+  if (remainder === "") return true;
+  if (/\s$/.test(rawPrefix)) return true;
+  return /^\s/.test(remainder);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+function globToRegex(pattern) {
+  let out = "";
+  for (let i = 0; i < String(pattern).length; i += 1) {
+    const ch = pattern[i];
+    const next = pattern[i + 1];
+    if (ch === "*" && next === "*") {
+      out += ".*";
+      i += 1;
+    } else if (ch === "*") {
+      out += "[^/]*";
+    } else if (ch === "?") {
+      out += ".";
+    } else {
+      out += escapeRegExp(ch);
+    }
+  }
+  return out;
+}
+
+function shellCommandHasUnquotedControlOperator(command) {
+  const input = String(command);
+  let quote = "";
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    const next = input[i + 1] || "";
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (ch === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+
+    if (quote !== "'" && ch === "$") {
+      if (next === "(") return true;
+      if (!quote && (next === "'" || next === '"')) return true;
+    }
+
+    if (quote === "'") {
+      if (ch === quote) quote = "";
+      continue;
+    }
+
+    if (quote) {
+      if (ch === quote) quote = "";
+      continue;
+    }
+
+    if (ch === "#") {
+      if (i === 0 || /\s/.test(input[i - 1])) return true;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+
+    if (ch === "\n" || ch === ";" || ch === "&" || ch === "|" || ch === "(" || ch === ")") {
+      return true;
+    }
+
+    if ((ch === "<" || ch === ">") && next === "(") {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function matchesSimpleGlob(value, pattern) {
@@ -457,6 +549,13 @@ export function evaluateLocalDecision({ policyName, toolName, context, passportF
     }
 
     const allowedCommands = Array.isArray(limits.allowed_commands) ? limits.allowed_commands : [];
+    if (hasRestrictiveList(allowedCommands) && shellCommandHasUnquotedControlOperator(command)) {
+      return makeDeny(
+        params,
+        "oap.command_chain_unsupported",
+        "Command contains shell control operators that cannot be safely authorized against a local command allowlist",
+      );
+    }
     if (!allowByList(command, allowedCommands, safePrefixMatch)) {
       return makeDeny(params, "oap.command_not_allowed", `Command '${command}' is not in allowed list`);
     }
