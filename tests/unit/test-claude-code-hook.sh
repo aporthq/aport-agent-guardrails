@@ -1207,6 +1207,40 @@ tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '.guardrail_tool == 
 }
 echo "  ✅ Bash without a timeout carries the 120s Claude Code default"
 
+OUT17S="$TEST_DIR/claude-deny-shell-no-timeout.txt"
+set +e
+echo '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT17S" 2> /dev/null
+EXIT17S=$?
+set -e
+[[ "$EXIT17S" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Shell without timeout, got $EXIT17S" >&2
+    cat "$OUT17S" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT17S" && grep -q 'oap.missing_required_context' "$OUT17S" || {
+    echo "FAIL: Claude Shell without timeout must not inherit Bash default evidence" >&2
+    cat "$OUT17S" >&2
+    exit 1
+}
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+OUT17T="$TEST_DIR/claude-allow-shell-timeout-seconds.txt"
+echo '{"tool_name":"Shell","tool_input":{"command":"ls -la","timeout":120}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT17T" 2> /dev/null
+EXIT17T=$?
+[[ "$EXIT17T" -eq 0 ]] && [[ ! -s "$OUT17T" ]] || {
+    echo "FAIL: Claude Shell with timeout=120 seconds should be allowed under max_execution_time=300, exit=$EXIT17T" >&2
+    cat "$OUT17T" >&2
+    exit 1
+}
+jq -e '.guardrail_tool == "bash" and .context.timeout == 120' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Claude Shell timeout should be interpreted as seconds, got:" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Shell timeout aliases do not inherit Claude Bash bounds"
+
 # 17e. The default is Claude Code's own: BASH_DEFAULT_TIMEOUT_MS from the environment the hook inherits,
 # capped by BASH_MAX_TIMEOUT_MS, so the evidence matches the bound the command really runs under.
 for CASE in "600000::600" "600000:300000:300" "90500::91" "::120"; do
