@@ -26,8 +26,7 @@ if (!fs.existsSync(mustExist)) {
 const sourceRoots = [
   "codex-rs/code-mode-protocol/src",
   "codex-rs/tools/src",
-  "codex-rs/core/src/tools/handlers",
-  "codex-rs/core/src/tools/code_mode",
+  "codex-rs/core/src/tools",
   "codex-rs/ext/image-generation/src",
   "codex-rs/ext/web-search/src",
   "codex-rs/ext/memories/src",

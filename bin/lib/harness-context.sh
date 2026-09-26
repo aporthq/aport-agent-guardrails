@@ -266,6 +266,72 @@ aport_hook_payload_has_conflicting_browser_action_aliases() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_payload_has_malformed_browser_action_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def malformed_action(v): v != null and (v | type) != "string";
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      malformed_action($root.action) or
+      malformed_action($root.operation) or
+      malformed_action($root.type) or
+      any($root | argument_containers[]; (
+        malformed_action(.action) or
+        malformed_action(.operation) or
+        malformed_action(.type)
+      ))
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_browser_action_evidence() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def action_string(v): (v | type) == "string" and (v | length) > 0;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      action_string($root.action) or
+      action_string($root.operation) or
+      action_string($root.type) or
+      any($root | argument_containers[]; (
+        action_string(.action) or
+        action_string(.operation) or
+        action_string(.type)
+      ))
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
 aport_hook_payload_has_conflicting_mcp_routing_aliases() {
     local payload="$1"
     jq -e '

@@ -160,6 +160,22 @@ run_hook "Codex computer_use is recognized but not authorized as web.fetch local
     '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"action":"type","text":"secret_text_should_not_persist","url":"https://example.com/form"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.interactive_browser_unsupported")) and ((.hookSpecificOutput.permissionDecisionReason | contains("secret_text_should_not_persist")) | not)'
 
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+EOF
+run_hook "Codex hosted computer_use without an explicit action fails closed before API evaluation" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+
+run_hook "Codex hosted computer_use rejects non-string action evidence before API evaluation" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form","action":{"kind":"type"}}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex image_gen.imagegen reaches image generation policy without prompt text" \
     codex "$CODEX" \
@@ -339,6 +355,20 @@ run_hook "Codex skills.read provider tool is explicitly classified" \
     '{"hook_event_name":"PreToolUse","tool_name":"skills.read","tool_input":{"package":"skill://example","resource":"skill://example/SKILL.md"}}' \
     '. == {}'
 
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-memory-write-test.json"
+jq '.capabilities = [] | .limits = {}' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex memories.add_ad_hoc_note fails closed as an unrepresentable provider-memory write" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"memories.add_ad_hoc_note","tool_input":{"note":"secret_note_should_not_persist"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unrepresentable_tool")) and ((.hookSpecificOutput.permissionDecisionReason | contains("secret_note_should_not_persist")) | not)'
+mv "$TEST_DIR/aport/passport.before-memory-write-test.json" "$TEST_DIR/aport/passport.json"
+
+run_hook "Codex memories.search provider metadata read remains explicitly classified" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"memories.search","tool_input":{"query":"project"}}' \
+    '. == {}'
+
 run_hook "Codex plugin candidate listing is explicitly classified" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"list_available_plugins_to_install","tool_input":{}}' \
@@ -474,6 +504,24 @@ run_hook "Codex write_stdin partial command fails closed" \
 run_hook "Codex write_stdin denies trailing partial input after a newline" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"echo ok\nrm -"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+WRITE_STDIN_BACKSLASH_INPUT="$(
+    jq -nc --arg chars $'rm \\\n' \
+        '{hook_event_name:"PreToolUse",tool_name:"write_stdin",tool_input:{session_id:"s1",chars:$chars}}'
+)"
+run_hook "Codex write_stdin rejects trailing backslash shell continuation" \
+    codex "$CODEX" \
+    "$WRITE_STDIN_BACKSLASH_INPUT" \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+WRITE_STDIN_OPEN_QUOTE_INPUT="$(
+    jq -nc --arg chars $'echo "unterminated\n' \
+        '{hook_event_name:"PreToolUse",tool_name:"write_stdin",tool_input:{session_id:"s1",chars:$chars}}'
+)"
+run_hook "Codex write_stdin rejects open-quote shell continuation" \
+    codex "$CODEX" \
+    "$WRITE_STDIN_OPEN_QUOTE_INPUT" \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
 
 run_hook "Codex write_stdin control-only input fails closed" \
