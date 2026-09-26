@@ -623,6 +623,10 @@ map_codex_computer_use() {
 map_codex_image_generation() {
     local image_context referenced_count
 
+    if aport_hook_payload_has_conflicting_image_generation_aliases "$INPUT"; then
+        emit_response "deny" "media.image.generate" "oap.invalid_tool_arguments" "Image generation tool supplied conflicting argument containers"
+    fi
+
     image_context="$(printf '%s' "$INPUT" | jq -c --arg provider "${APORT_IMAGE_GENERATION_PROVIDER:-openai}" '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
       def str_field($name; v):
@@ -938,7 +942,7 @@ case "$FRAMEWORK" in
             memories.add_ad_hoc_note)
                 emit_response "deny" "hook.tool.map" "oap.unrepresentable_tool" "Codex persistent memory writes are not representable by the current APort hook policy"
                 ;;
-            todoread | toolsearch | tool_search | toolsearchtool | tool_search_tool | tool_search.tool_search_tool | updateplan | update_plan | requestuserinput | request_user_input | requestuserinputasync | request_user_input_async | sendmessagetouserasync | send_message_to_user_async | requestpermissions | request_permissions | wait | waitforenvironment | wait_for_environment | getcontextremaining | get_context_remaining | newcontext | new_context | clock.curr_time | clock.sleep | currtime | curr_time | sleep | getgoal | get_goal | creategoal | create_goal | updategoal | update_goal | memories.list | memories.read | memories.search | skills.list | skills.read | listavailablepluginstoinstall | list_available_plugins_to_install | memoryoperators | memory_*)
+            todoread | toolsearch | tool_search | toolsearchtool | tool_search_tool | tool_search.tool_search_tool | updateplan | update_plan | requestuserinput | request_user_input | requestuserinputasync | request_user_input_async | sendmessagetouserasync | send_message_to_user_async | requestpermissions | request_permissions | wait | waitforenvironment | wait_for_environment | getcontextremaining | get_context_remaining | newcontext | new_context | clock.curr_time | clock.sleep | currtime | curr_time | sleep | getgoal | get_goal | creategoal | create_goal | updategoal | update_goal | memories.list | memories.read | memories.search | memory_read | memory_list | memory_search | skills.list | skills.read | listavailablepluginstoinstall | list_available_plugins_to_install | memoryoperators | memory_operators)
                 # Session bookkeeping, plan/user prompts, provider-owned metadata, and bounded memory/skill
                 # reads do not expose host file contents or perform external side effects through this hook.
                 emit_response "allow" "" "" ""

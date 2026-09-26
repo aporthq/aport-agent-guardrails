@@ -335,6 +335,16 @@ run_hook "Codex image generation rejects malformed output format limits" \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_limit"))'
 mv "$TEST_DIR/aport/passport.before-image-format-limit-test.json" "$TEST_DIR/aport/passport.json"
 
+run_hook "Codex image generation rejects conflicting prompt containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"this prompt must not be shadowed"},"args":{"prompt":"ok"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects conflicting referenced image containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit","referenced_image_paths":["/tmp/source-a-secret.png"]},"args":{"referenced_image_paths":["/tmp/source-b-secret.png"]}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments")) and ((.hookSpecificOutput.permissionDecisionReason | contains("source-a-secret")) | not) and ((.hookSpecificOutput.permissionDecisionReason | contains("source-b-secret")) | not)'
+
 run_hook "Codex update_plan is session bookkeeping and is allowed" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"update_plan","tool_input":{"plan":[{"step":"x","status":"pending"}]}}' \
@@ -368,6 +378,16 @@ run_hook "Codex memories.search provider metadata read remains explicitly classi
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"memories.search","tool_input":{"query":"project"}}' \
     '. == {}'
+
+run_hook "Codex memory_read provider metadata read remains explicitly classified" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"memory_read","tool_input":{"key":"project"}}' \
+    '. == {}'
+
+run_hook "Codex memory_write fails closed instead of matching a wildcard" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"memory_write","tool_input":{"value":"secret_memory_should_not_persist"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool")) and ((.hookSpecificOutput.permissionDecisionReason | contains("secret_memory_should_not_persist")) | not)'
 
 run_hook "Codex plugin candidate listing is explicitly classified" \
     codex "$CODEX" \

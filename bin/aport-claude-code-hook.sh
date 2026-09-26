@@ -150,6 +150,14 @@ deny_or_warn() {
     deny "$notice"
 }
 
+map_claude_mcp_context() {
+    if aport_hook_payload_has_conflicting_mcp_routing_aliases "$INPUT"; then
+        deny_or_warn "mcp.tool.execute" "oap.invalid_tool_arguments" "MCP tool supplied conflicting server or tool aliases"
+    fi
+    GUARDRAIL_TOOL="mcp.tool"
+    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
+}
+
 if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then
     deny_or_warn "hook.input" "oap.invalid_tool_arguments" "Hook tool arguments must be a JSON object"
 fi
@@ -205,8 +213,7 @@ case "$TOOL_NAME_NORM" in
         exit 0
         ;;
     readmcpresourcetool)
-        GUARDRAIL_TOOL="mcp.tool"
-        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
+        map_claude_mcp_context
         ;;
     glob | ls | lsp | todoread | todowrite | toolsearch | askuserquestion | listmcpresourcestool | waitformcpservers)
         # Search/list/read tools without a single file_path: allow without evaluator
@@ -244,8 +251,7 @@ case "$TOOL_NAME_NORM" in
         CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "claude-code")"
         ;;
     mcp__* | mcp:* | callmcptool)
-        GUARDRAIL_TOOL="mcp.tool"
-        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
+        map_claude_mcp_context
         ;;
     workflow)
         GUARDRAIL_TOOL="session.create"
