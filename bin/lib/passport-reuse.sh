@@ -58,11 +58,22 @@ aport_apply_reused_passport() {
             # framework, the same reader that picks up a saved hosted config exports its id, key and URL.
             # Start from a clean hosted credential state. A source mode file may omit the optional API key or
             # URL, and those omissions must not inherit stale values from the shell or the target framework.
+            local cli_api_key="${APORT_API_KEY:-}"
+            local cli_api_url="${APORT_API_URL:-}"
+            local cli_selected_api_url="${APORT_SELECTED_API_URL:-}"
             unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
             if [[ "$fw" != cli ]]; then
                 local src_dir
                 src_dir="$(get_config_dir "$fw")"
                 aport_try_reuse_existing_hosted_config "${src_dir/#\~/$HOME}" > /dev/null 2>&1 || true
+            else
+                [[ -n "$cli_api_key" ]] && export APORT_API_KEY="$cli_api_key"
+                [[ -n "$cli_api_url" ]] && export APORT_API_URL="$cli_api_url"
+                if [[ -n "$cli_selected_api_url" ]]; then
+                    export APORT_SELECTED_API_URL="$cli_selected_api_url"
+                elif [[ -n "$cli_api_url" ]]; then
+                    export APORT_SELECTED_API_URL="$cli_api_url"
+                fi
             fi
             export APORT_AGENT_ID="$ref"
             export APORT_PASSPORT_REUSED_FROM="$fw"

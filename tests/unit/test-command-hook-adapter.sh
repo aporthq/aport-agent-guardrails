@@ -511,6 +511,11 @@ run_hook "Codex write_stdin carrying a denied command does not allow" \
     '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"rm -rf /tmp/test\n"}}' \
     '.hookSpecificOutput.permissionDecision == "deny"'
 
+run_hook "Codex write_stdin rejects conflicting input containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"rm -rf /tmp/test\n"},"args":{"chars":"ls -la\n"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments")) and ((.hookSpecificOutput.permissionDecisionReason | contains("rm -rf")) | not)'
+
 run_hook "Codex write_stdin carrying an allowed command reaches the command policy" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"ls -la\n"}}' \

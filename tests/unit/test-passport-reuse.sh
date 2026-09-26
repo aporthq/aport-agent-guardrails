@@ -109,6 +109,14 @@ unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL APORT_PA
 # 7. --reuse-from with a bare agent id or a path works without any framework state.
 line="$(aport_resolve_reuse_ref ap_abcdefabcdefabcdefabcdefabcdefab claude-code)"
 [[ "$line" = "cli|hosted|ap_abcdefabcdefabcdefabcdefabcdefab" ]] || fail "agent id ref not resolved: $line"
+export APORT_REUSE_PASSPORT_FROM_CLI=ap_abcdefabcdefabcdefabcdefabcdefab APORT_API_KEY=apk_intended_key APORT_API_URL=https://custom.example
+unset APORT_SELECTED_API_URL APORT_PASSPORT_REUSE_DECIDED
+aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null || fail "bare hosted id reuse must return 0"
+[[ "${APORT_AGENT_ID:-}" = "ap_abcdefabcdefabcdefabcdefabcdefab" ]] || fail "bare hosted id reuse did not export the agent id"
+[[ "${APORT_API_KEY:-}" = "apk_intended_key" ]] || fail "bare hosted id reuse must preserve explicit APORT_API_KEY"
+[[ "${APORT_API_URL:-}" = "https://custom.example" ]] || fail "bare hosted id reuse must preserve explicit APORT_API_URL"
+[[ "${APORT_SELECTED_API_URL:-}" = "https://custom.example" ]] || fail "bare hosted id reuse should carry the custom API URL into selection"
+unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL APORT_PASSPORT_REUSE_DECIDED APORT_REUSE_PASSPORT_FROM_CLI APORT_PASSPORT_REUSED_FROM
 line="$(aport_resolve_reuse_ref "$HOME/.cursor/aport/passport.json" claude-code)"
 [[ "$line" = "cli|local|$HOME/.cursor/aport/passport.json" ]] || fail "path ref not resolved: $line"
 if aport_resolve_reuse_ref nonexistent claude-code 2> /dev/null; then fail "unknown ref must fail"; fi

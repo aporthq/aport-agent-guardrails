@@ -266,6 +266,43 @@ aport_hook_payload_has_conflicting_browser_action_aliases() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_payload_has_conflicting_stdin_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def root_input_value:
+        if (.input | type) != "string" then null
+        elif (try ((.input | fromjson | type) == "object") catch false) then null
+        else .input
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      ([
+        $root.chars,
+        root_input_value,
+        $root.text,
+        $root.data,
+        $root.stdin,
+        ($root | argument_containers[] | .chars, .input, .text, .data, .stdin)
+      ] | map(select(type == "string")) | unique | length) > 1
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
 aport_hook_payload_has_malformed_browser_action_aliases() {
     local payload="$1"
     jq -e '

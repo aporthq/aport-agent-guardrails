@@ -838,29 +838,56 @@ aport_codex_stdin_has_shell_continuation() {
 }
 
 map_codex_write_stdin() {
-    local stdin_chars stdin_command stdin_meta stdin_state stdin_line_state stdin_blank_state stdin_sentinel newline cr
+    local stdin_chars stdin_command stdin_info stdin_meta stdin_state stdin_line_state stdin_blank_state stdin_sentinel newline cr
     newline='
 '
     cr="$(printf '\r')"
     stdin_sentinel="APORT_STDIN_END_MARKER"
-    stdin_chars="$(printf '%s' "$INPUT" | jq -r '
+    if aport_hook_payload_has_conflicting_stdin_aliases "$INPUT"; then
+        emit_response "deny" "system.command.execute" "oap.invalid_tool_arguments" "Codex write_stdin supplied conflicting input aliases"
+    fi
+    stdin_info="$(printf '%s' "$INPUT" | jq -c '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
-      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
-      [$ti.chars, $ti.input, $ti.text, $ti.data, $ti.stdin]
-      | map(select(type == "string"))
-      | ((.[0] // "") + "APORT_STDIN_END_MARKER")
-    ' 2> /dev/null || true)"
-    stdin_chars="${stdin_chars%"$stdin_sentinel"}"
-    stdin_meta="$(printf '%s' "$INPUT" | jq -r '
-      def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
-      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
-      ([$ti.chars, $ti.input, $ti.text, $ti.data, $ti.stdin] | map(select(type == "string")) | .[0] // "") as $s |
+      def root_input_value:
+        if (.input | type) != "string" then null
+        elif (try ((.input | fromjson | type) == "object") catch false) then null
+        else .input
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
       [
-        (if $s == "" then "empty" else "nonempty" end),
-        (if ($s | test("[\r\n]$")) then "line" else "partial" end),
-        (if (($s | gsub("[ \t\r\n]"; "") | length) > 0) then "nonblank" else "blank" end)
-      ] | join("|")
-    ' 2> /dev/null || printf 'empty|partial|blank')"
+        $root.chars,
+        root_input_value,
+        $root.text,
+        $root.data,
+        $root.stdin,
+        ($root | argument_containers[] | .chars, .input, .text, .data, .stdin)
+      ]
+      | map(select(type == "string"))
+      | (.[0] // "") as $s |
+      {
+        chars: $s,
+        meta: [
+          (if $s == "" then "empty" else "nonempty" end),
+          (if ($s | test("[\r\n]$")) then "line" else "partial" end),
+          (if (($s | gsub("[ \t\r\n]"; "") | length) > 0) then "nonblank" else "blank" end)
+        ]
+      }
+    ' 2> /dev/null || printf '{"chars":"","meta":["empty","partial","blank"]}')"
+    stdin_chars="$(printf '%s' "$stdin_info" | jq -r '(.chars // "") + "APORT_STDIN_END_MARKER"' 2> /dev/null || true)"
+    stdin_chars="${stdin_chars%"$stdin_sentinel"}"
+    stdin_meta="$(printf '%s' "$stdin_info" | jq -r '(.meta // ["empty","partial","blank"]) | join("|")' 2> /dev/null || printf 'empty|partial|blank')"
     IFS='|' read -r stdin_state stdin_line_state stdin_blank_state <<< "$stdin_meta"
     # Nothing typed is nothing to judge; the session itself was already authorized.
     if [ "$stdin_state" = "empty" ]; then
