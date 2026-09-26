@@ -159,3 +159,11 @@ Re-run the setup command. The installer removes stale `plugins.load.paths` and `
 - Current public OpenClaw integration is plugin-based
 - No upstream native guardrail-provider merge is required for this plugin path
 - If OpenClaw later ships a native provider seam, APort can support that as an additional path without replacing the current plugin install flow
+
+## Compatibility
+
+- Minimum OpenClaw host: `>=2026.4.11`, declared as `openclaw.install.minHostVersion` and `openclaw.compat.pluginApi` in `package.json`. OpenClaw enforces both when the plugin is installed.
+- Hook contract: `api.on("before_tool_call", handler)`. The handler reads `event.toolName`, `event.params`, and `event.toolCallId`, honors `ctx.abortSignal` in API mode, and returns `{}` to allow or `{ block: true, blockReason }` to deny. It never returns `params` or `requireApproval`.
+- Last reviewed against OpenClaw v2026.9.5 source and the 2026.8.1 through 2026.9.6 release notes. No hook, payload, or manifest renames affected this plugin.
+- OpenClaw 2026.9.3 and later require Node 24.16+ (24.x) or 26.1+. The plugin's own `engines.node` floor stays at 22 for older hosts.
+- Details, reviewed deprecations, and open risks: [docs/OPENCLAW_COMPATIBILITY.md](../../docs/OPENCLAW_COMPATIBILITY.md).

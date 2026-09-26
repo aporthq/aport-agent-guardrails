@@ -70,6 +70,18 @@ grep -q '^APORT_GUARDRAIL_MODE=local$' "$CODEX_STATE_DIR/aport/guardrail-mode.en
     cat "$CODEX_STATE_DIR/aport/guardrail-mode.env" >&2
     exit 1
 }
+jq -e '
+  any(.capabilities[]; .id == "media.image.generate")
+  and (.limits["media.image.generate"].allowed_providers | type == "array")
+  and (.limits["media.image.generate"].max_prompt_length | type == "number")
+  and (.limits["media.image.generate"].max_referenced_images | type == "number")
+  and (.limits["media.image.generate"].max_output_images | type == "number")
+  and (.limits["media.image.generate"].allowed_output_formats | type == "array")
+' "$PASSPORT_PATH" > /dev/null || {
+    echo "FAIL: Codex setup passport should include media.image.generate capability and required limits" >&2
+    cat "$PASSPORT_PATH" >&2
+    exit 1
+}
 
 [[ -x "$CODEX_STATE_DIR/aport/runtime/bin/aport-codex-hook.sh" ]] || {
     echo "FAIL: expected stable Codex runtime hook at $CODEX_STATE_DIR/aport/runtime/bin/aport-codex-hook.sh" >&2

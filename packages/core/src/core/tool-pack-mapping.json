@@ -31,7 +31,20 @@
       "prefixes": ["message.", "messaging.", "sms", "whatsapp", "slack", "email"],
       "pack": "messaging.message.send.v1"
     },
-    { "prefixes": ["mcp."], "pack": "mcp.tool.execute.v1" },
+    {
+      "prefixes": [
+        "mcp.",
+        "read_mcp_resource",
+        "readmcpresource",
+        "read_mcp_resource_tool",
+        "readmcpresourcetool",
+        "list_mcp_resources",
+        "listmcpresources",
+        "list_mcp_resource_templates",
+        "listmcpresourcetemplates"
+      ],
+      "pack": "mcp.tool.execute.v1"
+    },
     {
       "prefixes": [
         "agent.session.",
@@ -114,6 +127,18 @@
         "waitformcpservers"
       ],
       "pack": "data.file.read.v1"
+    },
+    {
+      "prefixes": [
+        "image_gen.",
+        "image_genimagegen",
+        "image.generate",
+        "image_generation",
+        "image_generate",
+        "imagegeneration",
+        "imagegen"
+      ],
+      "pack": "media.image.generate.v1"
     },
     {
       "prefixes": [

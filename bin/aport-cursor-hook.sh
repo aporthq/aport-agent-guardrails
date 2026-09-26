@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # APort Cursor hook: reads JSON from stdin, maps tool to APort policy, calls guardrail.
-# Handles all Cursor hook events: beforeShellExecution, preToolUse, beforeMCPExecution,
-# beforeReadFile, subagentStart.
-# Output: JSON with "permission": "allow"|"deny"; optional native and legacy message fields.
-# Exit: 0 = allow, 2 = block (deny). Other exits = hook error (Cursor may fail-open).
+# Handles the Cursor permission hooks: beforeShellExecution, preToolUse,
+# beforeMCPExecution, beforeReadFile, beforeTabFileRead (opt-in registration),
+# subagentStart. Reference: https://cursor.com/docs/hooks
+# Output: JSON with "permission": "allow"|"deny" plus user_message/agent_message
+# on deny; legacy allowed/agentMessage/reason fields are kept for older consumers.
+# Exit: 0 = allow, 2 = block (deny). Other exits = hook error. Cursor fails open on
+# those unless the hooks.json entry sets failClosed: true (the installer does).
 #
 # Cursor preToolUse tool names vary by Cursor version. Keep mappings conservative
 # and covered by tests rather than assuming every host event is always emitted.
@@ -106,11 +109,11 @@ deny_or_warn() {
     local failure_class="${4:-hard}"
     local notice user_warning
     if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
-        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message")"
+        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "cursor")"
+        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "cursor")"
         warn_allow "$notice" "$user_warning"
     fi
-    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
+    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "cursor")"
     deny "$notice"
 }
 
@@ -137,25 +140,41 @@ safe_jq() {
 }
 
 # Detect hook event type from input fields and route accordingly.
-# Cursor sends different JSON shapes per hook event:
-#   beforeShellExecution: { "command": "...", "cwd": "..." }
-#   preToolUse:           { "tool_name": "Shell|Read|Write|...", "tool_input": {...} }
-#   beforeMCPExecution:   { "tool_name": "...", "tool_input": {...}, "mcp_server_name": "..." }
-#   beforeReadFile:       { "file_path": "...", "content": "..." }
-#   subagentStart:        { "subagent_id": "...", "subagent_type": "...", "task": "..." }
-# We detect by checking for distinguishing fields.
+# Every Cursor hook payload carries hook_event_name plus conversation_id,
+# generation_id, model, cursor_version, workspace_roots, user_email and
+# transcript_path. Event-specific fields (Cursor hooks reference, 2026-09):
+#   beforeShellExecution: { "command": "...", "cwd": "...", "sandbox": false }
+#   preToolUse:           { "tool_name": "Shell|Read|Write|Grep|Delete|Task|MCP:<tool>",
+#                           "tool_input": {...}, "tool_use_id": "...", "cwd": "...",
+#                           "agent_message": "..." }
+#   beforeMCPExecution:   { "tool_name": "...", "tool_input": "<json string>" | {...},
+#                           "mcp_server_name": "...",
+#                           HTTP/SSE: "url" + "mcp_server_url"; stdio: "command" (launch string) }
+#   beforeReadFile:       { "file_path": "...", "content": "...", "attachments": [...] }
+#   beforeTabFileRead:    { "file_path": "...", "content": "..." } (Tab completions, no attachments)
+#   subagentStart:        { "subagent_id": "...", "subagent_type": "...", "task": "...",
+#                           "parent_conversation_id": "...", "tool_call_id": "...", ... }
+# Route on hook_event_name first; the field heuristics below cover older payloads
+# that omit it. The top-level "command" of a stdio MCP payload is the server launch
+# string, not a shell command, so the MCP branch must win before the shell branch.
 
 GUARDRAIL_TOOL=""
 CONTEXT_JSON="{}"
 
-# Check for hook_event_name first (newer Cursor versions include it)
+# hook_event_name is part of every documented Cursor payload; older builds may omit it.
 HOOK_EVENT="$(echo "$INPUT" | jq -r '.hook_event_name // ""' 2> /dev/null)"
 TOOL_NAME="$(echo "$INPUT" | jq -r '.tool_name // ""' 2> /dev/null)"
 
-if [ "$HOOK_EVENT" = "beforeReadFile" ] || { [ -z "$HOOK_EVENT" ] && [ -z "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.file_path and .content' &> /dev/null; }; then
+if [ "$HOOK_EVENT" = "beforeReadFile" ] || [ "$HOOK_EVENT" = "beforeTabFileRead" ] || { [ -z "$HOOK_EVENT" ] && [ -z "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.file_path and .content' &> /dev/null; }; then
+    # beforeReadFile (Agent) and beforeTabFileRead (Tab completions) share the
+    # same file_path/content input and the same permission output. Only
+    # file_path is evaluated; content and attachments are never forwarded.
+    # No usable path is no evidence, and a read hook with no evidence must not allow. Both events are
+    # documented to carry file_path; a payload without one (or with one the read context builder rejects)
+    # is a payload this hook cannot authorize, so it denies rather than waving the read through.
     FILE_PATH="$(echo "$INPUT" | jq -r '.file_path // ""' 2> /dev/null || true)"
     if ! aport_hook_try_read_evaluation_from_file_path "$FILE_PATH"; then
-        allow
+        deny_or_warn "data.file.read" "oap.missing_file_path" "$HOOK_EVENT did not provide a file path that APort can evaluate"
     fi
 
 elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INPUT" | jq -e '.subagent_id' &> /dev/null; }; then
@@ -163,7 +182,7 @@ elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INP
     GUARDRAIL_TOOL="session.create"
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "subagentStart" "cursor")"
 
-elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -n "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.mcp_server_name // .server // .url' &> /dev/null; }; then
+elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -z "$HOOK_EVENT" ] && [ -n "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.mcp_server_name // .server // .url' &> /dev/null; }; then
     # beforeMCPExecution: MCP tool calls. Cursor's current native field is
     # mcp_server_name; server-qualified tool names are parsed by the shared
     # context helper. Do not trust ordinary tool_input.server values.
@@ -244,8 +263,17 @@ elif [ -n "$TOOL_NAME" ]; then
             CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
             ;;
         browser)
+            if aport_hook_payload_has_malformed_browser_action_aliases "$INPUT"; then
+                deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser action aliases must be strings"
+            fi
+            if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
+                deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting URL or domain aliases"
+            fi
+            if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
+                deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting action aliases"
+            fi
             GUARDRAIL_TOOL="browser"
-            CONTEXT_JSON="$(safe_jq "$INPUT" '{url: (.tool_input.url // .tool_input.args.url // "")}')"
+            CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
             ;;
         task | agent | taskcreate | taskupdate | taskstop | skill | subagent | subagentstart | sendmessage | teamcreate | teamdelete)
             GUARDRAIL_TOOL="session.create"

@@ -36,6 +36,7 @@ Runs the blocking GitHub workflow-equivalent checks locally:
 
 - `jq` passport schema validation
 - `shellcheck` and `shfmt -d`
+- Codex provider tool-surface drift check against `openai/codex`
 - `make test`
 - `npm run build`
 - `npm run test -w @aporthq/aport-agent-guardrails-core -w @aporthq/aport-agent-guardrails-langchain`
@@ -54,6 +55,7 @@ Useful environment flags:
 
 ```bash
 APORT_SKIP_PRE_PUSH_CHECKS=1 git push          # skip hook checks once
+APORT_CODEX_PROVIDER_SOURCE_DIR=/path/to/openai/codex npm run codex:tool-surface
 APORT_PRE_PUSH_INCLUDE_OPTIONAL=1 npm run prepush:check  # also run gitleaks / trufflehog if installed
 APORT_PRE_PUSH_INCLUDE_OPENCLAW_LIVE=1 npm run prepush:check  # include the live OpenClaw CLI E2E step
 ```

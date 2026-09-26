@@ -183,6 +183,69 @@ grep -q '^        apiKey: "apk_existing_config_key"$' "$CONFIG_YAML" || {
     exit 1
 }
 
+OVERRIDE_HOME="$TEST_DIR/.openclaw-home-ignored"
+OVERRIDE_STATE="$TEST_DIR/.openclaw-state-ignored"
+OVERRIDE_CONFIG="$TEST_DIR/.openclaw-config-override"
+mkdir -p "$OVERRIDE_HOME" "$OVERRIDE_STATE" "$OVERRIDE_CONFIG/aport"
+printf '{"passport_id":"override-existing"}\n' > "$OVERRIDE_CONFIG/aport/passport.json"
+PATH="$FAKE_BIN:$PATH" \
+    OPENCLAW_HOME="$OVERRIDE_HOME" \
+    OPENCLAW_STATE_DIR="$OVERRIDE_STATE" \
+    OPENCLAW_CONFIG_DIR="$OVERRIDE_CONFIG" \
+    APORT_NONINTERACTIVE=1 \
+    "$REPO_ROOT/bin/openclaw" \
+    ap_22222222222222222222222222222222 \
+    --api-url http://127.0.0.1:12 \
+    --non-interactive \
+    < /dev/null >> "$LOG_FILE" 2>&1 || {
+    echo "FAIL: OpenClaw OPENCLAW_CONFIG_DIR override setup failed" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+}
+
+[ -f "$OVERRIDE_CONFIG/config.yaml" ] || {
+    echo "FAIL: OpenClaw installer should write config.yaml under OPENCLAW_CONFIG_DIR" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+}
+
+if [ -e "$OVERRIDE_STATE/config.yaml" ] || [ -e "$OVERRIDE_HOME/config.yaml" ]; then
+    echo "FAIL: OpenClaw installer should not write to lower-precedence state/home overrides" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+fi
+
+APORT_OVERRIDE_CONFIG="$TEST_DIR/.openclaw-aport-config-override"
+mkdir -p "$APORT_OVERRIDE_CONFIG/aport"
+printf '{"passport_id":"aport-override-existing"}\n' > "$APORT_OVERRIDE_CONFIG/aport/passport.json"
+PATH="$FAKE_BIN:$PATH" \
+    OPENCLAW_HOME="$OVERRIDE_HOME" \
+    OPENCLAW_STATE_DIR="$OVERRIDE_STATE" \
+    OPENCLAW_CONFIG_DIR="$OVERRIDE_CONFIG" \
+    APORT_OPENCLAW_CONFIG_DIR="$APORT_OVERRIDE_CONFIG" \
+    APORT_NONINTERACTIVE=1 \
+    "$REPO_ROOT/bin/openclaw" \
+    ap_33333333333333333333333333333333 \
+    --api-url http://127.0.0.1:13 \
+    --non-interactive \
+    < /dev/null >> "$LOG_FILE" 2>&1 || {
+    echo "FAIL: OpenClaw APORT_OPENCLAW_CONFIG_DIR override setup failed" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+}
+
+[ -f "$APORT_OVERRIDE_CONFIG/config.yaml" ] || {
+    echo "FAIL: OpenClaw installer should write config.yaml under APORT_OPENCLAW_CONFIG_DIR" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+}
+
+grep -Eq '^        agentId: "?ap_33333333333333333333333333333333"?$' "$APORT_OVERRIDE_CONFIG/config.yaml" || {
+    echo "FAIL: APORT_OPENCLAW_CONFIG_DIR config should receive the hosted agent id" >&2
+    cat "$APORT_OVERRIDE_CONFIG/config.yaml" >&2
+    exit 1
+}
+
 cat > "$OPENCLAW_HOME/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=api
 APORT_API_URL=https://api.aport.io

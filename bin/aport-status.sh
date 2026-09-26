@@ -218,6 +218,7 @@ if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
         # Parse log line: [timestamp] tool=X decision_id=Y allow=Z ... context="..." (optional)
         timestamp=$(echo "$line" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
         tool=$(echo "$line" | sed -n 's/.*tool=\([^ ]*\).*/\1/p')
+        framework=$(echo "$line" | sed -n 's/.*tool=[^ ]* framework=\([^ ]*\) decision_id=.*/\1/p')
         decision_id=$(echo "$line" | sed -n 's/.*decision_id=\([^ ]*\).*/\1/p')
         allow=$(echo "$line" | sed -n 's/.*allow=\([^ ]*\).*/\1/p')
         context=$(echo "$line" | sed -n 's/.*context="\([^"]*\)".*/\1/p')
@@ -232,12 +233,15 @@ if [ -f "$AUDIT_LOG" ] && [ -s "$AUDIT_LOG" ]; then
 
         short_time=$(echo "$timestamp" | cut -d' ' -f1-2 | cut -d'.' -f1)
         # Show capability + context when present (e.g. "exec.run | cat test.md"); truncate long context
+        # Older log lines carry no framework field, so it is shown only when present.
+        tool_show="$tool"
+        [ -n "$framework" ] && tool_show="$framework/$tool"
         if [ -n "$context" ]; then
             context_show=$(printf '%.80s' "$context")
             [ "${#context}" -gt 80 ] && context_show="${context_show}..."
-            detail="$tool | $context_show"
+            detail="$tool_show | $context_show"
         else
-            detail="$tool"
+            detail="$tool_show"
         fi
 
         if [ "$allow" = "true" ]; then
@@ -286,7 +290,11 @@ echo
 
 # Upgrade hint (show once per day)
 HINT_FILE="$HOME/.openclaw/.last-status-upgrade-hint"
-if [ ! -f "$HINT_FILE" ] || [ $(($(date +%s) - $(stat -f %m "$HINT_FILE" 2> /dev/null || stat -c %Y "$HINT_FILE" 2> /dev/null || echo 0))) -gt 86400 ]; then
+# GNU stat reads -f as "show filesystem status" and prints filesystem fields for %m, so it has to be tried
+# after -c, not before, or the arithmetic below sees a filesystem value instead of an mtime.
+HINT_MTIME="$(stat -c %Y "$HINT_FILE" 2> /dev/null || stat -f %m "$HINT_FILE" 2> /dev/null || echo 0)"
+case "$HINT_MTIME" in '' | *[!0-9]*) HINT_MTIME=0 ;; esac
+if [ ! -f "$HINT_FILE" ] || [ $(($(date +%s) - HINT_MTIME)) -gt 86400 ]; then
     echo "💰 Upgrade to APort Cloud?"
     echo "   You're using APort Local (free tier) - perfect for individual developers!"
     echo

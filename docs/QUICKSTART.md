@@ -67,6 +67,55 @@ Hosted mode is the default public path because it gives you centralized audit,
 remote suspend/status, and signed hosted decisions. Local JSON remains available
 for offline or privacy-sensitive deployments.
 
+All runtime hooks need `jq` on the PATH the host uses; without it the hook
+denies every tool call.
+
+### Non-interactive installs
+
+Two flag-driven paths exist. Both skip every prompt; `CI=1` in the environment
+has the same effect as `--non-interactive`.
+
+Hosted passport (creates the passport and a setup key, writes API mode):
+
+```bash
+npx --yes @aporthq/aport-agent-guardrails claude-code \
+  --quick-hosted --email you@example.com --non-interactive
+# or: APORT_OWNER_EMAIL=you@example.com APORT_QUICK_HOSTED=1 \
+#     npx --yes @aporthq/aport-agent-guardrails claude-code --non-interactive
+```
+
+Local passport file (framework defaults, no network):
+
+```bash
+npx --yes @aporthq/aport-agent-guardrails claude-code --mode=local --non-interactive \
+  --output ~/.claude/aport/passport.json
+```
+
+`--output` is optional. `--non-interactive` with none of the hosted flags and
+no `--mode` also takes the local path. The defaults are permissive
+(`allowed_commands: ["*"]`, `allowed_paths: ["*"]`, `allowed_domains: ["*"]`,
+blocked patterns `rm -rf`, `sudo`, `chmod 777`, `dd if=`, `mkfs`), so edit
+`limits` in the passport file before trusting it for an unattended agent.
+
+### Interactive local passport, step by step
+
+1. Run `npx @aporthq/aport-agent-guardrails <framework>` (for example `claude-code`).
+2. At `Passport setup:` choose `3. Create local passport file`.
+3. `Passport file path [<framework default>]:` press Enter, or type another path.
+4. `Your email or ID`, `Owner type (user/org)`, `Agent name`, `Agent description`: accept the defaults or fill in.
+5. Capability questions: `Create and merge pull requests?`, `Execute system commands?`, `Send messages?`, `Read files from disk?`, `Write/edit files on disk?`, `Fetch data from web?`, `Automate web browser?`, `Export data?`, `Spawn sub-agents and tasks?`, `Use MCP tools?`. Answer `Y` to `Spawn sub-agents and tasks?` for Claude Code, Cursor, Codex, Goose and OpenClaw; every subagent, task and team tool is denied without the `agent.session.create` capability.
+6. Limits: allowed repos, allowed commands (`Enter or *=allow any / list=fixed list`; a fixed list is a prefix allowlist and chained commands are then denied), allowed paths, allowed domains. Press Enter for `*` and tighten later in the JSON file.
+7. `Should this passport expire?` and, if yes, the number of days.
+8. Back in the installer: `Mode [1=local, 2=api]:` choose `1`. Enforcement is `enforce` unless you passed `--enforcement=warn`.
+
+### Custom install directory
+
+Set `APORT_<FRAMEWORK>_CONFIG_DIR` (for example `APORT_CLAUDE_CODE_CONFIG_DIR`
+or `APORT_CODEX_CONFIG_DIR`) before running the installer to move the passport,
+mode file, runtime copy and audit log. The full table, and the note on when the
+variable must also be exported at run time, is in the README under "Install
+into a custom directory".
+
 Install URL alternative for runtime hooks:
 
 ```bash

@@ -129,6 +129,69 @@ printf '%s' "$FALLBACK_JSON" | "$JQ_BIN" -e '
 }
 echo "  ✅ no-jq Claude Code response fallback: valid escaped JSON"
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+OUT_WARN="$TEST_DIR/claude-warn-shell.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT_WARN" 2> /dev/null
+EXIT_WARN=$?
+set -e
+[[ "$EXIT_WARN" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Claude warn-mode shell denial, got $EXIT_WARN" >&2
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("report-only mode allowed"))
+  and (.systemMessage | contains("Evidence:"))
+  and (.systemMessage | contains("audit.log"))
+  and (.systemMessage | contains("session-decisions.jsonl"))
+  and ((.systemMessage | contains("decision.json")) | not)
+  and (.systemMessage | contains("mode claude-code --enforcement=enforce"))
+  and ((.systemMessage | contains("Review or update the hosted passport")) | not)
+' "$OUT_WARN" > /dev/null || {
+    echo "FAIL: Claude warn-mode message should point to evidence and enforce-mode CTA" >&2
+    cat "$OUT_WARN" >&2
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Claude warn-mode message: evidence plus enforce CTA"
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+OUT_WARN_BROWSER="$TEST_DIR/claude-warn-browser-interactive.txt"
+set +e
+echo '{"tool_name":"Browser","tool_input":{"url":"https://example.com/page","action":"click"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$HOOK_SCRIPT" > "$OUT_WARN_BROWSER" 2> /dev/null
+EXIT_WARN_BROWSER=$?
+set -e
+[[ "$EXIT_WARN_BROWSER" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Claude warn-mode interactive Browser denial, got $EXIT_WARN_BROWSER" >&2
+    cat "$OUT_WARN_BROWSER" >&2
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "deny"
+  and (.hookSpecificOutput.permissionDecisionReason | contains("oap.interactive_browser_unsupported"))
+' "$OUT_WARN_BROWSER" > /dev/null || {
+    echo "FAIL: Claude warn mode must not allow unsupported interactive Browser actions" >&2
+    cat "$OUT_WARN_BROWSER" >&2
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Claude warn-mode interactive Browser: hard deny"
+
 # 1. Allow: Read with allowed path (local evaluator)
 echo "  Test: Read tool -> allow (allowed path)..."
 OUT1="$TEST_DIR/claude-allow-read.txt"
@@ -964,6 +1027,38 @@ grep -q 'oap.invalid_url' "$OUT12C" || {
 }
 echo "  ✅ WebFetch Unicode-normalized loopback hostname: structured deny"
 
+echo "  Test: Browser conflicting root and tool_input URLs -> deny..."
+OUT12D="$TEST_DIR/claude-deny-browser-url-conflict.txt"
+echo '{"tool_name":"Browser","url":"https://allowed.example/","tool_input":{"url":"https://evil.example/","action":"navigate"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT12D" 2> /dev/null
+EXIT12D=$?
+[[ "$EXIT12D" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Browser URL conflict, got $EXIT12D" >&2
+    cat "$OUT12D" >&2
+    exit 1
+}
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))' "$OUT12D" > /dev/null || {
+    echo "FAIL: expected Browser URL conflict to fail closed" >&2
+    cat "$OUT12D" >&2
+    exit 1
+}
+echo "  ✅ Browser conflicting URL aliases: structured deny"
+
+echo "  Test: Browser malformed action alias -> deny..."
+OUT12E="$TEST_DIR/claude-deny-browser-malformed-action.txt"
+echo '{"tool_name":"Browser","tool_input":{"url":"https://allowed.example/","action":{"type":"click"}}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT12E" 2> /dev/null
+EXIT12E=$?
+[[ "$EXIT12E" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Browser malformed action, got $EXIT12E" >&2
+    cat "$OUT12E" >&2
+    exit 1
+}
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))' "$OUT12E" > /dev/null || {
+    echo "FAIL: expected Browser malformed action to fail closed" >&2
+    cat "$OUT12E" >&2
+    exit 1
+}
+echo "  ✅ Browser malformed action alias: structured deny"
+
 # 13. PowerShell -> allow (maps to bash policy)
 echo "  Test: PowerShell -> allow..."
 OUT13="$TEST_DIR/claude-allow-powershell.txt"
@@ -1013,6 +1108,238 @@ RESOLVED_AUDIT="$(
     exit 1
 }
 echo "  ✅ Resolver uses OPENCLAW_CONFIG_DIR when no passport.json"
+
+# 16. Upstream tools reference (2026-09): ListAgents, ReportFindings and SubagentHandback
+# are read-only or internal UX tools; SendUserFile stays unmapped and must fail closed.
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  Test: ListAgents/ReportFindings/SubagentHandback -> allow (no evaluator)..."
+for TOOL16 in ListAgents ReportFindings SubagentHandback; do
+    OUT16="$TEST_DIR/claude-allow-${TOOL16}.txt"
+    set +e
+    echo "{\"tool_name\":\"$TOOL16\",\"tool_input\":{}}" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT16" 2> /dev/null
+    EXIT16=$?
+    set -e
+    [[ "$EXIT16" -eq 0 ]] || {
+        echo "FAIL: expected exit 0 for $TOOL16, got $EXIT16" >&2
+        exit 1
+    }
+    [[ ! -s "$OUT16" ]] || {
+        echo "FAIL: $TOOL16 should allow silently (no hookSpecificOutput), got:" >&2
+        cat "$OUT16" >&2
+        exit 1
+    }
+done
+echo "  ✅ ListAgents/ReportFindings/SubagentHandback: silent allow"
+
+echo "  Test: SendUserFile (unmapped upstream tool) -> deny (fail-closed)..."
+OUT16B="$TEST_DIR/claude-deny-senduserfile.txt"
+set +e
+echo '{"tool_name":"SendUserFile","tool_input":{"file_paths":["/tmp/report.html"]}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT16B" 2> /dev/null
+EXIT16B=$?
+set -e
+[[ "$EXIT16B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for SendUserFile, got $EXIT16B" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT16B" && grep -q 'oap.unknown_tool' "$OUT16B" || {
+    echo "FAIL: SendUserFile should be denied as an unknown tool" >&2
+    cat "$OUT16B" >&2
+    exit 1
+}
+echo "  ✅ SendUserFile: fail-closed deny"
+
+# 17. Claude Code Bash tool_input.timeout is milliseconds; max_execution_time is seconds.
+echo "  Test: Bash timeout (milliseconds) is converted before max_execution_time check..."
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_claude_timeout",
+  "agent_id": "ap_claude_timeout",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "system.command.execute"}],
+  "limits": {
+    "system.command.execute": {
+      "allowed_commands": ["ls"],
+      "max_execution_time": 300
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+OUT17="$TEST_DIR/claude-allow-bash-timeout-ms.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la","timeout":120000,"run_in_background":false}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT17" 2> /dev/null
+EXIT17=$?
+set -e
+[[ "$EXIT17" -eq 0 ]] && [[ ! -s "$OUT17" ]] || {
+    echo "FAIL: Bash with timeout=120000ms (120s) should be allowed under max_execution_time=300, exit=$EXIT17" >&2
+    cat "$OUT17" >&2
+    exit 1
+}
+jq -e '.guardrail_tool == "bash" and .context.timeout == 120' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Claude Code Bash timeout should be recorded in seconds (120), got:" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+# 17c. A Bash call with no timeout carries Claude Code's default (120000 ms = 120 s) so a passport
+# with max_execution_time does not deny every ordinary command (the hosted rule requires context.timeout).
+OUT17C="$TEST_DIR/claude-allow-bash-no-timeout.txt"
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT17C" 2> /dev/null
+EXIT17C=$?
+[[ "$EXIT17C" -eq 0 ]] && [[ ! -s "$OUT17C" ]] || {
+    echo "FAIL: Bash without a timeout should be allowed under max_execution_time=300, exit=$EXIT17C" >&2
+    cat "$OUT17C" >&2
+    exit 1
+}
+tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '.guardrail_tool == "bash" and .context.timeout == 120' > /dev/null || {
+    echo "FAIL: Bash without a timeout should record the 120s default, got:" >&2
+    tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Bash without a timeout carries the 120s Claude Code default"
+
+# 17e. The default is Claude Code's own: BASH_DEFAULT_TIMEOUT_MS from the environment the hook inherits,
+# capped by BASH_MAX_TIMEOUT_MS, so the evidence matches the bound the command really runs under.
+for CASE in "600000::600" "600000:300000:300" "90500::91" "::120"; do
+    IFS=: read -r DEF_MS MAX_MS EXPECT <<< "$CASE"
+    OUT17E="$TEST_DIR/claude-bash-env-default.txt"
+    echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+        | BASH_DEFAULT_TIMEOUT_MS="$DEF_MS" BASH_MAX_TIMEOUT_MS="$MAX_MS" OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT17E" 2> /dev/null || true
+    tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e --argjson want "$EXPECT" '.guardrail_tool == "bash" and .context.timeout == $want' > /dev/null || {
+        echo "FAIL: BASH_DEFAULT_TIMEOUT_MS=$DEF_MS BASH_MAX_TIMEOUT_MS=$MAX_MS should record timeout $EXPECT, got:" >&2
+        tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" >&2
+        exit 1
+    }
+done
+# Under max_execution_time=300 a 600 s default is a deny: the passport's limit is judged against the real bound.
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+    | BASH_DEFAULT_TIMEOUT_MS=600000 OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT17E" 2> /dev/null || true
+grep -q 'oap.timeout_exceeded' "$OUT17E" || {
+    echo "FAIL: a 600 s harness default must exceed max_execution_time=300, got:" >&2
+    cat "$OUT17E" >&2
+    exit 1
+}
+echo "  ✅ Bash default timeout follows BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS"
+
+# 17d. A malformed timeout or a background call is not bounded by the default: no evidence, denied.
+for PAYLOAD in '{"tool_name":"Bash","tool_input":{"command":"ls -la","timeout":"none"}}' '{"tool_name":"Bash","tool_input":{"command":"ls -la","run_in_background":true}}' '{"tool_name":"Monitor","tool_input":{"command":"tail -f x","persistent":true}}'; do
+    OUT17D="$TEST_DIR/claude-deny-bash-unbounded.txt"
+    echo "$PAYLOAD" | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT17D" 2> /dev/null
+    EXIT17D=$?
+    if [[ "$EXIT17D" -eq 0 ]] && [[ ! -s "$OUT17D" ]]; then
+        echo "FAIL: an unbounded or malformed-timeout call must not be allowed under max_execution_time=300: $PAYLOAD" >&2
+        exit 1
+    fi
+    if ! grep -q "oap.missing_required_context\|oap.timeout_exceeded" "$OUT17D"; then
+        echo "FAIL: expected a timeout-evidence deny for $PAYLOAD, got:" >&2
+        cat "$OUT17D" >&2
+        exit 1
+    fi
+done
+echo "  ✅ Malformed timeout and background calls get no default and are denied"
+
+OUT17B="$TEST_DIR/claude-deny-bash-timeout-ms.txt"
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la","timeout":600000}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT17B" 2> /dev/null
+EXIT17B=$?
+set -e
+[[ "$EXIT17B" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for 600s Bash timeout, got $EXIT17B" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT17B" && grep -q 'oap.timeout_exceeded' "$OUT17B" || {
+    echo "FAIL: Bash timeout=600000ms (600s) should exceed max_execution_time=300" >&2
+    cat "$OUT17B" >&2
+    exit 1
+}
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+echo "  ✅ Bash timeout: milliseconds converted to seconds (120s allow, 600s deny)"
+
+# 18. Claude Code v2.1.274+ sends mcp_server as an object {name, source} on PreToolUse.
+echo "  Test: MCP tool with mcp_server object -> server name resolved, not stringified..."
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_restricted_claude_mcp_obj",
+  "agent_id": "ap_restricted_claude_mcp_obj",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "mcp.tool.execute": {
+      "allowed_servers": ["github"],
+      "allowed_tools": ["issues.*"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+OUT18="$TEST_DIR/claude-allow-mcp-server-object.txt"
+set +e
+echo '{"tool_name":"mcp__github__issues.list","mcp_server":{"name":"github","source":"project"},"tool_input":{"id":"x"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT18" 2> /dev/null
+EXIT18=$?
+set -e
+[[ "$EXIT18" -eq 0 ]] && [[ ! -s "$OUT18" ]] || {
+    echo "FAIL: MCP call with mcp_server object should be allowed for server github, exit=$EXIT18" >&2
+    cat "$OUT18" >&2
+    exit 1
+}
+jq -e '.guardrail_tool == "mcp.tool" and .context.mcp_server == "github" and .context.mcp_tool == "issues.list"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: mcp_server object must resolve to its name, got:" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+# A parsed mcp__<server>__ tool name must agree with Claude's host-reported object name.
+OUT18M="$TEST_DIR/claude-deny-mcp-server-object-mismatch.txt"
+set +e
+echo '{"tool_name":"mcp__evil__issues.list","mcp_server":{"name":"github","source":"project"},"tool_input":{"id":"x"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT18M" 2> /dev/null
+EXIT18M=$?
+set -e
+[[ "$EXIT18M" -eq 0 ]] || {
+    echo "FAIL: MCP server mismatch should return a structured deny response, exit=$EXIT18M" >&2
+    cat "$OUT18M" >&2
+    exit 1
+}
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))' "$OUT18M" > /dev/null || {
+    echo "FAIL: MCP server mismatch should fail closed as invalid tool arguments, got:" >&2
+    cat "$OUT18M" >&2
+    exit 1
+}
+# Without an mcp__<server>__ prefix the host-reported name is the only server evidence.
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+OUT18B="$TEST_DIR/claude-allow-mcp-server-object-generic.txt"
+set +e
+echo '{"tool_name":"CallMcpTool","mcp_server":{"name":"github","source":"project"},"tool_input":{"tool":"issues.list","id":"x"}}' \
+    | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT18B" 2> /dev/null
+EXIT18B=$?
+set -e
+[[ "$EXIT18B" -eq 0 ]] && [[ ! -s "$OUT18B" ]] || {
+    echo "FAIL: generic MCP call should take server from mcp_server.name, exit=$EXIT18B" >&2
+    cat "$OUT18B" >&2
+    exit 1
+}
+jq -e '.context.mcp_server == "github"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: mcp_server.name fallback not applied, got:" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+echo "  ✅ mcp_server object: name resolved for prefixed and generic MCP calls"
 
 echo ""
 echo "  All Claude Code hook unit tests passed."

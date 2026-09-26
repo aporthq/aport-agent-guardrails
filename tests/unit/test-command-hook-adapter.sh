@@ -121,6 +121,503 @@ jq -e '
 }
 echo "  ✅ Shell session decision context stores metadata only"
 
+# Explicitly mapped Codex tools reach their policy by name, never by payload shape.
+run_hook "Codex webrun reaches the web policy instead of unknown_tool" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"webrun","tool_input":{"url":"https://example.com/page"}}' \
+    '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex browser navigation reaches browser policy, not web fetch" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"browser","tool_input":{"action":"open","url":"https://example.com/page"}}' \
+    '. == {}'
+jq -e '
+  .original_tool == "browser"
+  and .guardrail_tool == "browser"
+  and .decision.policy_id == "web.browser.v1"
+  and .context.action == "navigate"
+  and .context.url == "https://example.com"
+' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex browser navigation should be authorized as web.browser metadata" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex browser navigation maps to web.browser"
+
+run_hook "Codex browser click fails closed locally instead of using web.fetch" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"browser","tool_input":{"action":"click","url":"https://example.com/page","selector":"#approve"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.interactive_browser_unsupported")) and ((.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool")) | not)'
+
+run_hook "Codex browser rejects conflicting action aliases before choosing one" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"browser","tool_input":{"action":"click","url":"https://example.com/page","args":{"action":"navigate"}}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex browser rejects non-string action aliases before defaulting to navigation" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"browser","tool_input":{"action":{"type":"click"},"url":"https://example.com/page"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex computer_use is recognized but not authorized as web.fetch locally" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"action":"type","text":"secret_text_should_not_persist","url":"https://example.com/form"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.interactive_browser_unsupported")) and ((.hookSpecificOutput.permissionDecisionReason | contains("secret_text_should_not_persist")) | not)'
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+EOF
+run_hook "Codex hosted computer_use without an explicit action fails closed before API evaluation" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+
+run_hook "Codex hosted computer_use rejects non-string action evidence before API evaluation" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form","action":{"kind":"type"}}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+run_hook "Codex hosted computer_use rejects conflicting URL evidence before API evaluation" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","url":"https://allowed.example/","tool_input":{"url":"https://evil.example/","action":"click"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex image_gen.imagegen reaches image generation policy without prompt text" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"secret_should_not_persist","num_last_images_to_include":0}}' \
+    '. == {}'
+if grep -q 'secret_should_not_persist' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: image generation decision context must not persist prompt text" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '
+  .original_tool == "image_gen.imagegen"
+  and .guardrail_tool == "image.generate"
+  and .decision.policy_id == "media.image.generate.v1"
+  and .context.provider == "openai"
+  and .context.prompt_length == 25
+  and .context.output_count == 1
+  and .context.output_format == "png"
+  and (.context | has("prompt") | not)
+  and (.context | has("referenced_image_paths") | not)
+' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: image generation should be authorized as sanitized media metadata" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex image generation records provider metadata only"
+
+run_hook "Codex image_genimagegen concatenated host name reaches image generation policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_genimagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '. == {}'
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-wizard-image-test.json"
+"$REPO_ROOT/bin/aport-create-passport.sh" --framework=codex --output "$TEST_DIR/aport/passport.json" --non-interactive > "$TEST_DIR/codex-wizard-image-passport.log" 2>&1
+jq -e '
+  any(.capabilities[]; .id == "media.image.generate")
+  and (.limits["media.image.generate"].allowed_providers | type == "array")
+  and (.limits["media.image.generate"].max_prompt_length | type == "number")
+  and (.limits["media.image.generate"].max_referenced_images | type == "number")
+  and (.limits["media.image.generate"].max_output_images | type == "number")
+  and (.limits["media.image.generate"].allowed_output_formats | type == "array")
+' "$TEST_DIR/aport/passport.json" > /dev/null || {
+    echo "FAIL: Codex wizard passport should include media.image.generate capability and required limits" >&2
+    cat "$TEST_DIR/aport/passport.json" >&2
+    exit 1
+}
+run_hook "Codex wizard-generated local passport authorizes image generation metadata" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"wizard generated image passport","num_last_images_to_include":0}}' \
+    '. == {}'
+mv "$TEST_DIR/aport/passport.before-wizard-image-test.json" "$TEST_DIR/aport/passport.json"
+
+run_hook "Codex image generation enforces previous-image reference count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit the last image","num_last_images_to_include":1}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.referenced_image_limit_exceeded"))'
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-prompt-limit-test.json"
+jq '.limits["media.image.generate"].max_prompt_length = 10' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation enforces prompt length limit" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"this prompt is too long"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.prompt_too_large"))'
+mv "$TEST_DIR/aport/passport.before-image-prompt-limit-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-output-count-test.json"
+jq '.limits["media.image.generate"].max_output_images = 1' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation enforces output image count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","n":2}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.output_image_limit_exceeded"))'
+mv "$TEST_DIR/aport/passport.before-image-output-count-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-format-test.json"
+jq '.limits["media.image.generate"].allowed_output_formats = ["png"]' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation enforces output format allowlist" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","output_format":"gif"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.output_format_not_allowed"))'
+mv "$TEST_DIR/aport/passport.before-image-format-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-missing-limit-test.json"
+jq 'del(.limits["media.image.generate"].max_prompt_length)' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation fails closed when required media limits are missing" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_limit"))'
+mv "$TEST_DIR/aport/passport.before-image-missing-limit-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-provider-test.json"
+jq '.limits["media.image.generate"].allowed_providers = ["openai"]' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+APORT_IMAGE_GENERATION_PROVIDER=blocked-provider run_hook "Codex image generation enforces provider allowlist" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.provider_not_allowed"))'
+mv "$TEST_DIR/aport/passport.before-image-provider-test.json" "$TEST_DIR/aport/passport.json"
+
+run_hook "Codex image generation with referenced local paths fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit this","referenced_image_paths":["/tmp/source.png"]}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.multi_policy_tool_unsupported"))'
+
+run_hook "Codex image generation rejects malformed referenced_image_paths" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit this","referenced_image_paths":"/tmp/source.png"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects malformed referenced image entries" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit this","referenced_image_paths":["/tmp/source.png",17]}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects malformed previous-image count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit the last image","num_last_images_to_include":"many"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects fractional output count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","n":1.5}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects non-positive output count" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","output_count":0}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects conflicting output count aliases" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge","n":1,"num_images":100,"output_format":"png"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-capability-test.json"
+jq 'del(.capabilities[] | select(.id == "media.image.generate"))' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation requires media.image.generate capability" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_capability"))'
+mv "$TEST_DIR/aport/passport.before-image-capability-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-unsupported-limit-test.json"
+jq '.limits["media.image.generate"].unsupported_limit = true' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation rejects unsupported media limits" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unsupported_limit"))'
+mv "$TEST_DIR/aport/passport.before-image-unsupported-limit-test.json" "$TEST_DIR/aport/passport.json"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-image-format-limit-test.json"
+jq '.limits["media.image.generate"].allowed_output_formats = "png"' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex image generation rejects malformed output format limits" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw a safe badge"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_limit"))'
+mv "$TEST_DIR/aport/passport.before-image-format-limit-test.json" "$TEST_DIR/aport/passport.json"
+
+run_hook "Codex image generation rejects conflicting prompt containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"this prompt must not be shadowed"},"args":{"prompt":"ok"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_hook "Codex image generation rejects conflicting referenced image containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit","referenced_image_paths":["/tmp/source-a-secret.png"]},"args":{"referenced_image_paths":["/tmp/source-b-secret.png"]}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments")) and ((.hookSpecificOutput.permissionDecisionReason | contains("source-a-secret")) | not) and ((.hookSpecificOutput.permissionDecisionReason | contains("source-b-secret")) | not)'
+
+run_hook "Codex update_plan is session bookkeeping and is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"update_plan","tool_input":{"plan":[{"step":"x","status":"pending"}]}}' \
+    '. == {}'
+
+run_hook "Codex request_user_input_async is prompt bookkeeping and is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"request_user_input_async","tool_input":{"question":"Continue?","task_handle":"surface-user-input"}}' \
+    '. == {}'
+
+run_hook "Codex request_user_input_sync remains unmapped until observed in Codex" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"request_user_input_sync","tool_input":{"question":"Continue?"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+run_hook "Codex skills.read provider tool is explicitly classified" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"skills.read","tool_input":{"package":"skill://example","resource":"skill://example/SKILL.md"}}' \
+    '. == {}'
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-memory-write-test.json"
+jq '.capabilities = [] | .limits = {}' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex memories.add_ad_hoc_note fails closed as an unrepresentable provider-memory write" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"memories.add_ad_hoc_note","tool_input":{"note":"secret_note_should_not_persist"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unrepresentable_tool")) and ((.hookSpecificOutput.permissionDecisionReason | contains("secret_note_should_not_persist")) | not)'
+mv "$TEST_DIR/aport/passport.before-memory-write-test.json" "$TEST_DIR/aport/passport.json"
+
+run_hook "Codex memories.search provider metadata read remains explicitly classified" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"memories.search","tool_input":{"query":"project"}}' \
+    '. == {}'
+
+run_hook "Codex memory_read provider metadata read remains explicitly classified" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"memory_read","tool_input":{"key":"project"}}' \
+    '. == {}'
+
+run_hook "Codex memory_write fails closed instead of matching a wildcard" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"memory_write","tool_input":{"value":"secret_memory_should_not_persist"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool")) and ((.hookSpecificOutput.permissionDecisionReason | contains("secret_memory_should_not_persist")) | not)'
+
+run_hook "Codex plugin candidate listing is explicitly classified" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"list_available_plugins_to_install","tool_input":{}}' \
+    '. == {}'
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex plugin install request routes through MCP policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"request_plugin_install","tool_input":{"tool_id":"private-plugin-should-not-persist","tool_type":"plugin","suggest_reason":"secret_reason_should_not_persist"}}' \
+    '. == {}'
+if grep -q 'private-plugin-should-not-persist\|secret_reason_should_not_persist' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Codex plugin install context must not persist raw requested plugin values" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '
+  .guardrail_tool == "mcp.tool"
+  and .context.mcp_server == "codex"
+  and .context.mcp_tool == "request_plugin_install"
+  and (.context.parameter_keys | index("tool_id") != null)
+  and (.context.parameter_keys | index("suggest_reason") != null)
+' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex plugin install should route to codex/request_plugin_install MCP policy metadata" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex plugin install request maps to MCP policy metadata"
+
+cp "$TEST_DIR/aport/passport.json" "$TEST_DIR/aport/passport.before-plugin-install-spoof-test.json"
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_plugin_install_codex_denied",
+  "agent_id": "ap_plugin_install_codex_denied",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "mcp.tool.execute": {
+      "allowed_servers": ["evil"],
+      "allowed_tools": ["harmless"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+run_hook "Codex plugin install ignores spoofed MCP routing metadata" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"request_plugin_install","mcp_context":{"server":"evil","tool":"harmless"},"tool_input":{"tool_id":"safe-looking-plugin"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.mcp_server_not_allowed"))'
+mv "$TEST_DIR/aport/passport.before-plugin-install-spoof-test.json" "$TEST_DIR/aport/passport.json"
+
+run_hook "Codex local_shell maps to the shell policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"local_shell","tool_input":{"command":"rm -rf /tmp/test"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+# An unmapped Codex tool denies by default. Routing by payload shape authorizes by shape, not by what the
+# tool does, so it is off unless the operator turns it on for a tool surface they have reviewed.
+run_hook "Codex unmapped tool with a url denies by default" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+run_hook "Codex unmapped tool with a command denies by default" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"execute_sql","tool_input":{"command":"ls -la"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+run_hook "Codex unmapped tool with a path denies by default" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"vault_reader","tool_input":{"path":"/etc/hosts"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+# Same three payloads with the operator opt-in. They now reach a policy instead of oap.unknown_tool.
+run_codex_fallback_on() {
+    local desc="$1" input="$2" assertion="$3"
+    local out="$TEST_DIR/out-codex-fallback-on-${RANDOM}.json"
+    printf '%s' "$input" \
+        | APORT_CODEX_TOOL_FALLBACK=on APORT_CODEX_CONFIG_DIR="$TEST_DIR" "$CODEX" > "$out" 2> /dev/null || true
+    jq -e "$assertion" "$out" > /dev/null || {
+        echo "FAIL: $desc" >&2
+        cat "$out" >&2
+        exit 1
+    }
+    echo "  ✅ $desc"
+}
+
+run_codex_fallback_on "Opt-in fallback routes an unmapped tool with a url to the web policy" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
+    '(. == {}) or ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+# execute_sql carries only a command, so the command policy judges that string (allowed_commands,
+# blocked_patterns); nothing in the name is trusted. That is the opt-in fallback's contract.
+run_codex_fallback_on "Opt-in fallback judges a command-only unmapped tool by the command policy" \
+    '{"hook_event_name":"PreToolUse","tool_name":"execute_sql","tool_input":{"command":"rm -rf /tmp/test"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and ((.hookSpecificOutput.permissionDecisionReason // "") | contains("oap.unknown_tool") | not)'
+
+run_codex_fallback_on "Opt-in fallback still fails closed on a payload that says nothing" \
+    '{"hook_event_name":"PreToolUse","tool_name":"frobnicate","tool_input":{"x":1}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+run_codex_fallback_on "Opt-in fallback: a name that sounds like a read but carries no path is unknown" \
+    '{"hook_event_name":"PreToolUse","tool_name":"read_secret_from_vault","tool_input":{"key":"db/creds"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))'
+
+# A payload carrying more than one effect denies even with the opt-in. Picking one effect means dropping the
+# others unevaluated: this payload used to route to web.fetch, drop the denied command, and return allow.
+run_codex_fallback_on "Opt-in fallback denies a mixed command+url payload instead of picking one" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"command":"rm -rf /","url":"https://example.com/"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_codex_fallback_on "Opt-in fallback denies a mixed command+path payload" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"command":"rm -rf /","file_path":"/tmp/x","content":"hi"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_codex_fallback_on "Opt-in fallback denies a mixed url+path payload" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"url":"https://example.com/","file_path":"/tmp/x"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_codex_fallback_on "Opt-in fallback denies mixed effects hidden in nested args" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","tool_input":{"args":{"command":"rm -rf /tmp/test"},"url":"https://example.com/"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+run_codex_fallback_on "Opt-in fallback denies mixed effects hidden in nested arguments" \
+    '{"hook_event_name":"PreToolUse","tool_name":"mystery_tool","args":{"arguments":{"command":"rm -rf /tmp/test"},"url":"https://example.com/"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+
+CODEX_FALLBACK_OFF_OUT="$TEST_DIR/out-codex-fallback-off.json"
+printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"web_page_runner","tool_input":{"url":"https://example.com/"}}' \
+    | APORT_CODEX_TOOL_FALLBACK=off APORT_CODEX_CONFIG_DIR="$TEST_DIR" "$CODEX" > "$CODEX_FALLBACK_OFF_OUT" 2> /dev/null || true
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))' "$CODEX_FALLBACK_OFF_OUT" > /dev/null || {
+    echo "FAIL: APORT_CODEX_TOOL_FALLBACK=off should keep the strict list only" >&2
+    cat "$CODEX_FALLBACK_OFF_OUT" >&2
+    exit 1
+}
+echo "  ✅ Codex tool fallback can be switched off explicitly too"
+
+# write_stdin submits keystrokes into a session an exec_command already opened. When that session is an
+# interactive shell the keystrokes are a new command, so they are evaluated as shell input rather than
+# waved through as session bookkeeping.
+run_hook "Codex write_stdin carrying a denied command does not allow" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"rm -rf /tmp/test\n"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny"'
+
+run_hook "Codex write_stdin rejects conflicting input containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"rm -rf /tmp/test\n"},"args":{"chars":"ls -la\n"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments")) and ((.hookSpecificOutput.permissionDecisionReason | contains("rm -rf")) | not)'
+
+run_hook "Codex write_stdin carrying an allowed command reaches the command policy" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"ls -la\n"}}' \
+    '. == {}'
+
+run_hook "Codex write_stdin partial command fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"rm"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+run_hook "Codex write_stdin denies trailing partial input after a newline" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"echo ok\nrm -"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+WRITE_STDIN_BACKSLASH_INPUT="$(
+    jq -nc --arg chars $'rm \\\n' \
+        '{hook_event_name:"PreToolUse",tool_name:"write_stdin",tool_input:{session_id:"s1",chars:$chars}}'
+)"
+run_hook "Codex write_stdin rejects trailing backslash shell continuation" \
+    codex "$CODEX" \
+    "$WRITE_STDIN_BACKSLASH_INPUT" \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+WRITE_STDIN_OPEN_QUOTE_INPUT="$(
+    jq -nc --arg chars $'echo "unterminated\n' \
+        '{hook_event_name:"PreToolUse",tool_name:"write_stdin",tool_input:{session_id:"s1",chars:$chars}}'
+)"
+run_hook "Codex write_stdin rejects open-quote shell continuation" \
+    codex "$CODEX" \
+    "$WRITE_STDIN_OPEN_QUOTE_INPUT" \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+run_hook "Codex write_stdin control-only input fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":"\n"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+WRITE_STDIN_VERTICAL_TAB_INPUT="$(
+    jq -nc --arg chars $'\v\n' \
+        '{hook_event_name:"PreToolUse",tool_name:"write_stdin",tool_input:{session_id:"s1",chars:$chars}}'
+)"
+run_hook "Codex write_stdin vertical-tab control-only input fails closed" \
+    codex "$CODEX" \
+    "$WRITE_STDIN_VERTICAL_TAB_INPUT" \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+WRITE_STDIN_DEL_INPUT="$(
+    jq -nc --arg chars $'\177\n' \
+        '{hook_event_name:"PreToolUse",tool_name:"write_stdin",tool_input:{session_id:"s1",chars:$chars}}'
+)"
+run_hook "Codex write_stdin DEL control-only input fails closed" \
+    codex "$CODEX" \
+    "$WRITE_STDIN_DEL_INPUT" \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.partial_stdin_unsupported"))'
+
+run_hook "Codex write_stdin with no characters is allowed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"write_stdin","tool_input":{"session_id":"s1","chars":""}}' \
+    '. == {}'
+echo "  ✅ Codex write_stdin is evaluated, not assumed harmless"
+
 run_hook "Codex exec_command maps to shell policy" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la"}}' \
@@ -130,6 +627,37 @@ run_hook "Codex exec_command rejects untrusted shell override" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la","shell":"/tmp/untrusted-shell"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.shell_not_allowed"))'
+
+# The trust check has to see the whole path. An attacker-planted /tmp/bash basenames to "bash", which is in
+# the trusted set, so a context builder that basenamed before the check let the host run /tmp/bash while
+# APort judged only "ls -la". The name of the interpreter is not evidence about the interpreter.
+run_hook "Codex exec_command rejects /tmp/bash, whose basename would pass as trusted" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la","shell":"/tmp/bash"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.shell_not_allowed"))'
+
+run_hook "Codex exec_command rejects a planted /tmp/sh too" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"ls -la","shell":"/tmp/sh"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.shell_not_allowed"))'
+
+# The context the trust check reads keeps the raw path; only normalize_api_context basenames it, on the way
+# to the hosted API, whose schema takes the enum and not a path.
+(
+    source "$REPO_ROOT/bin/lib/harness-context.sh"
+    source "$REPO_ROOT/bin/lib/validation.sh"
+    raw="$(aport_hook_context_from_payload '{"tool_input":{"cmd":"ls","shell":"/bin/bash"}}' shell exec_command codex)"
+    [[ "$(printf '%s' "$raw" | jq -r '.shell')" == "/bin/bash" ]] || {
+        echo "FAIL: hook context must keep the raw shell path, got $raw" >&2
+        exit 1
+    }
+    api="$(normalize_api_context system.command.execute.v1 "$raw")"
+    [[ "$(printf '%s' "$api" | jq -r '.shell')" == "bash" ]] || {
+        echo "FAIL: API context must receive the basename, got $api" >&2
+        exit 1
+    }
+) || exit 1
+echo "  ✅ Shell trust is decided on the full path; the API still gets the basename"
 
 ALT_BASH_DIR="$TEST_DIR/alternate-bash"
 mkdir -p "$ALT_BASH_DIR"
@@ -273,7 +801,15 @@ EOF
 run_hook "Codex warn mode allows with additionalContext" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
-    '.systemMessage and .hookSpecificOutput.additionalContext'
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("report-only mode allowed"))
+      and (.systemMessage | contains("Evidence:"))
+      and (.systemMessage | contains("audit.log"))
+      and (.systemMessage | contains("session-decisions.jsonl"))
+      and ((.systemMessage | contains("decision.json")) | not)
+      and (.systemMessage | contains("mode codex --enforcement=enforce"))
+      and ((.systemMessage | contains("Review or update the hosted passport")) | not)'
 
 run_hook "Codex warn mode keeps shell parser ambiguity blocking" \
     codex "$CODEX" \
@@ -340,10 +876,50 @@ run_hook "Codex shell enforces configured timeout when supplied" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status","timeoutMs":2000}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.timeout_exceeded"))'
 
-run_hook "Codex shell requires timeout evidence when max execution time is configured" \
+# exec_command is a unified-exec session: the process outlives the call, so there is no bound and no default.
+# Without timeout evidence it stays denied when the passport sets max_execution_time.
+run_hook "Codex exec_command without a timeout is unbounded and still requires timeout evidence" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+
+# The legacy shell tool kills at DEFAULT_EXEC_COMMAND_TIMEOUT_MS (10000 ms), so that is the timeout evidence the
+# hook supplies for it. Against max_execution_time 1 it must be denied as exceeded, never as missing.
+run_hook "Codex shell without a timeout is judged by the Codex default against max_execution_time" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"shell","tool_input":{"command":"git status"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.timeout_exceeded"))'
+
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_command_timeout_limit_30",
+  "agent_id": "ap_command_timeout_limit_30",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "system.command.execute"}],
+  "limits": {
+    "system.command.execute": {
+      "allowed_commands": ["git"],
+      "max_execution_time": 30
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex shell without a timeout is allowed under a limit above the Codex default and records 10s" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"shell","tool_input":{"command":"git status"}}' \
+    '. == {}'
+jq -e '.guardrail_tool == "bash" and .context.timeout == 10' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex shell without a timeout should record the 10s default, got:" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex shell without a timeout carries the 10s Codex default"
 
 cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
 
@@ -1109,10 +1685,44 @@ run_hook "Gemini MCP bare allowlist permits scoped mcp URL after path redaction"
     '{"hook_event_name":"BeforeTool","tool_name":"CallMcpTool","mcp_context":{"url":"mcp://github/tools","tool_name":"issues.list"},"tool_input":{"id":"x"}}' \
     '.decision == "allow"'
 
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_restricted_mcp_server_only",
+  "agent_id": "ap_restricted_mcp_server_only",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "mcp.tool.execute"}],
+  "limits": {
+    "mcp.tool.execute": {
+      "allowed_servers": ["github"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+
 run_hook "Codex MCP resource read uses routing server instead of URI authority" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"ReadMcpResourceTool","tool_input":{"server":"evil","tool":"resources.read","uri":"mcp://github/repo/README.md"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.mcp_server_not_allowed"))'
+
+run_hook "Codex read_mcp_resource reads server evidence from tool input" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"read_mcp_resource","tool_input":{"server":"github","uri":"repo://github/README.md"}}' \
+    '. == {}'
+
+run_hook "Codex list_mcp_resources reads server evidence from tool input" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"list_mcp_resources","tool_input":{"server":"github"}}' \
+    '. == {}'
+
+run_hook "Codex list_mcp_resource_templates reads server evidence from tool input" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"list_mcp_resource_templates","tool_input":{"server":"github"}}' \
+    '. == {}'
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {
@@ -1200,7 +1810,7 @@ run_hook "Gemini web_fetch rejects malformed URL without recording secrets" \
     gemini "$GEMINI" \
     '{"hook_event_name":"BeforeTool","tool_name":"web_fetch","tool_input":{"url":" https://user:password@example.com/path?token=secret#private","method":"GET"}}' \
     '.decision == "deny" and (.reason | contains("oap.invalid_url"))'
-if grep -Eq 'user:|password|token=secret|#private' "$TEST_DIR/aport/session-decisions.jsonl"; then
+if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -Eq 'user:|password|token=secret|#private' "$TEST_DIR/aport/session-decisions.jsonl"; then
     echo "FAIL: malformed URL context must not persist credentials, query tokens, or fragments" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
@@ -1625,7 +2235,11 @@ EOF
 run_hook "Goose warn mode allows with reason" \
     goose "$GOOSE" \
     '{"hook_event_name":"PreToolUse","tool_name":"developer__shell","tool_input":{"command":"rm -rf /tmp/x"}}' \
-    '.decision == "allow" and (.reason | contains("APort Warning"))'
+    '.decision == "allow"
+      and (.reason | contains("APort Warning"))
+      and (.reason | contains("Evidence:"))
+      and (.reason | contains("mode goose --enforcement=enforce"))
+      and ((.reason | contains("Review or update the hosted passport")) | not)'
 
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
@@ -1981,12 +2595,25 @@ run_hook "Codex WebSearch without destination fails closed through web policy" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"WebSearch","tool_input":{"query":"APort guardrails"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
-jq -e '.guardrail_tool == "websearch" and .decision.policy_id == "web.fetch.v1" and .decision.allow == false' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
-    echo "FAIL: Codex WebSearch should map to web.fetch policy" >&2
+if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q 'APort guardrails' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Codex WebSearch must not persist raw search queries when destination context is missing" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
-}
-echo "  ✅ Codex WebSearch maps to web policy"
+fi
+echo "  ✅ Codex WebSearch without destination fails closed before verifier"
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_AGENT_ID=ap_test_web_search
+EOF
+run_hook "Codex web.run search-only payload fails closed before hosted API validation" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web.run","tool_input":{"search_query":[{"q":"secret search query should not persist"}]}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context")) and ((.hookSpecificOutput.permissionDecisionReason | contains("secret search")) | not)'
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Codex hosted web.run search-only payload fails before API call"
 
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex spawn_agent maps to session policy" \
@@ -2212,6 +2839,21 @@ cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 }
 EOF
 rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+jq '.limits["agent.session.create"].local_lease_ttl_seconds = 60' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+run_hook "Codex ordinary spawn fills single session capacity before namespaced spawn" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"spawn_agent","session_id":"parent-session","tool_call_id":"multi-agent-baseline-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '. == {}'
+run_hook "Codex namespaced spawn_agent respects max_concurrent" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"multi_agent_v1.spawn_agent","session_id":"parent-session","tool_call_id":"multi-agent-namespaced-call","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.concurrent_limit_exceeded"))'
+rm -f "$TEST_DIR/aport/session-state.json" "$TEST_DIR/aport/session-decisions.jsonl"
+jq '.limits["agent.session.create"].local_lease_ttl_seconds = 1' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+echo "  ✅ Codex namespaced multi-agent spawn consumes session capacity"
+
 run_hook "Codex spawn_agent without per-call id fails closed" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"prompt":"review this","agent_type":"reviewer"}}' \

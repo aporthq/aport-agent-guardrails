@@ -15,11 +15,13 @@ file bin/lib/command-hook-adapter.sh
 file bin/lib/config.sh
 file bin/lib/agentsmd.sh
 file bin/lib/framework-hook-paths.sh
+file bin/lib/framework-setup.sh
 file bin/lib/guardrail-mode.sh
 file bin/lib/harness-context.sh
 file bin/lib/hook-read-policy.sh
 file bin/lib/hook-runtime.sh
 file bin/lib/passport.sh
+file bin/lib/passport-reuse.sh
 file bin/lib/quick-hosted.sh
 file bin/lib/tool-mapping.sh
 file bin/lib/validation.sh
@@ -28,3 +30,4 @@ file src/evaluator.js
 tree external/aport-policies
 file external/aport-spec/oap/passport-schema.json
 mkdir local-overrides/policies
+file local-overrides/policies/media.image.generate.v1.json

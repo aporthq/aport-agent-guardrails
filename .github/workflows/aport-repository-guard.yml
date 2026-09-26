@@ -23,6 +23,12 @@ permissions:
   id-token: write
   pull-requests: read
 
+# Superseded pull request runs are cancelled. Push and merge-queue runs are
+# never cancelled so every landed commit keeps its audit record.
+concurrency:
+  group: aport-guard-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   aport:
     name: APort / OAP code.repository.merge.v1
@@ -83,8 +89,13 @@ jobs:
         id: aport_guard
         if: steps.bootstrap.outputs.skip != 'true'
         continue-on-error: true
-        uses: aporthq/policy-verify-action@v1
+        # Pinned to the v1.0.11 release commit. Bump the SHA and the comment together.
+        uses: aporthq/policy-verify-action@433d32239fa46c483bc5936d9bae8c5163d85c03 # v1.0.11
         with:
+          # Bound to the repository variable APORT_PROTECT_DEFAULT_BRANCH. The pinned v1.0.11 Action ignores this input
+          # (GitHub logs an unknown-input warning). It takes effect once the pin is bumped to 1.1.0 or newer; see the
+          # Enforce step below for the condition to switch on at the same time.
+          protect-default-branch: ${{ vars.APORT_PROTECT_DEFAULT_BRANCH == 'true' }}
           mode: hosted
           agent-id: ${{ vars.APORT_GITHUB_AGENT_ID }}
           api-key: ${{ secrets.APORT_API_KEY }}
@@ -93,16 +104,33 @@ jobs:
             .github/workflows/**,
             .aport/**
 
+      # Push events are post-commit detection at this pin: the v1.0.11 Action cannot classify a push, so a failure
+      # on push is recorded as a warning below and never fails the run. When the pin is bumped to a release that
+      # honours protect-default-branch (1.1.0+), replace the event condition with
+      #   (github.event_name != 'push' || vars.APORT_PROTECT_DEFAULT_BRANCH == 'true') &&
+      # so a protected push fails the run only when the variable opts in.
       - name: Enforce APort repository guard
         if: >-
           ${{
             steps.bootstrap.outputs.skip != 'true' &&
+            github.event_name != 'push' &&
             steps.aport_guard.outcome == 'failure' &&
             steps.override.outputs.approved != 'true'
           }}
         run: |
           echo "::error::APort Repository Guard failed. Review the APort action output above."
           exit 1
+
+      - name: Record push audit warning
+        if: >-
+          ${{
+            always() &&
+            steps.bootstrap.outputs.skip != 'true' &&
+            github.event_name == 'push' &&
+            steps.aport_guard.outcome == 'failure'
+          }}
+        run: |
+          echo "::warning::APort Repository Guard push audit reported findings. Push events are post-commit detection; review the APort action output above."
 
       - name: Record control-plane override
         if: >-

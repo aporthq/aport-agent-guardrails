@@ -80,6 +80,7 @@ The Node middleware automatically parses JSON tool input and spreads parameters 
 ## Config
 
 - **Config:** `~/.aport/langchain/` or `.aport/config.yaml`
+- **Custom directory:** `APORT_LANGCHAIN_CONFIG_DIR=<dir>` moves the installer output (`config.yaml`, `aport/passport.json`, `aport/runtime/`) for both `npx @aporthq/aport-agent-guardrails langchain` and `aport setup --framework=langchain`. The callback does not read that variable; pass `configPath` (Node) or `config_path` (Python) pointing at `<dir>/config.yaml`.
 - **Usage:** Add the callback to your agent (see above).
 - **`fail_open_on_api_error`**: Set to `true` in config to allow tool execution when the APort API is unreachable (genuine policy denials are never overridden). Default: `false` (fail-closed).
 - **`enforcement_mode`**: `enforce` blocks denied tools. `warn` is explicit report-only rollout: APort records the original deny decision but the adapter lets LangChain continue.
