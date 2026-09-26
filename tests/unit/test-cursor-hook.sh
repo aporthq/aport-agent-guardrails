@@ -526,6 +526,14 @@ run_hook "preToolUse Edit: allow" \
 run_hook "preToolUse TodoWrite: allow internal bookkeeping" \
     '{"tool_name":"TodoWrite","tool_input":{"todos":[{"content":"Review change","status":"in_progress","activeForm":"Reviewing change"}]}}' 0 '"permission":"allow"'
 
+run_hook "preToolUse Browser rejects conflicting root and tool_input URLs" \
+    '{"hook_event_name":"preToolUse","tool_name":"Browser","url":"https://allowed.example/","tool_input":{"url":"https://evil.example/","action":"navigate"}}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected Cursor browser URL alias conflict to fail closed" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
 # --- preToolUse: MCP:<name> ---
 run_hook "preToolUse MCP:tool: allow" \
     '{"tool_name":"MCP:github_search","tool_input":{"query":"test"}}' 0 '"permission":"allow"'
