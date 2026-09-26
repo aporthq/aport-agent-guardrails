@@ -148,6 +148,9 @@ jq -e '
   .hookSpecificOutput.permissionDecision == "allow"
   and (.systemMessage | contains("report-only mode allowed"))
   and (.systemMessage | contains("Evidence:"))
+  and (.systemMessage | contains("audit.log"))
+  and (.systemMessage | contains("session-decisions.jsonl"))
+  and ((.systemMessage | contains("decision.json")) | not)
   and (.systemMessage | contains("mode claude-code --enforcement=enforce"))
   and ((.systemMessage | contains("Review or update the hosted passport")) | not)
 ' "$OUT_WARN" > /dev/null || {
@@ -1039,6 +1042,22 @@ jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput
     exit 1
 }
 echo "  ✅ Browser conflicting URL aliases: structured deny"
+
+echo "  Test: Browser malformed action alias -> deny..."
+OUT12E="$TEST_DIR/claude-deny-browser-malformed-action.txt"
+echo '{"tool_name":"Browser","tool_input":{"url":"https://allowed.example/","action":{"type":"click"}}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT12E" 2> /dev/null
+EXIT12E=$?
+[[ "$EXIT12E" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Browser malformed action, got $EXIT12E" >&2
+    cat "$OUT12E" >&2
+    exit 1
+}
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))' "$OUT12E" > /dev/null || {
+    echo "FAIL: expected Browser malformed action to fail closed" >&2
+    cat "$OUT12E" >&2
+    exit 1
+}
+echo "  ✅ Browser malformed action alias: structured deny"
 
 # 13. PowerShell -> allow (maps to bash policy)
 echo "  Test: PowerShell -> allow..."

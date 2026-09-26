@@ -250,6 +250,7 @@ aport_hook_enforce_reference() {
 
 aport_hook_decision_reference() {
     local app_url="${APORT_APP_URL:-https://aport.io}"
+    local decision_ref audit_ref session_ref data_dir
     app_url="${app_url%/}"
 
     if [ -n "${APORT_AGENT_ID:-}" ]; then
@@ -257,8 +258,22 @@ aport_hook_decision_reference() {
         return 0
     fi
 
-    if [ -n "${DECISION_FILE:-${OPENCLAW_DECISION_FILE:-}}" ] || [ -n "${AUDIT_LOG:-${OPENCLAW_AUDIT_LOG:-}}" ]; then
-        printf 'View local decision/audit: %s; %s' "${DECISION_FILE:-${OPENCLAW_DECISION_FILE:-decision.json}}" "${AUDIT_LOG:-${OPENCLAW_AUDIT_LOG:-audit.log}}"
+    decision_ref="${DECISION_FILE:-${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-}}}"
+    audit_ref="${AUDIT_LOG:-${APORT_AUDIT_LOG:-${OPENCLAW_AUDIT_LOG:-}}}"
+    session_ref="${APORT_SESSION_DECISIONS_FILE:-}"
+    if [ -n "$audit_ref" ] || [ -n "$session_ref" ] || [ -n "$decision_ref" ]; then
+        if [ -z "$audit_ref" ] || [ -z "$session_ref" ]; then
+            if [ -n "$audit_ref" ]; then
+                data_dir="$(dirname "$audit_ref")"
+            elif [ -n "$decision_ref" ]; then
+                data_dir="$(dirname "$decision_ref")"
+            else
+                data_dir="."
+            fi
+            [ -n "$audit_ref" ] || audit_ref="${data_dir}/audit.log"
+            [ -n "$session_ref" ] || session_ref="${data_dir}/session-decisions.jsonl"
+        fi
+        printf 'View local audit artifacts: %s; %s' "$audit_ref" "$session_ref"
         return 0
     fi
 
