@@ -761,19 +761,23 @@ has_mcp_context() {
 # shell parser and buffer, the only safe answer is to reject those continued chunks before policy evaluation.
 aport_codex_stdin_has_shell_continuation() {
     local input="$1"
-    local body tmp slash_count=0 state="" escaped=0 i ch next_ch
+    local body tmp slash_count=0 state="" escaped=0 i ch next_ch newline cr
+
+    newline='
+'
+    cr="$(printf '\r')"
 
     case "$input" in
-        *$'\n' | *$'\r') ;;
+        *"$newline" | *"$cr") ;;
         *) return 1 ;;
     esac
 
     body="$input"
     case "$body" in
-        *$'\n') body="${body%$'\n'}" ;;
+        *"$newline") body="${body%"$newline"}" ;;
     esac
     case "$body" in
-        *$'\r') body="${body%$'\r'}" ;;
+        *"$cr") body="${body%"$cr"}" ;;
     esac
 
     tmp="$body"
@@ -803,7 +807,7 @@ aport_codex_stdin_has_shell_continuation() {
             double)
                 case "$ch" in
                     "\\")
-                        if [ "$next_ch" = $'\n' ]; then
+                        if [ "$next_ch" = "$newline" ]; then
                             return 0
                         fi
                         escaped=1
@@ -814,7 +818,7 @@ aport_codex_stdin_has_shell_continuation() {
             *)
                 case "$ch" in
                     "\\")
-                        if [ "$next_ch" = $'\n' ]; then
+                        if [ "$next_ch" = "$newline" ]; then
                             return 0
                         fi
                         escaped=1
@@ -830,7 +834,10 @@ aport_codex_stdin_has_shell_continuation() {
 }
 
 map_codex_write_stdin() {
-    local stdin_chars stdin_command stdin_meta stdin_state stdin_line_state stdin_blank_state stdin_sentinel
+    local stdin_chars stdin_command stdin_meta stdin_state stdin_line_state stdin_blank_state stdin_sentinel newline cr
+    newline='
+'
+    cr="$(printf '\r')"
     stdin_sentinel="APORT_STDIN_END_7f4f713d9b6a"
     stdin_chars="$(printf '%s' "$INPUT" | jq -r '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
@@ -848,9 +855,9 @@ map_codex_write_stdin() {
         (if $s == "" then "empty" else "nonempty" end),
         (if ($s | test("[\r\n]$")) then "line" else "partial" end),
         (if (($s | gsub("[ \t\r\n]"; "") | length) > 0) then "nonblank" else "blank" end)
-      ] | @tsv
-    ' 2> /dev/null || printf 'empty\tpartial\tblank')"
-    IFS=$'\t' read -r stdin_state stdin_line_state stdin_blank_state <<< "$stdin_meta"
+      ] | join("|")
+    ' 2> /dev/null || printf 'empty|partial|blank')"
+    IFS='|' read -r stdin_state stdin_line_state stdin_blank_state <<< "$stdin_meta"
     # Nothing typed is nothing to judge; the session itself was already authorized.
     if [ "$stdin_state" = "empty" ]; then
         emit_response "allow" "" "" ""
@@ -867,10 +874,10 @@ map_codex_write_stdin() {
     GUARDRAIL_TOOL="bash"
     stdin_command="$stdin_chars"
     case "$stdin_command" in
-        *$'\n') stdin_command="${stdin_command%$'\n'}" ;;
+        *"$newline") stdin_command="${stdin_command%"$newline"}" ;;
     esac
     case "$stdin_command" in
-        *$'\r') stdin_command="${stdin_command%$'\r'}" ;;
+        *"$cr") stdin_command="${stdin_command%"$cr"}" ;;
     esac
     CONTEXT_JSON="$(jq -nc --arg command "$stdin_command" '{command: $command}')"
     if aport_is_reentrant_guardrail_command "$stdin_command" "$ROOT_DIR"; then
