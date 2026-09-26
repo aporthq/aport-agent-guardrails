@@ -883,6 +883,16 @@ run_hook "Codex exec_command without a timeout is unbounded and still requires t
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
 
+run_hook "Codex Bash without a timeout is unbounded and still requires timeout evidence" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+
+run_hook "Codex container_exec without a timeout is unbounded and still requires timeout evidence" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"container_exec","tool_input":{"command":"git status"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+
 # The legacy shell tool kills at DEFAULT_EXEC_COMMAND_TIMEOUT_MS (10000 ms), so that is the timeout evidence the
 # hook supplies for it. Against max_execution_time 1 it must be denied as exceeded, never as missing.
 run_hook "Codex shell without a timeout is judged by the Codex default against max_execution_time" \
@@ -2614,6 +2624,28 @@ cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
 echo "  ✅ Codex hosted web.run search-only payload fails before API call"
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex web.run open ref_id URL maps to sanitized web context" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web.run","tool_input":{"open":[{"ref_id":"https://example.com/page?token=secret#frag"}]}}' \
+    '. == {}'
+if grep -q 'token=secret\|frag\|/page' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Codex web.run open must not persist URL path, query, or fragment data" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+jq -e '.guardrail_tool == "websearch" and .context.url == "https://example.com" and .context.domain == "example.com"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex web.run open ref_id should record only sanitized web origin context" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex web.run open ref_id URL maps to sanitized web context"
+
+run_hook "Codex web.run opaque open ref stays missing context" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web.run","tool_input":{"open":[{"ref_id":"turn0search0"}]}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
 
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex spawn_agent maps to session policy" \

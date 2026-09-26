@@ -737,7 +737,7 @@ aport_hook_context_from_payload() {
             (($ti.run_in_background == true) or ($ti.persistent == true) or ($ti.background == true)) as $unbounded |
             if $has_timeout_key or $unbounded then null
             elif $event_hint == "claude-code" then $claude_default_timeout
-            elif $event_hint == "codex" and ($default_tool | IN("shell", "bash", "local_shell", "localshell", "container_exec", "containerexec")) then 10
+            elif $event_hint == "codex" and ($default_tool | IN("shell", "local_shell", "localshell")) then 10
             else null
             end
           )
@@ -812,7 +812,16 @@ aport_hook_context_from_payload() {
           replace_all: (($ti.replace_all // $ti.replaceAll // false) == true or (($edits | map((.replace_all // .replaceAll // false) == true) | any) // false))
         }
       elif $kind == "web" then
-        (.url // $ti.url // (if urlish($ti.source) then $ti.source else null end) // "") as $raw_url |
+        (arr($ti.open) + arr(.open)) as $open_entries |
+        ($open_entries | map(
+          (if type == "object" then (.ref_id // .url // "")
+           elif type == "string" then .
+           else ""
+           end) as $candidate |
+          select(urlish($candidate)) |
+          $candidate
+        ) | .[0] // null) as $open_url |
+        (.url // $ti.url // (if urlish($ti.source) then $ti.source else null end) // $open_url // "") as $raw_url |
         (.domain // $ti.domain // "") as $raw_domain |
         clean_url($raw_url) as $safe_url |
         url_host($safe_url) as $safe_host |
