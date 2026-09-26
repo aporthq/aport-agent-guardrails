@@ -831,13 +831,13 @@ aport_codex_stdin_has_shell_continuation() {
 
 map_codex_write_stdin() {
     local stdin_chars stdin_command stdin_meta stdin_state stdin_line_state stdin_blank_state stdin_sentinel
-    stdin_sentinel=$'\036APORT_STDIN_END'
+    stdin_sentinel="APORT_STDIN_END_7f4f713d9b6a"
     stdin_chars="$(printf '%s' "$INPUT" | jq -r '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
       [$ti.chars, $ti.input, $ti.text, $ti.data, $ti.stdin]
       | map(select(type == "string"))
-      | ((.[0] // "") + "\u001eAPORT_STDIN_END")
+      | ((.[0] // "") + "APORT_STDIN_END_7f4f713d9b6a")
     ' 2> /dev/null || true)"
     stdin_chars="${stdin_chars%"$stdin_sentinel"}"
     stdin_meta="$(printf '%s' "$INPUT" | jq -r '
