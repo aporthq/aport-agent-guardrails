@@ -160,6 +160,20 @@ resolve_gemini_hook_config_dir() {
     fi
 }
 
+resolve_cursor_hook_config_dir() {
+    if [[ -n "${CURSOR_HOOKS_DIR:-}" ]]; then
+        printf '%s' "${CURSOR_HOOKS_DIR/#\~/$HOME}"
+    elif [[ "$reset_scope" = "project" ]]; then
+        printf '%s/.cursor' "$PWD"
+    elif [[ "$reset_scope" = "global" ]]; then
+        printf '%s/.cursor' "$HOME"
+    elif [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" && -f "${APORT_CURSOR_CONFIG_DIR/#\~/$HOME}/hooks.json" ]]; then
+        printf '%s' "${APORT_CURSOR_CONFIG_DIR/#\~/$HOME}"
+    else
+        printf '%s/.cursor' "$HOME"
+    fi
+}
+
 config_dir="$(resolve_reset_config_dir)"
 config_dir="${config_dir/#\~/$HOME}"
 
@@ -272,6 +286,7 @@ cleanup_cursor_hooks() {
     if [[ ! -f "$hooks_file" ]]; then
         return 0
     fi
+    refuse_symlink_path "$hooks_file"
     if ! command -v jq &> /dev/null; then
         log_error "jq not found; cannot safely remove Cursor hook entries from $hooks_file"
         return 1
@@ -360,8 +375,13 @@ cleanup_claude() {
 }
 
 cleanup_cursor() {
-    local hooks_file="$config_dir/hooks.json"
+    local cursor_hooks_dir hooks_file
+    cursor_hooks_dir="$(resolve_cursor_hook_config_dir)"
+    hooks_file="$cursor_hooks_dir/hooks.json"
     cleanup_cursor_hooks "$hooks_file"
+    if preserve_command_hook_state_if_referenced "Cursor" "$config_dir" "shared"; then
+        return 0
+    fi
     remove_dir_if_exists "$config_dir/aport"
 }
 
@@ -615,6 +635,7 @@ command_hook_any_state_has_remaining_reference() {
     [[ -n "${APORT_GEMINI_CLI_HOOKS_DIR:-}" ]] && candidate_files+=("${APORT_GEMINI_CLI_HOOKS_DIR/#\~/$HOME}/settings.json")
     [[ -n "${APORT_CLAUDE_CODE_CONFIG_DIR:-}" ]] && candidate_files+=("${APORT_CLAUDE_CODE_CONFIG_DIR/#\~/$HOME}/settings.json")
     [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" ]] && candidate_files+=("${APORT_CURSOR_CONFIG_DIR/#\~/$HOME}/hooks.json")
+    [[ -n "${CURSOR_HOOKS_DIR:-}" ]] && candidate_files+=("${CURSOR_HOOKS_DIR/#\~/$HOME}/hooks.json")
     [[ -n "${APORT_GOOSE_PLUGIN_DIR:-}" ]] && candidate_files+=("${APORT_GOOSE_PLUGIN_DIR/#\~/$HOME}/scripts/aport-goose-hook.sh")
 
     for candidate_file in "${candidate_files[@]}"; do

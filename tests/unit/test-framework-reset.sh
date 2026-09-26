@@ -278,6 +278,44 @@ fi
 
 echo "  ✅ reset cursor prefers framework-specific config over generic APORT_CONFIG_DIR"
 
+CURSOR_SPLIT_STATE_DIR="$TEST_DIR/cursor-split-state"
+CURSOR_SPLIT_HOOKS_DIR="$TEST_DIR/cursor-split-hooks"
+mkdir -p "$CURSOR_SPLIT_STATE_DIR/aport" "$CURSOR_SPLIT_HOOKS_DIR"
+cat > "$CURSOR_SPLIT_HOOKS_DIR/hooks.json" << EOF
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {"command":"$CURSOR_SPLIT_STATE_DIR/aport/runtime/bin/aport-cursor-hook.sh","__aport_hook":true,"timeout":30,"failClosed":true},
+      {"command":"/usr/local/bin/custom-cursor-hook.sh"}
+    ]
+  }
+}
+EOF
+touch "$CURSOR_SPLIT_STATE_DIR/aport/passport.json"
+
+echo "  Test: reset cursor honors CURSOR_HOOKS_DIR when state is split..."
+APORT_CURSOR_CONFIG_DIR="$CURSOR_SPLIT_STATE_DIR" CURSOR_HOOKS_DIR="$CURSOR_SPLIT_HOOKS_DIR" "$DISPATCHER" reset cursor --yes > "$TEST_DIR/reset-cursor-split-hooks.txt" 2>&1
+if [[ -d "$CURSOR_SPLIT_STATE_DIR/aport" ]]; then
+    echo "FAIL: expected split Cursor state to be removed after hooks cleanup" >&2
+    cat "$TEST_DIR/reset-cursor-split-hooks.txt" >&2
+    exit 1
+fi
+CURSOR_SPLIT_APORT_COUNT=$(jq -r '[.hooks.preToolUse[]? | select(.__aport_hook == true)] | length' "$CURSOR_SPLIT_HOOKS_DIR/hooks.json")
+if [[ "$CURSOR_SPLIT_APORT_COUNT" -ne 0 ]]; then
+    echo "FAIL: reset cursor should remove APort hook entries from CURSOR_HOOKS_DIR" >&2
+    cat "$CURSOR_SPLIT_HOOKS_DIR/hooks.json" >&2
+    exit 1
+fi
+CURSOR_SPLIT_CUSTOM_COUNT=$(jq -r '[.hooks.preToolUse[]? | select(.command == "/usr/local/bin/custom-cursor-hook.sh")] | length' "$CURSOR_SPLIT_HOOKS_DIR/hooks.json")
+if [[ "$CURSOR_SPLIT_CUSTOM_COUNT" -ne 1 ]]; then
+    echo "FAIL: reset cursor should preserve custom hooks in CURSOR_HOOKS_DIR" >&2
+    cat "$CURSOR_SPLIT_HOOKS_DIR/hooks.json" >&2
+    exit 1
+fi
+
+echo "  ✅ reset cursor honors CURSOR_HOOKS_DIR when state is split"
+
 OPENCLAW_STATE_RESET_DIR="$TEST_DIR/openclaw-state-reset"
 OPENCLAW_HOME_RESET_DIR="$TEST_DIR/openclaw-home-reset"
 mkdir -p "$OPENCLAW_STATE_RESET_DIR/aport" "$OPENCLAW_HOME_RESET_DIR/aport"

@@ -30,7 +30,7 @@ npx @aporthq/aport-agent-guardrails openclaw ap_your_agent_id
 
 The setup command:
 
-1. Chooses your OpenClaw config directory (a prompt; default `$OPENCLAW_STATE_DIR`, `$OPENCLAW_HOME`, or `~/.openclaw`). The `mode` and `reset` commands read `APORT_OPENCLAW_CONFIG_DIR`, `OPENCLAW_CONFIG_DIR`, or `OPENCLAW_STATE_DIR` for the same directory.
+1. Chooses your OpenClaw config directory (a prompt; default precedence is `$APORT_OPENCLAW_CONFIG_DIR`, `$OPENCLAW_CONFIG_DIR`, `$OPENCLAW_STATE_DIR`, `$OPENCLAW_HOME`, then `~/.openclaw`). The `mode` and `reset` commands read the same aliases for that directory.
 2. Creates a local passport or wires a hosted `agent_id` (keep `Spawn sub-agents and tasks?` at `Y` if the agent uses `sessions_spawn` or sub-agents; those map to `agent.session.create.v1` and need that capability)
 3. Installs the `openclaw-aport` plugin with `openclaw plugins install --link ...`
 4. Writes `plugins.entries.openclaw-aport` config into your OpenClaw config files
