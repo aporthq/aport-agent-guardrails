@@ -5,6 +5,8 @@
 # Shaping is keyed on the resolved policy id, so every tool that maps to the command policy is treated alike.
 set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TEST_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_DIR"' EXIT
 # shellcheck source=../../bin/lib/validation.sh
 source "$REPO_ROOT/bin/lib/validation.sh"
 # shellcheck source=../../bin/lib/tool-mapping.sh
@@ -66,5 +68,21 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Bash","tool_input":{"comma
 source "$REPO_ROOT/bin/lib/hook-runtime.sh"
 if aport_hook_shell_override_is_trusted "/tmp/bash"; then fail "/tmp/bash must not be trusted"; fi
 aport_hook_shell_override_is_trusted "/bin/bash" || fail "/bin/bash must be trusted"
+
+for shell_path in /tmp/bash /usr/local/bin/dash; do
+    out="$TEST_DIR/direct-api-shell.out"
+    err="$TEST_DIR/direct-api-shell.err"
+    set +e
+    APORT_AGENT_ID=ap_test_direct_shell OPENCLAW_CONFIG_DIR="$TEST_DIR" \
+        "$REPO_ROOT/bin/aport-guardrail-api.sh" bash "{\"command\":\"ls\",\"shell\":\"$shell_path\"}" > "$out" 2> "$err"
+    exit_code=$?
+    set -e
+    [ "$exit_code" -ne 0 ] || fail "direct API wrapper must reject untrusted shell $shell_path"
+    grep -q 'oap.shell_not_allowed' "$err" || {
+        cat "$out" >&2 || true
+        cat "$err" >&2 || true
+        fail "direct API wrapper should report shell_not_allowed for $shell_path"
+    }
+done
 
 echo "PASS: api context normalization"

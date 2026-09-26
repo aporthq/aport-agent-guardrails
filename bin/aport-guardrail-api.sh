@@ -29,6 +29,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "${SCRIPT_DIR}/bin/lib/tool-mapping.sh"
 # shellcheck source=bin/lib/validation.sh
 . "${SCRIPT_DIR}/bin/lib/validation.sh"
+# shellcheck source=bin/lib/hook-runtime.sh
+. "${SCRIPT_DIR}/bin/lib/hook-runtime.sh"
 
 NODE_EVALUATOR="$SCRIPT_DIR/src/evaluator.js"
 
@@ -81,6 +83,28 @@ POLICY_ID="$(resolve_policy_id_from_tool_name "$TOOL_NAME" || true)"
 if [[ -z "$POLICY_ID" ]]; then
     echo "Error: Tool '$TOOL_NAME' is not mapped to a policy pack" >&2
     exit 1
+fi
+if [[ "$POLICY_ID" == system.command.execute* ]] && command -v jq > /dev/null 2>&1; then
+    RAW_SHELL="$(printf '%s' "$CONTEXT_JSON" | jq -r '
+      if (type != "object") then "__APORT_MALFORMED_CONTEXT__"
+      elif has("shell") and .shell != null then
+        if (.shell | type) == "string" then .shell else "__APORT_MALFORMED_SHELL__" end
+      else "" end
+    ' 2> /dev/null || printf '__APORT_MALFORMED_CONTEXT__')"
+    case "$RAW_SHELL" in
+        __APORT_MALFORMED_CONTEXT__)
+            echo "APort deny (oap.invalid_tool_arguments): Command context must be a JSON object" >&2
+            exit 1
+            ;;
+        __APORT_MALFORMED_SHELL__)
+            echo "APort deny (oap.invalid_tool_arguments): Shell override must be a string" >&2
+            exit 1
+            ;;
+    esac
+    if [ -n "$RAW_SHELL" ] && ! aport_hook_shell_override_is_trusted "$RAW_SHELL"; then
+        echo "APort deny (oap.shell_not_allowed): Shell override is not a trusted interpreter" >&2
+        exit 1
+    fi
 fi
 # Shape hook-built context to the hosted schema (a path-form `shell` is rejected with HTTP 400 otherwise).
 CONTEXT_JSON="$(normalize_api_context "$POLICY_ID" "$CONTEXT_JSON")"
