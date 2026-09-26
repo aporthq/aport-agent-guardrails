@@ -2642,6 +2642,41 @@ jq -e '.guardrail_tool == "websearch" and .context.url == "https://example.com" 
 }
 echo "  ✅ Codex web.run open ref_id URL maps to sanitized web context"
 
+cat > "$TEST_DIR/aport/passport.json" << 'EOF'
+{
+  "passport_id": "ap_web_open_batch",
+  "agent_id": "ap_web_open_batch",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [{"id": "web.fetch"}],
+  "limits": {
+    "web.fetch": {
+      "allowed_domains": ["example.com"]
+    }
+  },
+  "regions": ["US"],
+  "never_expires": true
+}
+EOF
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex web.run multi-target open batch fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web.run","tool_input":{"open":[{"ref_id":"https://example.com/ok"},{"ref_id":"https://evil.example/bad"}]}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unrepresentable_tool"))'
+if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q 'evil.example\|/bad\|/ok' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Codex web.run multi-target open must not audit only one URL from the batch" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+
+run_hook "Codex web.run mixed opaque and URL open batch fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web.run","tool_input":{"open":[{"ref_id":"turn0search0"},{"ref_id":"https://example.com/ok"}]}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unrepresentable_tool"))'
+cp "$FIXTURE_PASSPORT" "$TEST_DIR/aport/passport.json"
+
 run_hook "Codex web.run opaque open ref stays missing context" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"web.run","tool_input":{"open":[{"ref_id":"turn0search0"}]}}' \

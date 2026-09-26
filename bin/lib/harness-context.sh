@@ -706,15 +706,17 @@ aport_hook_context_from_payload() {
       (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
       ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
       if $kind == "shell" then
+        ($event_hint == "claude-code" and ($default_tool | ascii_downcase | IN("bash", "powershell", "monitor"))) as $claude_bounded_shell |
         (
           # The raw values are bound once, so the unit-aware chain and the "carries a timeout key" guard below
           # can never disagree about which fields count.
           ($ti.timeout_seconds // $ti.timeoutSeconds // .timeout // null) as $raw_s |
           ($ti.timeout_ms // $ti.timeoutMs // .timeout_ms // .timeoutMs // null) as $raw_ms |
           ($ti.timeout // null) as $raw_tool_timeout |
-          # Claude Code Bash/PowerShell/Monitor send tool_input.timeout in milliseconds;
-          # every other harness sends seconds. The evaluator compares seconds.
-          (if $event_hint == "claude-code" then
+          # Claude Code Bash/PowerShell/Monitor send tool_input.timeout in milliseconds.
+          # Other shell aliases use seconds when they provide timeout evidence at all.
+          # The evaluator compares seconds.
+          (if $claude_bounded_shell then
              (safe_timeout_ms($raw_tool_timeout) // safe_timeout($raw_s))
            else
              safe_timeout($raw_tool_timeout // $raw_s)
@@ -736,7 +738,7 @@ aport_hook_context_from_payload() {
             ($raw_tool_timeout != null or $raw_s != null or $raw_ms != null) as $has_timeout_key |
             (($ti.run_in_background == true) or ($ti.persistent == true) or ($ti.background == true)) as $unbounded |
             if $has_timeout_key or $unbounded then null
-            elif $event_hint == "claude-code" then $claude_default_timeout
+            elif $claude_bounded_shell then $claude_default_timeout
             elif $event_hint == "codex" and ($default_tool | IN("shell", "local_shell", "localshell")) then 10
             else null
             end
@@ -817,10 +819,11 @@ aport_hook_context_from_payload() {
           (if type == "object" then (.ref_id // .url // "")
            elif type == "string" then .
            else ""
-           end) as $candidate |
-          select(urlish($candidate)) |
-          $candidate
-        ) | .[0] // null) as $open_url |
+           end) |
+          select(type == "string" and length > 0)
+        )) as $open_targets |
+        ($open_targets | map(select(urlish(.)))) as $open_urls |
+        ($open_urls | .[0] // null) as $open_url |
         (.url // $ti.url // (if urlish($ti.source) then $ti.source else null end) // $open_url // "") as $raw_url |
         (.domain // $ti.domain // "") as $raw_domain |
         clean_url($raw_url) as $safe_url |
@@ -829,6 +832,7 @@ aport_hook_context_from_payload() {
         {
           url: $safe_url,
           domain: (if $safe_url != "" then $safe_host elif $raw_url != "" then "" else $domain_host end),
+          web_target_count: ($open_targets | length),
           invalid_url: ($raw_url != "" and $safe_url == ""),
           domain_mismatch: ($safe_host != "" and $domain_host != "" and $domain_host != $safe_host),
           method: (.method // $ti.method // "GET")
