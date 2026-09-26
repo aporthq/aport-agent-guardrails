@@ -147,6 +147,7 @@ aport_hook_is_hard_failure_reason() {
             oap.input_too_large | \
             oap.invalid_json | \
             oap.invalid_tool_arguments | \
+            oap.unrepresentable_tool | \
             oap.invalid_limit | \
             oap.unsupported_limit | \
             oap.missing_required_context | \

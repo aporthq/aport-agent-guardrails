@@ -602,8 +602,14 @@ map_codex_browser() {
 }
 
 map_codex_computer_use() {
+    if aport_hook_payload_has_malformed_browser_action_aliases "$INPUT"; then
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use action aliases must be strings"
+    fi
     if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
         emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting action aliases"
+    fi
+    if ! aport_hook_payload_has_browser_action_evidence "$INPUT"; then
+        emit_response "deny" "web.browser" "oap.missing_required_context" "Computer-use tool did not provide an explicit action that APort can evaluate"
     fi
     CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
     if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
@@ -749,15 +755,91 @@ has_mcp_context() {
 # incomplete evidence if more non-terminated text follows it: "echo ok\nrm -" now and "rf /tmp/x\n" later
 # would bypass a blocklist if each piece were judged independently. Control-only chunks can also execute a
 # command already buffered in the terminal. Without per-session terminal state, both cases fail closed.
+#
+# A line terminator is not enough when shell syntax explicitly continues the line. "rm \\\n" followed by
+# "-rf /tmp/x\n" is one Bash command, as is a line ending inside an open quote. Without a trusted per-session
+# shell parser and buffer, the only safe answer is to reject those continued chunks before policy evaluation.
+aport_codex_stdin_has_shell_continuation() {
+    local input="$1"
+    local body tmp slash_count=0 state="" escaped=0 i ch next_ch
+
+    case "$input" in
+        *$'\n' | *$'\r') ;;
+        *) return 1 ;;
+    esac
+
+    body="$input"
+    case "$body" in
+        *$'\n') body="${body%$'\n'}" ;;
+    esac
+    case "$body" in
+        *$'\r') body="${body%$'\r'}" ;;
+    esac
+
+    tmp="$body"
+    while [ -n "$tmp" ] && [ "${tmp%\\}" != "$tmp" ]; do
+        slash_count=$((slash_count + 1))
+        tmp="${tmp%\\}"
+    done
+    if [ $((slash_count % 2)) -eq 1 ]; then
+        return 0
+    fi
+
+    for ((i = 0; i < ${#body}; i++)); do
+        ch="${body:i:1}"
+        next_ch=""
+        if [ $((i + 1)) -lt ${#body} ]; then
+            next_ch="${body:i+1:1}"
+        fi
+        if [ "$escaped" -eq 1 ]; then
+            escaped=0
+            continue
+        fi
+
+        case "$state" in
+            single)
+                [ "$ch" = "'" ] && state=""
+                ;;
+            double)
+                case "$ch" in
+                    "\\")
+                        if [ "$next_ch" = $'\n' ]; then
+                            return 0
+                        fi
+                        escaped=1
+                        ;;
+                    '"') state="" ;;
+                esac
+                ;;
+            *)
+                case "$ch" in
+                    "\\")
+                        if [ "$next_ch" = $'\n' ]; then
+                            return 0
+                        fi
+                        escaped=1
+                        ;;
+                    "'") state="single" ;;
+                    '"') state="double" ;;
+                esac
+                ;;
+        esac
+    done
+
+    [ -n "$state" ]
+}
+
 map_codex_write_stdin() {
-    local stdin_chars stdin_meta stdin_state stdin_line_state stdin_blank_state
+    local stdin_chars stdin_command stdin_meta stdin_state stdin_line_state stdin_blank_state stdin_sentinel
+    stdin_sentinel=$'\036APORT_STDIN_END'
     stdin_chars="$(printf '%s' "$INPUT" | jq -r '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
       [$ti.chars, $ti.input, $ti.text, $ti.data, $ti.stdin]
       | map(select(type == "string"))
-      | .[0] // ""
+      | ((.[0] // "") + "\u001eAPORT_STDIN_END")
     ' 2> /dev/null || true)"
+    stdin_chars="${stdin_chars%"$stdin_sentinel"}"
     stdin_meta="$(printf '%s' "$INPUT" | jq -r '
       def obj(v): if (v | type) == "object" then v elif (v | type) == "string" then (try (v | fromjson) catch {}) else {} end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $ti |
@@ -776,12 +858,22 @@ map_codex_write_stdin() {
     if [ "$stdin_line_state" != "line" ]; then
         emit_response "deny" "system.command.execute" "oap.partial_stdin_unsupported" "Codex write_stdin sent partial terminal input; APort cannot authorize split shell input without session buffering"
     fi
+    if aport_codex_stdin_has_shell_continuation "$stdin_chars"; then
+        emit_response "deny" "system.command.execute" "oap.partial_stdin_unsupported" "Codex write_stdin sent shell continuation syntax; APort cannot authorize split shell input without session buffering"
+    fi
     if [ "$stdin_blank_state" != "nonblank" ]; then
         emit_response "deny" "system.command.execute" "oap.partial_stdin_unsupported" "Codex write_stdin sent only terminal control characters; APort cannot prove no buffered shell command will execute"
     fi
     GUARDRAIL_TOOL="bash"
-    CONTEXT_JSON="$(jq -nc --arg command "$stdin_chars" '{command: $command}')"
-    if aport_is_reentrant_guardrail_command "$stdin_chars" "$ROOT_DIR"; then
+    stdin_command="$stdin_chars"
+    case "$stdin_command" in
+        *$'\n') stdin_command="${stdin_command%$'\n'}" ;;
+    esac
+    case "$stdin_command" in
+        *$'\r') stdin_command="${stdin_command%$'\r'}" ;;
+    esac
+    CONTEXT_JSON="$(jq -nc --arg command "$stdin_command" '{command: $command}')"
+    if aport_is_reentrant_guardrail_command "$stdin_command" "$ROOT_DIR"; then
         emit_response "allow" "" "" ""
     fi
 }
@@ -836,7 +928,10 @@ case "$FRAMEWORK" in
             writestdin | write_stdin)
                 map_codex_write_stdin
                 ;;
-            todoread | toolsearch | tool_search | toolsearchtool | tool_search_tool | tool_search.tool_search_tool | updateplan | update_plan | requestuserinput | request_user_input | requestuserinputasync | request_user_input_async | sendmessagetouserasync | send_message_to_user_async | requestpermissions | request_permissions | wait | waitforenvironment | wait_for_environment | getcontextremaining | get_context_remaining | newcontext | new_context | clock.curr_time | clock.sleep | currtime | curr_time | sleep | getgoal | get_goal | creategoal | create_goal | updategoal | update_goal | memories.add_ad_hoc_note | memories.list | memories.read | memories.search | skills.list | skills.read | listavailablepluginstoinstall | list_available_plugins_to_install | memoryoperators | memory_*)
+            memories.add_ad_hoc_note)
+                emit_response "deny" "hook.tool.map" "oap.unrepresentable_tool" "Codex persistent memory writes are not representable by the current APort hook policy"
+                ;;
+            todoread | toolsearch | tool_search | toolsearchtool | tool_search_tool | tool_search.tool_search_tool | updateplan | update_plan | requestuserinput | request_user_input | requestuserinputasync | request_user_input_async | sendmessagetouserasync | send_message_to_user_async | requestpermissions | request_permissions | wait | waitforenvironment | wait_for_environment | getcontextremaining | get_context_remaining | newcontext | new_context | clock.curr_time | clock.sleep | currtime | curr_time | sleep | getgoal | get_goal | creategoal | create_goal | updategoal | update_goal | memories.list | memories.read | memories.search | skills.list | skills.read | listavailablepluginstoinstall | list_available_plugins_to_install | memoryoperators | memory_*)
                 # Session bookkeeping, plan/user prompts, provider-owned metadata, and bounded memory/skill
                 # reads do not expose host file contents or perform external side effects through this hook.
                 emit_response "allow" "" "" ""
