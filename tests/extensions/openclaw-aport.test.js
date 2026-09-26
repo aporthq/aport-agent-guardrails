@@ -707,7 +707,7 @@ describe("plugin hook contract", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("allows unmapped tools in warn mode while surfacing the unknown-tool warning", async () => {
+  it("keeps unmapped tools blocking in warn mode", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const beforeToolCall = await registerPlugin({
       mode: "local",
@@ -716,7 +716,8 @@ describe("plugin hook contract", () => {
     });
 
     const result = await beforeToolCall({ toolName: "new_host_tool", params: {} });
-    assert.deepStrictEqual(result, {});
+    assert.strictEqual(result.block, true);
+    assert.match(result.blockReason, /oap\.unknown_tool/);
 
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -877,7 +878,7 @@ describe("plugin hook contract", () => {
     }
   });
 
-  it("honors warn mode when an API decision integrity check fails", async () => {
+  it("keeps API decision integrity failures blocking in warn mode", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => ({
       ok: true,
@@ -900,7 +901,28 @@ describe("plugin hook contract", () => {
         enforcementMode: "warn",
       });
       const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
-      assert.deepStrictEqual(result, {});
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.decision_integrity_failed/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps API evaluator errors blocking in warn mode", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("network down");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.policy_error/);
     } finally {
       globalThis.fetch = originalFetch;
     }
