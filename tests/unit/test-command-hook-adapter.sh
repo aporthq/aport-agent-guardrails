@@ -2459,6 +2459,18 @@ run_hook "Codex edit enforces resulting file size" \
     "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"edit\",\"tool_input\":{\"file_path\":\"$TEST_DIR/aport-existing-edit.txt\",\"old_string\":\"0\",\"new_string\":\"abcdefghij\"}}" \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.file_too_large"))'
 
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+printf 'x' > "$TEST_DIR/aport-existing-str-replace.txt"
+run_hook "Codex str_replace rejects conflicting replacement content aliases" \
+    codex "$CODEX" \
+    "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"str_replace\",\"tool_input\":{\"file_path\":\"$TEST_DIR/aport-existing-str-replace.txt\",\"old_string\":\"x\",\"content\":\"a\",\"new_string\":\"abcdefghij\"}}" \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q 'abcdefghij\|aport-existing-str-replace' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: conflicting str_replace content aliases must fail before auditing selected write context" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+
 run_hook "Codex file write enforces UTF-8 byte size" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/aport-emoji.txt","content":"😀"}}' \
@@ -2667,6 +2679,28 @@ run_hook "Codex web.run multi-target open batch fails closed" \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unrepresentable_tool"))'
 if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q 'evil.example\|/bad\|/ok' "$TEST_DIR/aport/session-decisions.jsonl"; then
     echo "FAIL: Codex web.run multi-target open must not audit only one URL from the batch" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex web.run scalar URL plus open target fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web.run","url":"https://example.com/ok","tool_input":{"open":[{"ref_id":"https://evil.example/bad"}]}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q 'evil.example\|/bad\|/ok' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Codex web.run scalar/open conflict must fail before auditing only one target" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex web.run mixed operation batch fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web.run","tool_input":{"open":[{"ref_id":"https://example.com/ok"}],"search_query":[{"q":"secret query should not persist"}]}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unrepresentable_tool"))'
+if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q 'secret query\|/ok' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Codex web.run mixed operation batch must fail before auditing only one operation" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 fi
