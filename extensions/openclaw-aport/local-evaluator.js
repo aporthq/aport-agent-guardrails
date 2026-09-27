@@ -302,17 +302,22 @@ function pathAllowedByPatterns(filePath, patterns) {
   return patterns.some((pattern) => pattern === "*" || matchesSimpleGlob(filePath, pattern));
 }
 
+function hasPathComponent(value, component) {
+  return new RegExp(`(^|/)${escapeRegExp(component)}(/|$)`).test(value);
+}
+
+function hasAnyPathComponent(value, components) {
+  return components.some((component) => hasPathComponent(value, component));
+}
+
 function isDefaultSensitiveReadPath(filePath) {
   const value = String(filePath).toLowerCase();
   return /(^|\/)\.env/.test(value) ||
-    /(^|\/)\.aws\//.test(value) ||
-    /(^|\/)\.ssh\//.test(value) ||
+    hasAnyPathComponent(value, [".aws", ".ssh", ".gnupg", ".kube"]) ||
     value.includes("credentials") ||
     /(^|\/)id_(rsa|dsa|ecdsa|ed25519)/.test(value) ||
     /\.(pem|key)$/.test(value) ||
-    value.includes("password") ||
-    /(^|\/)\.gnupg\//.test(value) ||
-    /(^|\/)\.kube\//.test(value);
+    value.includes("password");
 }
 
 function assuranceRank(level) {
@@ -348,8 +353,7 @@ function requiredRepoCapability(context, toolName) {
 function isSensitiveReleaseFile(filePath) {
   const value = String(filePath).toLowerCase();
   return /(^|\/)\.env(\.|$)/.test(value) ||
-    /(^|\/)\.aws\//.test(value) ||
-    /(^|\/)\.ssh\//.test(value) ||
+    hasAnyPathComponent(value, [".aws", ".ssh"]) ||
     value.includes("credentials") ||
     /(^|\/)id_(rsa|dsa|ecdsa|ed25519)/.test(value) ||
     /\.(pem|key)$/.test(value);

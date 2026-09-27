@@ -418,6 +418,14 @@ grep -q 'oap.missing_file_path' "$LAST_HOOK_OUTPUT" || {
 run_hook "beforeTabFileRead: empty file_path denies" \
     '{"hook_event_name":"beforeTabFileRead","file_path":"","content":"SECRET=1"}' 2 '"permission":"deny"'
 
+run_hook "beforeTabFileRead: non-string file_path denies" \
+    '{"hook_event_name":"beforeTabFileRead","file_path":42,"content":"SECRET=1"}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: beforeTabFileRead with non-string path should deny oap.invalid_tool_arguments" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
 run_hook "beforeReadFile: missing file_path denies instead of allowing" \
     '{"hook_event_name":"beforeReadFile","content":"SECRET=1"}' 2 '"permission":"deny"'
 grep -q 'oap.missing_file_path' "$LAST_HOOK_OUTPUT" || {

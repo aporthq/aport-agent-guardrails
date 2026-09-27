@@ -300,6 +300,27 @@ describe("local evaluator", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("denies exact default sensitive read directories locally", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const passport = JSON.parse(await readFile(passportPath, "utf8"));
+    passport.capabilities.push({ id: "data.file.read" });
+    passport.limits["data.file.read"] = { allowed_paths: ["*"] };
+    await writeFile(passportPath, JSON.stringify(passport), "utf8");
+
+    for (const filePath of ["/home/u/.ssh", "/home/u/.aws", "/home/u/.gnupg", "/home/u/.kube"]) {
+      const decision = evaluateLocalDecision({
+        policyName: "data.file.read.v1",
+        context: { file_path: filePath },
+        passportFile: passportPath,
+      });
+
+      assert.strictEqual(decision.allow, false, filePath);
+      assert.strictEqual(decision.reasons[0].code, "oap.blocked_pattern", filePath);
+    }
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("enforces release publish capabilities and context locally", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "aport-openclaw-release-"));
     const aportDir = path.join(tempDir, "aport");
