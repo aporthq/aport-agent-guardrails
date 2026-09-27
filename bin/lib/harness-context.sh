@@ -127,6 +127,47 @@ aport_hook_payload_has_conflicting_file_target_aliases() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_payload_has_conflicting_write_content_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def arr(v): if (v | type) == "array" then v elif v == null then [] else [v] end;
+      def content_values($o):
+        [
+          $o.content,
+          $o.text,
+          $o.file_text,
+          $o.new_source,
+          $o.newSource,
+          $o.new_string,
+          $o.newText,
+          $o.new_str,
+          $o.replacement
+        ] | map(select(type == "string"));
+      def has_content_conflict($o): (content_values($o) | unique | length) > 1;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      ([$root] + [$root | argument_containers[]]) as $containers |
+      any($containers[]; has_content_conflict(.)) or
+      any($containers[] | (arr(.edits) + arr(.replacements) + arr(.changes))[] | select(type == "object"); has_content_conflict(.))
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
 aport_hook_payload_has_malformed_file_target_aliases() {
     local payload="$1"
     jq -e '
@@ -177,6 +218,7 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
         else {}
         end;
       def str(v): if v == null then "" else (v | tostring) end;
+      def arr(v): if (v | type) == "array" then v elif v == null then [] else [v] end;
       def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
       def methodish(v): if (v | type) == "string" and (v | length) > 0 then (v | ascii_upcase) else "" end;
       def url_host(v):
@@ -209,6 +251,12 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
           obj(obj(.args).args),
           obj(obj(.args).arguments)
         ];
+      def open_targets($o):
+        arr($o.open)[] |
+        if type == "object" then (.ref_id // .url // "")
+        elif type == "string" then .
+        else ""
+        end;
       . as $root |
       ([
         $root.url,
@@ -217,14 +265,20 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
         (if urlish($root.source) then $root.source else null end),
         $root.domain,
         ($root | argument_containers[] | .url, .uri, .href, (if urlish(.source) then .source else null end), .domain)
-      ] | map(select(type == "string" and length > 0)) | map(url_host(.)) | map(select(. != "")) | unique) as $hosts |
+      ] | map(select(type == "string" and length > 0)) | map(url_host(.)) | map(select(. != "")) | unique) as $scalar_hosts |
+      ([
+        (open_targets($root) | select(urlish(.))),
+        ($root | argument_containers[] | (open_targets(.) | select(urlish(.))))
+      ] | map(select(type == "string" and length > 0)) | map(url_host(.)) | map(select(. != "")) | unique) as $open_hosts |
       ([
         methodish($root.method),
         methodish($root.http_method),
         methodish($root.request_method),
         ($root | argument_containers[] | methodish(.method), methodish(.http_method), methodish(.request_method))
       ] | map(select(. != "")) | unique) as $methods |
-      (($hosts | length) > 1) or (($methods | length) > 1)
+      (($scalar_hosts | length) > 1) or
+      ((($scalar_hosts | length) > 0) and (($open_hosts | length) > 0) and ((($scalar_hosts + $open_hosts) | unique | length) > 1)) or
+      (($methods | length) > 1)
     ' <<< "$payload" > /dev/null 2>&1
 }
 
@@ -822,9 +876,16 @@ aport_hook_context_from_payload() {
            end) |
           select(type == "string" and length > 0)
         )) as $open_targets |
+        ([
+          .url,
+          $ti.url,
+          (if urlish(.source) then .source else null end),
+          (if urlish($ti.source) then $ti.source else null end)
+        ] | map(select(type == "string" and length > 0)) | unique) as $scalar_targets |
+        ($open_targets | unique) as $open_targets |
         ($open_targets | map(select(urlish(.)))) as $open_urls |
         ($open_urls | .[0] // null) as $open_url |
-        (.url // $ti.url // (if urlish($ti.source) then $ti.source else null end) // $open_url // "") as $raw_url |
+        ($scalar_targets[0] // $open_url // "") as $raw_url |
         (.domain // $ti.domain // "") as $raw_domain |
         clean_url($raw_url) as $safe_url |
         url_host($safe_url) as $safe_host |
@@ -832,7 +893,19 @@ aport_hook_context_from_payload() {
         {
           url: $safe_url,
           domain: (if $safe_url != "" then $safe_host elif $raw_url != "" then "" else $domain_host end),
-          web_target_count: ($open_targets | length),
+          web_target_count: (($scalar_targets + $open_targets) | unique | length),
+          web_operation_group_count: ([
+            (if ((arr($ti.open) + arr(.open)) | length) > 0 then "open" else empty end),
+            (if ((arr($ti.search_query) + arr(.search_query)) | length) > 0 then "search_query" else empty end),
+            (if ((arr($ti.click) + arr(.click)) | length) > 0 then "click" else empty end),
+            (if ((arr($ti.find) + arr(.find)) | length) > 0 then "find" else empty end),
+            (if ((arr($ti.screenshot) + arr(.screenshot)) | length) > 0 then "screenshot" else empty end),
+            (if ((arr($ti.image_query) + arr(.image_query)) | length) > 0 then "image_query" else empty end),
+            (if ((arr($ti.sports) + arr(.sports)) | length) > 0 then "sports" else empty end),
+            (if ((arr($ti.finance) + arr(.finance)) | length) > 0 then "finance" else empty end),
+            (if ((arr($ti.weather) + arr(.weather)) | length) > 0 then "weather" else empty end),
+            (if ((arr($ti.time) + arr(.time)) | length) > 0 then "time" else empty end)
+          ] | unique | length),
           invalid_url: ($raw_url != "" and $safe_url == ""),
           domain_mismatch: ($safe_host != "" and $domain_host != "" and $domain_host != $safe_host),
           method: (.method // $ti.method // "GET")

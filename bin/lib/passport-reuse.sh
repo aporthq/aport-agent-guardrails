@@ -38,7 +38,7 @@ aport_list_device_passports() {
                 continue
             fi
         fi
-        if [[ -r "$passport" && "$kind_filter" != "hosted" ]]; then
+        if [[ -r "$passport" && "$kind_filter" != "hosted" ]] && aport_reuse_file_is_passport "$passport"; then
             printf '%s|local|%s\n' "$fw" "$passport"
         fi
     done
@@ -155,20 +155,63 @@ aport_resolve_reuse_ref() {
             printf 'cli|local|%s\n' "$ref"
             return 0
         fi
-        log_error "--reuse-from: $ref is not a passport file (expected JSON with spec_version and capabilities)"
+        log_error "--reuse-from: $ref is not a reusable local passport (expected active OAP passport JSON with required identity fields)"
         return 1
     fi
     log_error "--reuse-from: no ${kind_filter:+$kind_filter }passport found for \"$ref\" (expected a framework name, a passport.json path, or a hosted agent id)"
     return 1
 }
 
-# A passport file parses as JSON and carries the two keys every OAP passport has.
+# A reusable local passport must be active OAP JSON with the required identity fields local setup needs.
 aport_reuse_file_is_passport() {
     local file="$1"
     if command -v jq > /dev/null 2>&1; then
-        jq -e '(type == "object") and has("spec_version") and has("capabilities")' "$file" > /dev/null 2>&1
+        jq -e '
+          def nonempty_string($key): (.[$key] | type == "string" and length > 0);
+          (type == "object") and
+          (.spec_version == "oap/1.0") and
+          nonempty_string("passport_id") and
+          (.kind | IN("template", "instance")) and
+          nonempty_string("owner_id") and
+          (.owner_type | IN("user", "org")) and
+          (.status == "active") and
+          (.assurance_level | IN("L0", "L1", "L2", "L3", "L4KYC", "L4FIN")) and
+          (.capabilities | type == "array") and
+          all(.capabilities[]; type == "object" and (.id | type == "string" and length > 0)) and
+          (.limits | type == "object") and
+          (.regions | type == "array") and
+          all(.regions[]; type == "string" and length > 0) and
+          nonempty_string("created_at") and
+          nonempty_string("updated_at") and
+          nonempty_string("version")
+        ' "$file" > /dev/null 2>&1
     elif command -v node > /dev/null 2>&1; then
-        node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); process.exit(p && typeof p==="object" && "spec_version" in p && "capabilities" in p ? 0 : 1)' "$file" > /dev/null 2>&1
+        node -e '
+          try {
+            const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const nonempty = (v) => typeof v === "string" && v.length > 0;
+            const ok =
+              p && typeof p === "object" && !Array.isArray(p) &&
+              p.spec_version === "oap/1.0" &&
+              nonempty(p.passport_id) &&
+              (p.kind === "template" || p.kind === "instance") &&
+              nonempty(p.owner_id) &&
+              (p.owner_type === "user" || p.owner_type === "org") &&
+              p.status === "active" &&
+              ["L0", "L1", "L2", "L3", "L4KYC", "L4FIN"].includes(p.assurance_level) &&
+              Array.isArray(p.capabilities) &&
+              p.capabilities.every((c) => c && typeof c === "object" && !Array.isArray(c) && nonempty(c.id)) &&
+              p.limits && typeof p.limits === "object" && !Array.isArray(p.limits) &&
+              Array.isArray(p.regions) &&
+              p.regions.every(nonempty) &&
+              nonempty(p.created_at) &&
+              nonempty(p.updated_at) &&
+              nonempty(p.version);
+            process.exit(ok ? 0 : 1);
+          } catch (_) {
+            process.exit(1);
+          }
+        ' "$file" > /dev/null 2>&1
     else
         return 1
     fi

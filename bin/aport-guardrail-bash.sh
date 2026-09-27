@@ -2284,12 +2284,19 @@ if [[ "$POLICY_ID" == "web.fetch.v1" ]]; then
     INVALID_URL=$(echo "$CONTEXT_JSON" | jq -r '.invalid_url // false' 2> /dev/null || echo "false")
     DOMAIN_MISMATCH=$(echo "$CONTEXT_JSON" | jq -r '.domain_mismatch // false' 2> /dev/null || echo "false")
     WEB_TARGET_COUNT=$(echo "$CONTEXT_JSON" | jq -r '.web_target_count // 0' 2> /dev/null || echo "0")
+    WEB_OPERATION_GROUP_COUNT=$(echo "$CONTEXT_JSON" | jq -r '.web_operation_group_count // 0' 2> /dev/null || echo "0")
     DOMAIN=""
     case "$WEB_TARGET_COUNT" in
         "" | *[!0-9]*) WEB_TARGET_COUNT=0 ;;
     esac
+    case "$WEB_OPERATION_GROUP_COUNT" in
+        "" | *[!0-9]*) WEB_OPERATION_GROUP_COUNT=0 ;;
+    esac
+    if [ "$WEB_OPERATION_GROUP_COUNT" -gt 1 ]; then
+        write_decision false "$POLICY_ID" "oap.unrepresentable_tool" "Web fetch context contains multiple operation groups"
+    fi
     if [ "$WEB_TARGET_COUNT" -gt 1 ]; then
-        write_decision false "$POLICY_ID" "oap.unrepresentable_tool" "Web fetch context contains multiple open targets"
+        write_decision false "$POLICY_ID" "oap.unrepresentable_tool" "Web fetch context contains multiple web targets"
     fi
     if [ "$INVALID_URL" = "true" ]; then
         write_decision false "$POLICY_ID" "oap.invalid_url" "URL contains ambiguous parser characters"
@@ -2366,9 +2373,13 @@ if [[ "$POLICY_ID" == "web.browser.v1" ]]; then
     INVALID_URL=$(echo "$CONTEXT_JSON" | jq -r '.invalid_url // false' 2> /dev/null || echo "false")
     DOMAIN_MISMATCH=$(echo "$CONTEXT_JSON" | jq -r '.domain_mismatch // false' 2> /dev/null || echo "false")
     WEB_TARGET_COUNT=$(echo "$CONTEXT_JSON" | jq -r '.web_target_count // 0' 2> /dev/null || echo "0")
+    WEB_OPERATION_GROUP_COUNT=$(echo "$CONTEXT_JSON" | jq -r '.web_operation_group_count // 0' 2> /dev/null || echo "0")
     DOMAIN=""
     case "$WEB_TARGET_COUNT" in
         "" | *[!0-9]*) WEB_TARGET_COUNT=0 ;;
+    esac
+    case "$WEB_OPERATION_GROUP_COUNT" in
+        "" | *[!0-9]*) WEB_OPERATION_GROUP_COUNT=0 ;;
     esac
 
     if echo "$LIMITS" | jq -e 'type != "object"' > /dev/null 2>&1; then
@@ -2382,7 +2393,10 @@ if [[ "$POLICY_ID" == "web.browser.v1" ]]; then
         write_decision false "$POLICY_ID" "oap.unsupported_limit" "web.browser local mode cannot enforce configured limit(s): $UNSUPPORTED_BROWSER_LIMITS"
     fi
     if [ "$WEB_TARGET_COUNT" -gt 1 ]; then
-        write_decision false "$POLICY_ID" "oap.unrepresentable_tool" "Browser context contains multiple open targets"
+        write_decision false "$POLICY_ID" "oap.unrepresentable_tool" "Browser context contains multiple web targets"
+    fi
+    if [ "$WEB_OPERATION_GROUP_COUNT" -gt 1 ]; then
+        write_decision false "$POLICY_ID" "oap.unrepresentable_tool" "Browser context contains multiple operation groups"
     fi
     validate_string_array_limits allowed_domains blocked_domains allowed_actions
     if echo "$LIMITS" | jq -e 'has("allow_form_submission") and (.allow_form_submission | type) != "boolean"' > /dev/null 2>&1; then

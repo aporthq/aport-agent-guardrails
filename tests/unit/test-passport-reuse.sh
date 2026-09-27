@@ -21,9 +21,32 @@ fail() {
     exit 1
 }
 
+write_test_passport() {
+    local file="$1"
+    local passport_id="$2"
+    cat > "$file" << EOF
+{
+  "passport_id": "$passport_id",
+  "kind": "template",
+  "spec_version": "oap/1.0",
+  "owner_id": "user@example.com",
+  "owner_type": "user",
+  "assurance_level": "L2",
+  "status": "active",
+  "capabilities": [],
+  "limits": {},
+  "regions": ["US"],
+  "never_expires": true,
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-01-01T00:00:00Z",
+  "version": "1.0.0"
+}
+EOF
+}
+
 # A local passport from cursor and a hosted one from codex.
 mkdir -p "$HOME/.cursor/aport" "$HOME/.aport/codex/aport" "$HOME/.claude"
-printf '{"passport_id":"local-cursor","spec_version":"oap/1.0","capabilities":[]}\n' > "$HOME/.cursor/aport/passport.json"
+write_test_passport "$HOME/.cursor/aport/passport.json" "local-cursor"
 cat > "$HOME/.aport/codex/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=api
 APORT_ENFORCEMENT_MODE=enforce
@@ -132,10 +155,20 @@ if (
     aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null 2> /dev/null
 ); then fail "an unresolvable --reuse-from must exit non-zero"; fi
 unset APORT_PASSPORT_REUSE_DECIDED
+# An explicit malformed local passport path is also refused before the wizard can be skipped.
+printf '{"spec_version":null,"capabilities":{}}\n' > "$HOME/shadow/invalid-passport.json"
+rm -rf "$HOME/.invalid-reuse-target"
+if (
+    export APORT_NONINTERACTIVE=1 APORT_REUSE_PASSPORT_FROM_CLI="$HOME/shadow/invalid-passport.json"
+    unset APORT_PASSPORT_REUSE_DECIDED APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM
+    aport_maybe_configure_hosted_passport claude-code "$HOME/.invalid-reuse-target" < /dev/null 2> /dev/null
+); then fail "an invalid explicit local passport path must exit non-zero"; fi
+[[ ! -f "$HOME/.invalid-reuse-target/aport/passport.json" ]] || fail "invalid reuse must not copy a passport"
+unset APORT_PASSPORT_REUSE_DECIDED
 
 # 8. --mode=local with --reuse-from=<framework> uses that framework's local passport even when it also has a
 #    hosted mode file, and never configures the hosted one.
-printf '{"passport_id":"local-codex","spec_version":"oap/1.0","capabilities":[]}\n' > "$HOME/.aport/codex/aport/passport.json"
+write_test_passport "$HOME/.aport/codex/aport/passport.json" "local-codex"
 export APORT_GUARDRAIL_MODE_CLI=local APORT_REUSE_PASSPORT_FROM_CLI=codex
 if aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null; then fail "mode=local must return 1"; fi
 [[ -z "${APORT_AGENT_ID:-}" ]] || fail "mode=local must not configure a hosted passport"
@@ -181,7 +214,7 @@ echo "PASS: explicit reuse beats an inherited agent id"
 # 12. The interactive menu never offers to copy over a passport the framework already has, and an explicit
 #     request that does overwrite keeps the old file as .bak.
 unset APORT_NONINTERACTIVE CI
-printf '{"passport_id":"hand-tuned","spec_version":"oap/1.0","capabilities":[]}\n' > "$HOME/.claude/aport/passport.json"
+write_test_passport "$HOME/.claude/aport/passport.json" "hand-tuned"
 rm -f "$HOME/.claude/aport/guardrail-mode.env"
 menu_out="$(
     export APORT_GUARDRAIL_MODE_CLI=local
@@ -222,7 +255,7 @@ if aport_resolve_reuse_ref ap_abcdefabcdefabcdefabcdefabcdefab claude-code local
 #     would have skipped the wizard with the OLD passport still in place.
 BLOCKED_DIR="$HOME/.blocked-dest"
 mkdir -p "$BLOCKED_DIR/aport"
-printf '{"passport_id":"read-only-dest","spec_version":"oap/1.0","capabilities":[]}\n' > "$BLOCKED_DIR/aport/passport.json"
+write_test_passport "$BLOCKED_DIR/aport/passport.json" "read-only-dest"
 chmod 400 "$BLOCKED_DIR/aport/passport.json"
 unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM
 if aport_apply_reused_passport "cursor|local|$HOME/.cursor/aport/passport.json" "$BLOCKED_DIR" 2> "$TEST_DIR/blocked-dest.err"; then
@@ -240,7 +273,7 @@ echo "PASS: a failed destination copy fails loudly"
 #     function promises in its log line could not be written. A read-only .bak makes `cp dest dest.bak` fail.
 BAK_DIR="$HOME/.unwritable-backup"
 mkdir -p "$BAK_DIR/aport"
-printf '{"passport_id":"must-survive","spec_version":"oap/1.0","capabilities":[]}\n' > "$BAK_DIR/aport/passport.json"
+write_test_passport "$BAK_DIR/aport/passport.json" "must-survive"
 printf 'reserved\n' > "$BAK_DIR/aport/passport.json.bak"
 chmod 400 "$BAK_DIR/aport/passport.json.bak"
 unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM
@@ -258,10 +291,10 @@ echo "PASS: a failed backup leaves the existing passport alone"
 #     to resolve the same aliases or it misses a passport already on the device and offers to mint a duplicate.
 OC_HOME="$HOME/.openclaw-custom-home"
 mkdir -p "$OC_HOME/aport"
-printf '{"passport_id":"local-openclaw-home","spec_version":"oap/1.0","capabilities":[]}\n' > "$OC_HOME/aport/passport.json"
+write_test_passport "$OC_HOME/aport/passport.json" "local-openclaw-home"
 OC_STATE="$HOME/.openclaw-state-dir"
 mkdir -p "$OC_STATE/aport"
-printf '{"passport_id":"local-openclaw-state","spec_version":"oap/1.0","capabilities":[]}\n' > "$OC_STATE/aport/passport.json"
+write_test_passport "$OC_STATE/aport/passport.json" "local-openclaw-state"
 oc_listing="$(OPENCLAW_HOME="$OC_HOME" aport_list_device_passports claude-code)"
 [[ "$oc_listing" == *"openclaw|local|$OC_HOME/aport/passport.json"* ]] \
     || fail "OPENCLAW_HOME passport not discovered: $oc_listing"
@@ -274,7 +307,7 @@ oc_listing="$(OPENCLAW_CONFIG_DIR="$OC_HOME" aport_list_device_passports claude-
 # APort's own override still wins over OpenClaw aliases, which is the precedence set-mode and reset use.
 OTHER_OC="$HOME/.openclaw-aport-override"
 mkdir -p "$OTHER_OC/aport"
-printf '{"passport_id":"aport-override","spec_version":"oap/1.0","capabilities":[]}\n' > "$OTHER_OC/aport/passport.json"
+write_test_passport "$OTHER_OC/aport/passport.json" "aport-override"
 oc_listing="$(APORT_OPENCLAW_CONFIG_DIR="$OTHER_OC" OPENCLAW_STATE_DIR="$OC_STATE" OPENCLAW_HOME="$OC_HOME" aport_list_device_passports claude-code)"
 [[ "$oc_listing" == *"openclaw|local|$OTHER_OC/aport/passport.json"* ]] \
     || fail "APORT_OPENCLAW_CONFIG_DIR must win over OpenClaw aliases: $oc_listing"

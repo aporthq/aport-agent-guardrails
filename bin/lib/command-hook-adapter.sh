@@ -506,6 +506,9 @@ map_file_write() {
     if aport_hook_payload_has_conflicting_file_target_aliases "$INPUT"; then
         emit_response "deny" "data.file.write" "oap.invalid_tool_arguments" "File write tool supplied conflicting path aliases"
     fi
+    if aport_hook_payload_has_conflicting_write_content_aliases "$INPUT"; then
+        emit_response "deny" "data.file.write" "oap.invalid_tool_arguments" "File write tool supplied conflicting content aliases"
+    fi
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" file_write)"
     local file_path patch_paths patch_path_count patch_text patch_operation patch_content_length patch_size_line patch_add_bytes patch_delete_bytes patch_current_size patch_resulting_size
     file_path="$(printf '%s' "$CONTEXT_JSON" | jq -r '.file_path // ""' 2> /dev/null || true)"
@@ -567,19 +570,26 @@ map_file_write() {
 }
 
 map_web() {
-    local web_url web_domain web_invalid_url web_target_count
+    local web_url web_domain web_invalid_url web_target_count web_operation_group_count
 
     if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
         emit_response "deny" "web.fetch" "oap.invalid_tool_arguments" "Web tool supplied conflicting URL or domain aliases"
     fi
     GUARDRAIL_TOOL="websearch"
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
+    web_operation_group_count="$(printf '%s' "$CONTEXT_JSON" | jq -r '.web_operation_group_count // 0' 2> /dev/null || echo 0)"
+    case "$web_operation_group_count" in
+        "" | *[!0-9]*) web_operation_group_count=0 ;;
+    esac
+    if [ "$web_operation_group_count" -gt 1 ]; then
+        emit_response "deny" "web.fetch" "oap.unrepresentable_tool" "Web tool supplied multiple operation groups; APort cannot authorize a batch as one fetch"
+    fi
     web_target_count="$(printf '%s' "$CONTEXT_JSON" | jq -r '.web_target_count // 0' 2> /dev/null || echo 0)"
     case "$web_target_count" in
         "" | *[!0-9]*) web_target_count=0 ;;
     esac
     if [ "$web_target_count" -gt 1 ]; then
-        emit_response "deny" "web.fetch" "oap.unrepresentable_tool" "Web tool supplied multiple open targets; APort cannot authorize a batch as one fetch"
+        emit_response "deny" "web.fetch" "oap.unrepresentable_tool" "Web tool supplied multiple web targets; APort cannot authorize a batch as one fetch"
     fi
     web_invalid_url="$(printf '%s' "$CONTEXT_JSON" | jq -r 'if .invalid_url == true then "true" else "false" end' 2> /dev/null || echo false)"
     if [ "$web_invalid_url" = "true" ]; then
