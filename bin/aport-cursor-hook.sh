@@ -172,9 +172,13 @@ if [ "$HOOK_EVENT" = "beforeReadFile" ] || [ "$HOOK_EVENT" = "beforeTabFileRead"
     # No usable path is no evidence, and a read hook with no evidence must not allow. Both events are
     # documented to carry file_path; a payload without one (or with one the read context builder rejects)
     # is a payload this hook cannot authorize, so it denies rather than waving the read through.
+    READ_HOOK_NAME="${HOOK_EVENT:-read hook}"
+    if echo "$INPUT" | jq -e 'has("file_path") and (.file_path | type != "string")' > /dev/null 2>&1; then
+        deny_or_warn "data.file.read" "oap.invalid_tool_arguments" "$READ_HOOK_NAME file_path must be a string"
+    fi
     FILE_PATH="$(echo "$INPUT" | jq -r '.file_path // ""' 2> /dev/null || true)"
     if ! aport_hook_try_read_evaluation_from_file_path "$FILE_PATH"; then
-        deny_or_warn "data.file.read" "oap.missing_file_path" "$HOOK_EVENT did not provide a file path that APort can evaluate"
+        deny_or_warn "data.file.read" "oap.missing_file_path" "$READ_HOOK_NAME did not provide a file path that APort can evaluate"
     fi
 
 elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INPUT" | jq -e '.subagent_id' &> /dev/null; }; then
