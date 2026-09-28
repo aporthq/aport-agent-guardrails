@@ -2709,6 +2709,17 @@ if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q 'evil.example\|
 fi
 
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex web.run duplicate URL open batch fails closed" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"web.run","tool_input":{"open":[{"ref_id":"https://example.com/ok"},{"ref_id":"https://example.com/ok"}]}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unrepresentable_tool"))'
+if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q '/ok' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: Codex web.run duplicate open entries must fail before auditing one collapsed URL" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex web.run scalar URL plus open target fails closed" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"web.run","url":"https://example.com/ok","tool_input":{"open":[{"ref_id":"https://evil.example/bad"}]}}' \

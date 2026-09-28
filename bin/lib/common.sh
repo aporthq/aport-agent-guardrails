@@ -25,6 +25,7 @@ require_cmd() {
 
 # The evaluator's own request bound, in whole seconds, under the same rules apiTimeoutMs() applies in
 # src/evaluator.js: a finite positive APORT_API_TIMEOUT is used, anything else falls back to 15.
+# Values above Node's timer ceiling are clamped to the same effective bound.
 #
 # Framework installers derive their hook timeout from this. They used to read $APORT_API_TIMEOUT straight into
 # shell arithmetic, which disagreed with the evaluator in both directions: APORT_API_TIMEOUT=0 or -5 made the
@@ -69,7 +70,9 @@ aport_api_timeout_seconds() {
             } else {
               n = line + 0
             }
+            max_s = 2147484
             if (n <= 0) { print 15; exit }
+            if (n > max_s) { print max_s; exit }
             s = int(n)
             if (s < n) s = s + 1
             if (s < 1) s = 1

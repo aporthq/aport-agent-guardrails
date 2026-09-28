@@ -232,13 +232,9 @@ elif [ -n "${APORT_PASSPORT_REUSED:-}" ]; then
 	echo "  ✅ Using passport reused from ${APORT_PASSPORT_REUSED_FROM:-another framework}"
 	echo ""
 elif [ -f "$PASSPORT_FILE" ]; then
-	# Local passport exists
-	prompt_with_default again "  Passport already exists. Run wizard again (overwrite)? [y/N]: " "n"
-	if [ "$again" != "y" ] && [ "$again" != "Y" ]; then
-		echo "  Skipping passport creation."
-	else
-		run_local_passport_wizard
-	fi
+	echo "  📋 Passport: Existing local ($PASSPORT_FILE)"
+	echo "     Continuing without creating a new passport."
+	echo ""
 else
 	run_local_passport_wizard
 fi

@@ -185,6 +185,8 @@ curl -fsSL "https://api.aport.io/enterprise/scripts/enforce" | bash
 
 `enforce` reuses existing local state when present. If the framework hook/config is missing, it reinstalls without creating a duplicate passport instance.
 
+To roll out a newer guardrail package, rerun `deploy` or `enforce` with the desired script/package version. Existing `state.env` and `/api/check-instance` reuse the same passport instance; the `npx` installer refreshes the framework hook/runtime without reissuing the passport.
+
 ## Uninstall
 
 Use only for approved removal:
@@ -219,6 +221,8 @@ curl -fsSL "https://api.aport.io/enterprise/scripts/deploy?version=$VERSION" -o 
 shasum -a 256 /tmp/aport-deploy.sh
 bash /tmp/aport-deploy.sh
 ```
+
+Bundled enterprise scripts set `APORT_PACKAGE_VERSION` to the reviewed release, so `npx` installs that exact package. Leave it unset only when you intentionally want the latest npm package during each deploy/enforce run. The runtime hooks themselves do not check npm for updates during tool execution.
 
 ## More Detail
 

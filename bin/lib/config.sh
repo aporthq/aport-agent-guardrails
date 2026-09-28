@@ -31,6 +31,24 @@ get_config_dir() {
     esac
 }
 
+get_framework_config_dir_override() {
+    local framework="${1:-}"
+    case "$framework" in
+        openclaw) printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-${OPENCLAW_HOME:-}}}}" ;;
+        cursor) printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}" ;;
+        claude-code | claude) printf '%s' "${APORT_CLAUDE_CODE_CONFIG_DIR:-}" ;;
+        codex) printf '%s' "${APORT_CODEX_CONFIG_DIR:-}" ;;
+        gemini-cli | gemini) printf '%s' "${APORT_GEMINI_CLI_CONFIG_DIR:-}" ;;
+        goose) printf '%s' "${APORT_GOOSE_CONFIG_DIR:-}" ;;
+        langchain) printf '%s' "${APORT_LANGCHAIN_CONFIG_DIR:-}" ;;
+        crewai) printf '%s' "${APORT_CREWAI_CONFIG_DIR:-}" ;;
+        deerflow) printf '%s' "${APORT_DEERFLOW_CONFIG_DIR:-}" ;;
+        n8n) printf '%s' "${APORT_N8N_CONFIG_DIR:-}" ;;
+        opencode) printf '%s' "${APORT_OPENCODE_CONFIG_DIR:-}" ;;
+        *) printf '' ;;
+    esac
+}
+
 # Default passport path per framework (config_dir/aport/passport.json). Used by wizard and evaluator.
 # The frameworks the installers know. One list: the dispatcher, set-mode and passport reuse all read it.
 APORT_SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n opencode)
@@ -73,4 +91,4 @@ write_config_template() {
     echo "$dest_dir"
 }
 
-export -f get_config_dir get_default_passport_path write_config_template
+export -f get_config_dir get_framework_config_dir_override get_default_passport_path write_config_template

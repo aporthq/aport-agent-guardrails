@@ -58,6 +58,7 @@ aport_apply_reused_passport() {
             # framework, the same reader that picks up a saved hosted config exports its id, key and URL.
             # Start from a clean hosted credential state. A source mode file may omit the optional API key or
             # URL, and those omissions must not inherit stale values from the shell or the target framework.
+            local reused_mode_file=""
             local cli_api_key="${APORT_API_KEY:-}"
             local cli_api_url="${APORT_API_URL:-}"
             local cli_selected_api_url="${APORT_SELECTED_API_URL:-}"
@@ -65,7 +66,9 @@ aport_apply_reused_passport() {
             if [[ "$fw" != cli ]]; then
                 local src_dir
                 src_dir="$(get_config_dir "$fw")"
-                aport_try_reuse_existing_hosted_config "${src_dir/#\~/$HOME}" > /dev/null 2>&1 || true
+                src_dir="${src_dir/#\~/$HOME}"
+                reused_mode_file="$src_dir/aport/guardrail-mode.env"
+                aport_try_reuse_existing_hosted_config "$src_dir" > /dev/null 2>&1 || true
             else
                 [[ -n "$cli_api_key" ]] && export APORT_API_KEY="$cli_api_key"
                 [[ -n "$cli_api_url" ]] && export APORT_API_URL="$cli_api_url"
@@ -78,6 +81,9 @@ aport_apply_reused_passport() {
             export APORT_AGENT_ID="$ref"
             export APORT_PASSPORT_REUSED_FROM="$fw"
             log_info "Reusing hosted passport $ref from $fw"
+            if command -v aport_log_hosted_passport_reference > /dev/null 2>&1; then
+                aport_log_hosted_passport_reference "$ref" "$reused_mode_file"
+            fi
             return 0
             ;;
         local)
@@ -150,6 +156,50 @@ aport_apply_reused_passport() {
             return 1
             ;;
     esac
+}
+
+# Reuse the local passport the framework being installed already has. This is
+# different from cross-framework reuse: nothing is copied, and the installer
+# should continue with hook/runtime refresh instead of running the wizard.
+aport_try_reuse_existing_local_passport() {
+    local framework="$1"
+    local config_dir="${2/#\~/$HOME}"
+    local passport="$config_dir/aport/passport.json"
+
+    [[ -r "$passport" ]] || return 1
+    if ! aport_reuse_file_is_passport "$passport"; then
+        return 1
+    fi
+
+    unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
+    export APORT_PASSPORT_REUSED=1
+    export APORT_PASSPORT_REUSED_FROM="$framework"
+    log_info "Found existing local passport at $passport; continuing without creating a new passport."
+    return 0
+}
+
+aport_passport_args_allow_existing_framework_passport() {
+    local config_dir="${1/#\~/$HOME}"
+    shift || true
+    local requested_output="" arg
+    while [[ $# -gt 0 ]]; do
+        arg="$1"
+        shift || true
+        case "$arg" in
+            --output)
+                requested_output="${1:-}"
+                shift || true
+                ;;
+            --output=*)
+                requested_output="${arg#*=}"
+                ;;
+        esac
+    done
+
+    [[ -n "$requested_output" ]] || return 0
+    requested_output="${requested_output/#\~/$HOME}"
+    [[ "$requested_output" = /* ]] || requested_output="$PWD/$requested_output"
+    [[ "$requested_output" = "$config_dir/aport/passport.json" ]]
 }
 
 # Turn a --reuse-from value (framework name, passport path, or hosted agent id) into a list line, or fail.
@@ -284,7 +334,11 @@ aport_maybe_reuse_device_passport() {
     for line in "${found[@]}"; do
         IFS='|' read -r fw kind ref <<< "$line"
         if [[ "$kind" = "hosted" ]]; then
-            echo "    $i. $fw (hosted, $ref)"
+            if command -v aport_hosted_passport_url > /dev/null 2>&1; then
+                echo "    $i. $fw (hosted, $ref) - $(aport_hosted_passport_url "$ref")"
+            else
+                echo "    $i. $fw (hosted, $ref)"
+            fi
         else
             echo "    $i. $fw (local, ${ref/#$HOME/~})"
         fi
