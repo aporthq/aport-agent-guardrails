@@ -11,7 +11,7 @@ mkdir -p "$TEST_DIR"
 
 node --input-type=module - "$REPO_ROOT" "$TEST_DIR" << 'NODE'
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -25,6 +25,37 @@ const baseline = await readJson(path.join(repoRoot, "docs", "framework-drift-bas
 const readme = await readFile(path.join(repoRoot, "README.md"), "utf8");
 const compatDoc = await readFile(path.join(repoRoot, "docs", "OPENCLAW_COMPATIBILITY.md"), "utf8");
 const indexSource = await readFile(path.join(pluginDir, "index.js"), "utf8");
+
+const runtimePluginDir = path.join(testDir, "openclaw-aport-runtime");
+await mkdir(runtimePluginDir, { recursive: true });
+for (const file of [
+  "api-client.js",
+  "audit.js",
+  "decision.js",
+  "index.js",
+  "local-evaluator.js",
+  "package.json",
+  "tool-mapping.js",
+]) {
+  await cp(path.join(pluginDir, file), path.join(runtimePluginDir, file));
+}
+const sdkStubDir = path.join(runtimePluginDir, "node_modules", "openclaw", "plugin-sdk");
+await mkdir(sdkStubDir, { recursive: true });
+await writeFile(
+  path.join(runtimePluginDir, "node_modules", "openclaw", "package.json"),
+  JSON.stringify({
+    type: "module",
+    exports: {
+      "./plugin-sdk/plugin-entry": "./plugin-sdk/plugin-entry.js",
+    },
+  }),
+  "utf8",
+);
+await writeFile(
+  path.join(sdkStubDir, "plugin-entry.js"),
+  "export const definePluginEntry = (plugin) => plugin;\n",
+  "utf8",
+);
 
 // 1. Host version floors: one value, semver floor syntax, mirrored in the README badge and compat doc.
 const minHost = pkg.openclaw?.install?.minHostVersion;
@@ -73,7 +104,7 @@ for (const subpath of retiredSubpaths) {
 assert.ok(!/registerHook\(/.test(indexSource), "typed hooks must be registered with api.on, not api.registerHook");
 
 // 4. Registration: exactly one typed hook, named before_tool_call, optional options limited to matcher/priority.
-const plugin = (await import(pathToFileURL(path.join(pluginDir, "index.js")).href)).default;
+const plugin = (await import(pathToFileURL(path.join(runtimePluginDir, "index.js")).href)).default;
 const registrations = [];
 plugin.register({
   pluginConfig: { mode: "local", passportFile: path.join(testDir, "aport", "passport.json") },

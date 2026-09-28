@@ -28,15 +28,21 @@ After that, every push will:
 1. Run `git submodule update --init --recursive`
 2. Run `git submodule update --remote`
 3. If any submodule ref changed, block the push and tell you to commit the updated refs, then push again
-4. Run `scripts/pre-push-check.sh` for the local workflow-equivalent checks
+4. Run `scripts/pre-push-check.sh` for the fast local checks
 
 ### `pre-push-check.sh`
 
-Runs the blocking GitHub workflow-equivalent checks locally:
+Runs fast, deterministic checks by default:
 
 - `jq` passport schema validation
-- `shellcheck` and `shfmt -d`
-- Codex provider tool-surface drift check against `openai/codex`
+- shell syntax and `shfmt -d`
+- Codex provider tool-surface drift check against `openai/codex` using a persistent local cache outside CI
+- evaluator API timeout parsing smoke test
+
+Full CI-equivalent local checks are opt-in with `APORT_PRE_PUSH_LEVEL=full`:
+
+- all fast checks
+- `shellcheck` when installed
 - `make test`
 - `npm run build`
 - `npm run test -w @aporthq/aport-agent-guardrails-core -w @aporthq/aport-agent-guardrails-langchain`
@@ -49,12 +55,15 @@ Run it manually with:
 
 ```bash
 npm run prepush:check
+npm run prepush:full
 ```
 
 Useful environment flags:
 
 ```bash
 APORT_SKIP_PRE_PUSH_CHECKS=1 git push          # skip hook checks once
+APORT_PRE_PUSH_INCLUDE_SHELLCHECK=1 npm run prepush:check  # add shellcheck to the fast gate
+APORT_PRE_PUSH_LEVEL=full npm run prepush:check  # run the CI-equivalent local gate
 APORT_CODEX_PROVIDER_SOURCE_DIR=/path/to/openai/codex npm run codex:tool-surface
 APORT_PRE_PUSH_INCLUDE_OPTIONAL=1 npm run prepush:check  # also run gitleaks / trufflehog if installed
 APORT_PRE_PUSH_INCLUDE_OPENCLAW_LIVE=1 npm run prepush:check  # include the live OpenClaw CLI E2E step

@@ -356,6 +356,63 @@ jq -e '(.plugins.entries | has("openclaw-aport") | not) and (.plugins.entries["c
 
 echo "  ✅ reset openclaw honors OPENCLAW_STATE_DIR"
 
+OPENCLAW_HOME_RESET_ONLY_DIR="$TEST_DIR/openclaw-home-reset-only"
+OPENCLAW_GENERIC_RESET_DIR="$TEST_DIR/openclaw-generic-reset"
+mkdir -p "$OPENCLAW_HOME_RESET_ONLY_DIR/aport" "$OPENCLAW_GENERIC_RESET_DIR/aport"
+cat > "$OPENCLAW_HOME_RESET_ONLY_DIR/openclaw.json" << 'EOF'
+{
+  "plugins": {
+    "entries": {
+      "openclaw-aport": {
+        "enabled": true,
+        "config": {"mode": "api", "agentId": "ap_home_existing"}
+      },
+      "custom-plugin": {
+        "enabled": true
+      }
+    }
+  }
+}
+EOF
+cat > "$OPENCLAW_GENERIC_RESET_DIR/openclaw.json" << 'EOF'
+{
+  "plugins": {
+    "entries": {
+      "openclaw-aport": {
+        "enabled": true,
+        "config": {"mode": "api", "agentId": "ap_generic_existing"}
+      }
+    }
+  }
+}
+EOF
+touch "$OPENCLAW_HOME_RESET_ONLY_DIR/aport/passport.json" "$OPENCLAW_GENERIC_RESET_DIR/aport/passport.json"
+
+echo "  Test: reset openclaw honors OPENCLAW_HOME before generic APORT_CONFIG_DIR..."
+APORT_CONFIG_DIR="$OPENCLAW_GENERIC_RESET_DIR" OPENCLAW_HOME="$OPENCLAW_HOME_RESET_ONLY_DIR" "$DISPATCHER" reset openclaw --yes > "$TEST_DIR/reset-openclaw-home-before-generic.txt" 2>&1
+if [[ -d "$OPENCLAW_HOME_RESET_ONLY_DIR/aport" ]]; then
+    echo "FAIL: expected OpenClaw OPENCLAW_HOME runtime to be removed" >&2
+    cat "$TEST_DIR/reset-openclaw-home-before-generic.txt" >&2
+    exit 1
+fi
+if [[ ! -f "$OPENCLAW_GENERIC_RESET_DIR/aport/passport.json" ]]; then
+    echo "FAIL: reset openclaw removed generic APORT_CONFIG_DIR instead of OPENCLAW_HOME" >&2
+    cat "$TEST_DIR/reset-openclaw-home-before-generic.txt" >&2
+    exit 1
+fi
+jq -e '(.plugins.entries | has("openclaw-aport") | not) and (.plugins.entries["custom-plugin"].enabled == true)' "$OPENCLAW_HOME_RESET_ONLY_DIR/openclaw.json" > /dev/null || {
+    echo "FAIL: reset openclaw should clean only APort plugin entries from OPENCLAW_HOME" >&2
+    cat "$OPENCLAW_HOME_RESET_ONLY_DIR/openclaw.json" >&2
+    exit 1
+}
+jq -e '.plugins.entries["openclaw-aport"].config.agentId == "ap_generic_existing"' "$OPENCLAW_GENERIC_RESET_DIR/openclaw.json" > /dev/null || {
+    echo "FAIL: reset openclaw should leave generic APORT_CONFIG_DIR untouched when OPENCLAW_HOME is active" >&2
+    cat "$OPENCLAW_GENERIC_RESET_DIR/openclaw.json" >&2
+    exit 1
+}
+
+echo "  ✅ reset openclaw honors OPENCLAW_HOME before generic APORT_CONFIG_DIR"
+
 CODEX_DIR="$TEST_DIR/.codex"
 mkdir -p "$CODEX_DIR/aport"
 cat > "$CODEX_DIR/hooks.json" << 'EOF'

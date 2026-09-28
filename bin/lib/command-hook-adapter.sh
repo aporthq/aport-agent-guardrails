@@ -9,6 +9,11 @@ FRAMEWORK="${1:-${APORT_HOOK_FRAMEWORK:-}}"
 if [ $# -gt 0 ]; then
     shift || true
 fi
+APORT_ADAPTER_CLASSIFY_ONLY=0
+if [ "${1:-}" = "--classify-only" ]; then
+    APORT_ADAPTER_CLASSIFY_ONLY=1
+    shift || true
+fi
 
 case "$FRAMEWORK" in
     codex | gemini-cli | gemini | goose) ;;
@@ -1134,6 +1139,10 @@ esac
 
 if [ -z "$GUARDRAIL_TOOL" ]; then
     emit_response "deny" "hook.tool.map" "oap.unknown_tool" "No APort policy mapping for tool: $ORIGINAL_TOOL"
+fi
+
+if [ "$APORT_ADAPTER_CLASSIFY_ONLY" = "1" ]; then
+    emit_response "allow" "" "" ""
 fi
 
 HOOK_DECISION_FILE="${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-}}"

@@ -891,8 +891,8 @@ aport_hook_context_from_payload() {
           (if urlish(.source) then .source else null end),
           (if urlish($ti.source) then $ti.source else null end)
         ] | map(select(type == "string" and length > 0)) | unique) as $scalar_targets |
-        ($open_targets | unique) as $open_targets |
-        ($open_targets | map(select(urlish(.)))) as $open_urls |
+        ($open_targets | unique) as $unique_open_targets |
+        ($unique_open_targets | map(select(urlish(.)))) as $open_urls |
         ($open_urls | .[0] // null) as $open_url |
         ($scalar_targets[0] // $open_url // "") as $raw_url |
         (.domain // $ti.domain // "") as $raw_domain |
@@ -902,7 +902,7 @@ aport_hook_context_from_payload() {
         {
           url: $safe_url,
           domain: (if $safe_url != "" then $safe_host elif $raw_url != "" then "" else $domain_host end),
-          web_target_count: (($scalar_targets + $open_targets) | unique | length),
+          web_target_count: (($scalar_targets | length) + ($open_targets | length)),
           web_operation_group_count: ([
             (if ((arr($ti.open) + arr(.open)) | length) > 0 then "open" else empty end),
             (if ((arr($ti.search_query) + arr(.search_query)) | length) > 0 then "search_query" else empty end),

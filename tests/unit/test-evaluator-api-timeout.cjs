@@ -14,7 +14,10 @@ assert.strictEqual(apiTimeoutMs("1.0001"), 1000, "fractional seconds round to wh
 assert.strictEqual(apiTimeoutMs("0"), 15000, "zero is not a bound");
 assert.strictEqual(apiTimeoutMs("-3"), 15000);
 assert.strictEqual(apiTimeoutMs("45"), 45000);
-for (const raw of ["15s", "1.0001", "NaN", "45"]) {
+assert.strictEqual(apiTimeoutMs("2147483.647"), 2147483647, "Node timer maximum is allowed");
+assert.strictEqual(apiTimeoutMs("2147484"), 2147483647, "values above Node timer maximum are clamped");
+assert.strictEqual(apiTimeoutMs("1e100"), 2147483647, "huge finite values are clamped");
+for (const raw of ["15s", "1.0001", "NaN", "45", "2147484", "1e100"]) {
   assert.doesNotThrow(() => AbortSignal.timeout(apiTimeoutMs(raw)), `AbortSignal.timeout must accept the value for ${raw}`);
 }
 console.log("PASS: evaluator API timeout parsing");
