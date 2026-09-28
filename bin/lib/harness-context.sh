@@ -584,6 +584,9 @@ aport_hook_payload_has_conflicting_image_generation_aliases() {
         | unique;
       (
         (string_values("prompt") | length) > 1 or
+        (string_values("model") | length) > 1 or
+        (string_values("size") | length) > 1 or
+        (string_values("aspect_ratio") | length) > 1 or
         (format_values | length) > 1 or
         (positive_int_values | length) > 1 or
         (nonnegative_int_values("num_last_images_to_include") | length) > 1 or
@@ -664,7 +667,13 @@ aport_hook_context_from_payload() {
         end;
       def safe_timeout_ms(v):
         safe_timeout(v) as $timeout_ms |
-        if $timeout_ms == null then null else ($timeout_ms / 1000) end;
+        # Rounded up to a whole second, never left a fraction. jq division yields a float, so a 1500 ms timeout
+        # became 1.5 and the hosted API refused the whole context with "timeout must be an integer", which denies
+        # every tool call rather than the one that carried the odd value. Up rather than down so the evidence never
+        # claims a shorter bound than the harness will actually enforce, and never zero for a sub-second timeout,
+        # which a policy comparing against max_execution_time would read as no bound at all.
+        if $timeout_ms == null then null
+        else (((($timeout_ms + 999) / 1000) | floor) | if . < 1 then 1 else . end) end;
       def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
       def url_host(v):
         str(v) as $s |

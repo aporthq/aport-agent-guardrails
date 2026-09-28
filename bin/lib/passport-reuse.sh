@@ -83,6 +83,10 @@ aport_apply_reused_passport() {
         local)
             local dest_dir="$config_dir/aport"
             local dest="$dest_dir/passport.json"
+            local source_ref="$ref"
+            local temp_source=""
+            local ref_is_dest=0
+            local ref_is_dest_backup=0
             if [[ ! -r "$ref" ]]; then
                 log_error "Passport not readable: $ref"
                 return 1
@@ -99,7 +103,21 @@ aport_apply_reused_passport() {
             refuse_symlink_path "$dest.bak" || return 1
             mkdir -p "$dest_dir"
             chmod 700 "$dest_dir" 2> /dev/null || true
-            if [[ "$ref" != "$dest" ]]; then
+            [[ -e "$dest" && "$ref" -ef "$dest" ]] && ref_is_dest=1
+            [[ -e "$dest.bak" && "$ref" -ef "$dest.bak" ]] && ref_is_dest_backup=1
+            if [[ "$ref_is_dest_backup" == 1 ]]; then
+                temp_source="$(mktemp "$dest_dir/passport.reuse.XXXXXX")" || {
+                    log_error "Could not create a temporary copy for $ref"
+                    return 1
+                }
+                if ! cp "$ref" "$temp_source"; then
+                    rm -f "$temp_source"
+                    log_error "Could not preserve requested passport source $ref before rotating backup"
+                    return 1
+                fi
+                source_ref="$temp_source"
+            fi
+            if [[ "$ref_is_dest" != 1 ]]; then
                 # Both copies are checked explicitly. Callers invoke this function inside an `if` or after a
                 # `||`, which turns errexit off for everything it runs, so an unchecked `cp` that failed would
                 # fall straight through to the success log and `return 0`: a failed backup would report a
@@ -107,16 +125,19 @@ aport_apply_reused_passport() {
                 # destination copy would set the reuse flags and skip the wizard with no passport in place.
                 if [[ -f "$dest" ]]; then
                     if ! cp "$dest" "$dest.bak"; then
+                        [[ -n "$temp_source" ]] && rm -f "$temp_source"
                         log_error "Could not back up the existing passport to $dest.bak; leaving $dest unchanged"
                         return 1
                     fi
                     log_info "Existing passport kept at $dest.bak"
                 fi
-                if ! cp "$ref" "$dest"; then
+                if ! cp "$source_ref" "$dest"; then
+                    [[ -n "$temp_source" ]] && rm -f "$temp_source"
                     log_error "Could not copy $ref to $dest"
                     return 1
                 fi
             fi
+            [[ -n "$temp_source" ]] && rm -f "$temp_source"
             chmod 600 "$dest" 2> /dev/null || true
             unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
             export APORT_PASSPORT_REUSED=1

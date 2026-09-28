@@ -354,6 +354,17 @@ run_hook "Codex image generation rejects conflicting prompt containers" \
     '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"this prompt must not be shadowed"},"args":{"prompt":"ok"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
 
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex image generation rejects conflicting model metadata containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"draw","model":"allowed-model"},"args":{"model":"other-model"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
+if [[ -f "$TEST_DIR/aport/session-decisions.jsonl" ]] && grep -q 'allowed-model\|other-model' "$TEST_DIR/aport/session-decisions.jsonl"; then
+    echo "FAIL: conflicting image model aliases must fail before auditing selected metadata" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+fi
+
 run_hook "Codex image generation rejects conflicting referenced image containers" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"image_gen.imagegen","tool_input":{"prompt":"edit","referenced_image_paths":["/tmp/source-a-secret.png"]},"args":{"referenced_image_paths":["/tmp/source-b-secret.png"]}}' \
@@ -875,6 +886,20 @@ run_hook "Codex shell enforces configured timeout when supplied" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status","timeoutMs":2000}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.timeout_exceeded"))'
+
+jq '.limits["system.command.execute"].max_execution_time = 2' "$TEST_DIR/aport/passport.json" > "$TEST_DIR/aport/passport.updated.json"
+mv "$TEST_DIR/aport/passport.updated.json" "$TEST_DIR/aport/passport.json"
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex timeoutMs rounds up to whole-second context" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"exec_command","tool_input":{"cmd":"git status","timeoutMs":1500}}' \
+    '. == {}'
+jq -e '.guardrail_tool == "bash" and .context.timeout == 2' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex timeoutMs should round up to a whole-second timeout context" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex timeoutMs rounds up to whole seconds"
 
 # exec_command is a unified-exec session: the process outlives the call, so there is no bound and no default.
 # Without timeout evidence it stays denied when the passport sets max_execution_time.
