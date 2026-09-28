@@ -9,7 +9,8 @@ PROVIDER_REF="${APORT_CODEX_PROVIDER_REF:-main}"
 SOURCE_DIR="${APORT_CODEX_PROVIDER_SOURCE_DIR:-}"
 TMP_ROOT="${APORT_CODEX_PROVIDER_TMP_ROOT:-}"
 PROVIDER_CACHE_DIR="${APORT_CODEX_PROVIDER_CACHE_DIR:-}"
-TOOL_TIMEOUT_SECONDS="${APORT_CODEX_PROVIDER_TOOL_TIMEOUT:-10}"
+PROVIDER_CACHE_ROOT="${APORT_CODEX_PROVIDER_CACHE_ROOT:-}"
+TOOL_TIMEOUT_SECONDS="${APORT_CODEX_PROVIDER_TOOL_TIMEOUT:-20}"
 CLEANUP_TMP=0
 
 cleanup() {
@@ -19,16 +20,46 @@ cleanup() {
 }
 trap cleanup EXIT
 
+cache_component() {
+    local value="$1"
+    local safe checksum
+    safe="$(printf '%s' "$value" | tr -c 'A-Za-z0-9._-' '_' | cut -c 1-80)"
+    checksum="$(printf '%s' "$value" | cksum | awk '{print $1}')"
+    printf '%s-%s' "${safe:-value}" "$checksum"
+}
+
+ensure_provider_remote() {
+    local source_dir="$1"
+    local expected_repo="$2"
+    local current_repo
+
+    current_repo="$(git -C "$source_dir" remote get-url origin 2> /dev/null || true)"
+    if [ -z "$current_repo" ]; then
+        git -C "$source_dir" remote add origin "$expected_repo" >&2
+        return 0
+    fi
+
+    if [ "$current_repo" != "$expected_repo" ]; then
+        git -C "$source_dir" remote set-url origin "$expected_repo" >&2
+    fi
+}
+
 if [ -z "$SOURCE_DIR" ]; then
-    if [ -z "$PROVIDER_CACHE_DIR" ] && [ -z "${CI:-}" ] && [ -n "${HOME:-}" ]; then
-        cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/aport/codex-provider"
-        cache_key="$(printf '%s' "$PROVIDER_REF" | tr -c 'A-Za-z0-9._-' '_')"
-        PROVIDER_CACHE_DIR="$cache_root/$cache_key"
+    if [ -z "$PROVIDER_CACHE_DIR" ] && [ -z "${CI:-}" ]; then
+        if [ -z "$PROVIDER_CACHE_ROOT" ] && [ -n "${HOME:-}" ]; then
+            PROVIDER_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/aport/codex-provider"
+        fi
+        if [ -n "$PROVIDER_CACHE_ROOT" ]; then
+            repo_key="$(cache_component "$PROVIDER_REPO")"
+            ref_key="$(cache_component "$PROVIDER_REF")"
+            PROVIDER_CACHE_DIR="$PROVIDER_CACHE_ROOT/$repo_key/$ref_key"
+        fi
     fi
 
     if [ -n "$PROVIDER_CACHE_DIR" ]; then
         SOURCE_DIR="$PROVIDER_CACHE_DIR"
         if [ -d "$SOURCE_DIR/.git" ]; then
+            ensure_provider_remote "$SOURCE_DIR" "$PROVIDER_REPO"
             git -C "$SOURCE_DIR" fetch --depth 1 origin "$PROVIDER_REF" >&2
             git -C "$SOURCE_DIR" checkout --quiet FETCH_HEAD >&2
         else

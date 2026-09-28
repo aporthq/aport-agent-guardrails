@@ -44,6 +44,22 @@ aport_quick_hosted_is_valid_agent_id() {
     [[ "${1:-}" =~ ^(ap|apt|agt_inst|agt_tmpl)_[A-Za-z0-9_-]+$ ]]
 }
 
+aport_hosted_passport_url() {
+    local agent_id="$1"
+    local app_url="${APORT_APP_URL:-https://aport.io}"
+    app_url="${app_url%/}"
+    printf '%s/passports?details=%s' "$app_url" "$agent_id"
+}
+
+aport_log_hosted_passport_reference() {
+    local agent_id="$1"
+    local mode_file="${2:-}"
+    log_info "Hosted passport: $(aport_hosted_passport_url "$agent_id")"
+    if [[ -n "$mode_file" ]]; then
+        log_info "Hosted config: $mode_file"
+    fi
+}
+
 aport_try_reuse_existing_hosted_config() {
     local config_dir="$1"
     local mode_file="$config_dir/aport/guardrail-mode.env"
@@ -67,6 +83,7 @@ aport_try_reuse_existing_hosted_config() {
         export APORT_SELECTED_API_URL="$api_url"
     fi
     log_info "Found existing hosted passport in $mode_file"
+    aport_log_hosted_passport_reference "$agent_id" "$mode_file"
     return 0
 }
 
@@ -149,6 +166,7 @@ try {
     export APORT_API_KEY="$api_key"
     export APORT_SELECTED_GUARDRAIL_MODE="api"
     log_info "Created hosted passport: $agent_id${api_key_id:+ (setup key: $api_key_id)}"
+    aport_log_hosted_passport_reference "$agent_id" ""
 }
 
 aport_maybe_configure_hosted_passport() {
@@ -221,6 +239,7 @@ aport_maybe_configure_hosted_passport() {
                 exit 1
             fi
             export APORT_AGENT_ID="$agent_id_input"
+            aport_log_hosted_passport_reference "$agent_id_input" ""
             read -r -s -p "  APort setup API key [optional]: " api_key_input
             echo ""
             if [[ -n "$api_key_input" ]]; then

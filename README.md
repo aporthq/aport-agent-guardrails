@@ -86,7 +86,7 @@ When prompted for passport setup, the choices are:
 2. `Use existing hosted passport ID` — paste an existing `agent_id`.
 3. `Create local passport file` — offline/local JSON passport.
 
-For a new hosted setup, choose option `1`. The installer creates a passport, creates a narrow setup key, writes the framework hook/config, and starts sending decisions to APort. For non-interactive installs:
+For a new hosted setup, choose option `1`. The installer creates a passport, creates a narrow setup key, writes the framework hook/config, and starts sending decisions to APort. Re-running the same `npx @aporthq/aport-agent-guardrails <framework>` command reuses the framework's existing hosted config or local `aport/passport.json`, refreshes the installed runtime/hooks, and does not create a new passport unless you reset first or explicitly choose a different passport. Hosted reuse prints the dashboard link (`https://aport.io/passports?details=<agent_id>`); when it reuses a saved config, it also prints the mode-file path. For non-interactive installs:
 
 ```bash
 npx --yes @aporthq/aport-agent-guardrails claude-code \
@@ -248,6 +248,8 @@ npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=warn
 npx @aporthq/aport-agent-guardrails mode cursor --enforcement=enforce
 npx @aporthq/aport-agent-guardrails mode langchain --mode=api --enforcement=warn
 ```
+
+To upgrade the installed runtime, rerun the unpinned `npx @aporthq/aport-agent-guardrails <framework>` installer. The command resolves the current npm package, reuses the existing passport, and replaces the stable runtime copy used by the framework hook. Runtime hooks do not check npm for updates during tool calls, so version prompts cannot slow or block agent actions; enterprise deployments can pin reviewed versions with `APORT_PACKAGE_VERSION`.
 
 **Install into a custom directory.** Each framework's config directory can be moved with one environment variable. The installer, the `mode` and `reset` commands, and the Python `aport setup` CLI all read it (`get_config_dir` in `bin/lib/config.sh`):
 

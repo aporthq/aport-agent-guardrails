@@ -61,6 +61,10 @@ listing="$(aport_list_device_passports claude-code)"
 [[ "$listing" == *"codex|hosted|ap_1234567890abcdef1234567890abcdef"* ]] || fail "codex hosted passport not listed: $listing"
 [[ "$(aport_list_device_passports cursor)" != *"cursor|"* ]] || fail "current framework must be excluded"
 [[ "$(aport_list_device_passports claude-code local)" != *"|hosted|"* ]] || fail "kind filter local must drop hosted entries"
+menu_out="$(aport_maybe_reuse_device_passport claude-code "$HOME/.claude" <<< "n" 2>&1 || true)"
+[[ "$menu_out" == *"https://aport.io/passports?details=ap_1234567890abcdef1234567890abcdef"* ]] \
+    || fail "hosted reuse menu should show the hosted passport link: $menu_out"
+unset APORT_PASSPORT_REUSE_DECIDED
 
 # 2. Applying a local passport copies it into the target config dir, mode 600, and marks the wizard to be skipped.
 aport_apply_reused_passport "cursor|local|$HOME/.cursor/aport/passport.json" "$HOME/.claude"
@@ -76,10 +80,14 @@ mode="$(stat -c '%a' "$HOME/.claude/aport/passport.json" 2> /dev/null || stat -f
 unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM
 
 # 3. Applying a hosted passport exports the id, key and URL from the source framework.
-aport_apply_reused_passport "codex|hosted|ap_1234567890abcdef1234567890abcdef" "$HOME/.claude"
+aport_apply_reused_passport "codex|hosted|ap_1234567890abcdef1234567890abcdef" "$HOME/.claude" 2> "$TEST_DIR/hosted-apply.err"
 [[ "${APORT_AGENT_ID:-}" = "ap_1234567890abcdef1234567890abcdef" ]] || fail "APORT_AGENT_ID not exported"
 [[ "${APORT_API_KEY:-}" = "apk_test_key" ]] || fail "APORT_API_KEY not exported"
 [[ "${APORT_API_URL:-}" = "https://api.aport.io" ]] || fail "APORT_API_URL not exported"
+grep -q 'https://aport.io/passports?details=ap_1234567890abcdef1234567890abcdef' "$TEST_DIR/hosted-apply.err" \
+    || fail "hosted reuse should log the hosted passport URL: $(cat "$TEST_DIR/hosted-apply.err")"
+grep -q "$HOME/.aport/codex/aport/guardrail-mode.env" "$TEST_DIR/hosted-apply.err" \
+    || fail "hosted reuse should log the source mode file: $(cat "$TEST_DIR/hosted-apply.err")"
 unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
 
 # 4. Non-interactive: no opt-in means no reuse and no prompt.
@@ -378,5 +386,24 @@ if (
 fi
 grep -q "hosted agent id" "$TEST_DIR/reuse-conflict-installer.err" || fail "installer conflict must name the hosted id: $(cat "$TEST_DIR/reuse-conflict-installer.err")"
 echo "PASS: --reuse-from= with an empty value is refused"
+
+# 18. Re-running a framework installer with the framework's own local passport should reuse it and skip the
+#     wizard, but an explicit different --output path is still a request to create/use that other file.
+SAME_FRAMEWORK_DIR="$HOME/.same-framework"
+mkdir -p "$SAME_FRAMEWORK_DIR/aport"
+write_test_passport "$SAME_FRAMEWORK_DIR/aport/passport.json" "same-framework-local"
+unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM
+aport_try_reuse_existing_local_passport claude-code "$SAME_FRAMEWORK_DIR" || fail "same-framework local passport should be reusable"
+[[ "${APORT_PASSPORT_REUSED:-}" = "1" ]] || fail "same-framework reuse should set wizard skip flag"
+[[ "${APORT_PASSPORT_REUSED_FROM:-}" = "claude-code" ]] || fail "same-framework reuse should identify its framework"
+[[ -z "${APORT_AGENT_ID:-}" ]] || fail "same-framework local reuse must clear hosted state"
+aport_passport_args_allow_existing_framework_passport "$SAME_FRAMEWORK_DIR" \
+    --output "$SAME_FRAMEWORK_DIR/aport/passport.json" || fail "explicit output to the framework passport should allow reuse"
+if aport_passport_args_allow_existing_framework_passport "$SAME_FRAMEWORK_DIR" \
+    --output "$SAME_FRAMEWORK_DIR/other-passport.json"; then
+    fail "explicit output to a different passport should not be hidden by existing framework reuse"
+fi
+unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM
+echo "PASS: framework-local passport reuse is idempotent but respects explicit output"
 
 echo "PASS: passport reuse"

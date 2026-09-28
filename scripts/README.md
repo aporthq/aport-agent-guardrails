@@ -36,7 +36,7 @@ Runs fast, deterministic checks by default:
 
 - `jq` passport schema validation
 - shell syntax and `shfmt -d`
-- Codex provider tool-surface drift check against `openai/codex` using a persistent local cache outside CI
+- Codex provider tool-surface drift check against `openai/codex` using a persistent repo-and-ref-scoped local cache outside CI
 - evaluator API timeout parsing smoke test
 
 Full CI-equivalent local checks are opt-in with `APORT_PRE_PUSH_LEVEL=full`:
@@ -65,6 +65,6 @@ APORT_SKIP_PRE_PUSH_CHECKS=1 git push          # skip hook checks once
 APORT_PRE_PUSH_INCLUDE_SHELLCHECK=1 npm run prepush:check  # add shellcheck to the fast gate
 APORT_PRE_PUSH_LEVEL=full npm run prepush:check  # run the CI-equivalent local gate
 APORT_CODEX_PROVIDER_SOURCE_DIR=/path/to/openai/codex npm run codex:tool-surface
-APORT_PRE_PUSH_INCLUDE_OPTIONAL=1 npm run prepush:check  # also run gitleaks / trufflehog if installed
-APORT_PRE_PUSH_INCLUDE_OPENCLAW_LIVE=1 npm run prepush:check  # include the live OpenClaw CLI E2E step
+APORT_PRE_PUSH_INCLUDE_OPTIONAL=1 npm run prepush:check  # also run gitleaks / trufflehog if installed, including in fast mode
+APORT_PRE_PUSH_INCLUDE_OPENCLAW_LIVE=1 npm run prepush:check  # include the live OpenClaw CLI E2E step, including in fast mode
 ```

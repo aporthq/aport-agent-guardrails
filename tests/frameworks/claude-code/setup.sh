@@ -114,12 +114,25 @@ if command -v jq &> /dev/null; then
     DERIVED_DIR="$TEST_DIR/claude-derived-timeout"
     mkdir -p "$DERIVED_DIR/aport"
     cp "$CLAUDE_DIR/aport/passport.json" "$DERIVED_DIR/aport/passport.json"
+    DERIVED_PASSPORT_BEFORE="$(cksum "$DERIVED_DIR/aport/passport.json" | awk '{print $1 ":" $2}')"
     APORT_API_TIMEOUT=45 APORT_CLAUDE_CODE_CONFIG_DIR="$DERIVED_DIR" \
         "$REPO_ROOT/bin/agent-guardrails" --framework=claude-code --output "$DERIVED_DIR/aport/passport.json" --non-interactive --mode=local > "$TEST_DIR/claude-derived.out" 2>&1 || {
         echo "FAIL: Claude Code setup with APORT_API_TIMEOUT=45 failed" >&2
         cat "$TEST_DIR/claude-derived.out" >&2
         exit 1
     }
+    DERIVED_PASSPORT_AFTER="$(cksum "$DERIVED_DIR/aport/passport.json" | awk '{print $1 ":" $2}')"
+    if [[ "$DERIVED_PASSPORT_BEFORE" != "$DERIVED_PASSPORT_AFTER" ]]; then
+        echo "FAIL: rerunning Claude Code setup should reuse the existing local passport, not recreate it" >&2
+        cat "$TEST_DIR/claude-derived.out" >&2
+        exit 1
+    fi
+    grep -q 'Found existing local passport' "$TEST_DIR/claude-derived.out" || {
+        echo "FAIL: rerun should report existing local passport reuse" >&2
+        cat "$TEST_DIR/claude-derived.out" >&2
+        exit 1
+    }
+    echo "  ✅ existing local passport is reused on setup rerun"
     DERIVED_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true and .timeout == 60)] | length' "$DERIVED_DIR/settings.json")
     if [[ "$DERIVED_COUNT" -ne 1 ]]; then
         echo "FAIL: APORT_API_TIMEOUT=45 should install a 60 s hook timeout" >&2
