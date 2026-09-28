@@ -674,6 +674,31 @@ if (plugin.enforcementMode !== "warn") process.exit(3);
     exit 1
 }
 
+OPENCLAW_HOME_MODE_DIR="$TEST_DIR/openclaw-home-mode"
+OPENCLAW_GENERIC_MODE_DIR="$TEST_DIR/openclaw-generic-mode"
+mkdir -p "$OPENCLAW_HOME_MODE_DIR" "$OPENCLAW_GENERIC_MODE_DIR"
+cat > "$OPENCLAW_HOME_MODE_DIR/openclaw.json" << 'EOF'
+{"plugins":{"entries":{"openclaw-aport":{"enabled":true,"config":{"mode":"api","agentId":"ap_home_existing","apiUrl":"https://api.aport.io","enforcementMode":"enforce"}}}}}
+EOF
+cat > "$OPENCLAW_GENERIC_MODE_DIR/openclaw.json" << 'EOF'
+{"plugins":{"entries":{"openclaw-aport":{"enabled":true,"config":{"mode":"api","agentId":"ap_generic_existing","apiUrl":"https://api.aport.io","enforcementMode":"enforce"}}}}}
+EOF
+APORT_CONFIG_DIR="$OPENCLAW_GENERIC_MODE_DIR" OPENCLAW_HOME="$OPENCLAW_HOME_MODE_DIR" "$MODE_HELPER" openclaw --enforcement=warn > "$TEST_DIR/openclaw-home-mode.out"
+node -e '
+const fs = require("fs");
+const active = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).plugins.entries["openclaw-aport"].config;
+const generic = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).plugins.entries["openclaw-aport"].config;
+if (active.agentId !== "ap_home_existing") process.exit(1);
+if (active.enforcementMode !== "warn") process.exit(2);
+if (generic.agentId !== "ap_generic_existing") process.exit(3);
+if (generic.enforcementMode !== "enforce") process.exit(4);
+' "$OPENCLAW_HOME_MODE_DIR/openclaw.json" "$OPENCLAW_GENERIC_MODE_DIR/openclaw.json" || {
+    echo "FAIL: OpenClaw mode switching should honor OPENCLAW_HOME before generic APORT_CONFIG_DIR" >&2
+    cat "$OPENCLAW_HOME_MODE_DIR/openclaw.json" >&2
+    cat "$OPENCLAW_GENERIC_MODE_DIR/openclaw.json" >&2
+    exit 1
+}
+
 APORT_OPENCLAW_CONFIG_DIR="$OPENCLAW_DIR" "$MODE_HELPER" openclaw --mode=api > "$TEST_DIR/openclaw-preserve-enforcement.out"
 node -e '
 const fs = require("fs");

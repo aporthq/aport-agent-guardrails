@@ -23,6 +23,7 @@
     "version": "node scripts/normalize-changeset-bumps.mjs && CI=1 changeset version && node scripts/sync-version.mjs",
     "sync-version": "node scripts/sync-version.mjs",
     "prepush:check": "bash scripts/pre-push-check.sh",
+    "prepush:full": "APORT_PRE_PUSH_LEVEL=full bash scripts/pre-push-check.sh",
     "build": "npm run build:core && npm run build --workspaces --if-present",
     "build:core": "npm run build -w @aporthq/aport-agent-guardrails-core",
     "codex:tool-surface": "bash scripts/check-codex-provider-tool-surface.sh",
