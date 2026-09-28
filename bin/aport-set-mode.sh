@@ -89,80 +89,11 @@ fi
 
 has_explicit_config_dir_override() {
     [[ -n "${APORT_CONFIG_DIR:-}" ]] && return 0
-
-    case "$framework" in
-        openclaw)
-            [[ -n "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}" ]]
-            ;;
-        cursor)
-            [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" ]]
-            ;;
-        claude-code)
-            [[ -n "${APORT_CLAUDE_CODE_CONFIG_DIR:-}" ]]
-            ;;
-        codex)
-            [[ -n "${APORT_CODEX_CONFIG_DIR:-}" ]]
-            ;;
-        gemini-cli)
-            [[ -n "${APORT_GEMINI_CLI_CONFIG_DIR:-}" ]]
-            ;;
-        goose)
-            [[ -n "${APORT_GOOSE_CONFIG_DIR:-}" ]]
-            ;;
-        langchain)
-            [[ -n "${APORT_LANGCHAIN_CONFIG_DIR:-}" ]]
-            ;;
-        crewai)
-            [[ -n "${APORT_CREWAI_CONFIG_DIR:-}" ]]
-            ;;
-        deerflow)
-            [[ -n "${APORT_DEERFLOW_CONFIG_DIR:-}" ]]
-            ;;
-        n8n)
-            [[ -n "${APORT_N8N_CONFIG_DIR:-}" ]]
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+    [[ -n "$(get_framework_config_dir_override "$framework")" ]]
 }
 
 framework_specific_config_dir_override() {
-    case "$framework" in
-        openclaw)
-            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}"
-            ;;
-        cursor)
-            printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}"
-            ;;
-        claude-code)
-            printf '%s' "${APORT_CLAUDE_CODE_CONFIG_DIR:-}"
-            ;;
-        codex)
-            printf '%s' "${APORT_CODEX_CONFIG_DIR:-}"
-            ;;
-        gemini-cli)
-            printf '%s' "${APORT_GEMINI_CLI_CONFIG_DIR:-}"
-            ;;
-        goose)
-            printf '%s' "${APORT_GOOSE_CONFIG_DIR:-}"
-            ;;
-        langchain)
-            printf '%s' "${APORT_LANGCHAIN_CONFIG_DIR:-}"
-            ;;
-        crewai)
-            printf '%s' "${APORT_CREWAI_CONFIG_DIR:-}"
-            ;;
-        deerflow)
-            printf '%s' "${APORT_DEERFLOW_CONFIG_DIR:-}"
-            ;;
-        n8n)
-            printf '%s' "${APORT_N8N_CONFIG_DIR:-}"
-            ;;
-        *)
-            printf ''
-            ;;
-    esac
+    get_framework_config_dir_override "$framework"
 }
 
 read_hook_config_dir_from_file() {

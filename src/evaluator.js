@@ -74,11 +74,13 @@ function buildRuntimeMetadata(options = {}) {
  * @param {boolean} options.policyInBody - If true, POST to /api/verify/policy/IN_BODY and send body.policy (for dynamic/generated policies).
  * @returns {Promise<object>} OAP v1.0 compliant decision object
  */
+const MAX_ABORT_TIMEOUT_MS = 2147483647;
+
 /** Seconds in (any string), whole milliseconds out, 15 s when the value is unusable. Exported for tests. */
 function apiTimeoutMs(raw) {
   const n = Number(raw);
   if (raw === undefined || raw === "" || !Number.isFinite(n) || n <= 0) return 15000;
-  return Math.max(1, Math.round(n * 1000));
+  return Math.min(MAX_ABORT_TIMEOUT_MS, Math.max(1, Math.round(n * 1000)));
 }
 
 async function evaluatePolicy(policyPack, passport, context, options = {}) {

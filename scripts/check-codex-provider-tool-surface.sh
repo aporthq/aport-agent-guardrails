@@ -8,6 +8,9 @@ PROVIDER_REPO="${APORT_CODEX_PROVIDER_REPO:-https://github.com/openai/codex.git}
 PROVIDER_REF="${APORT_CODEX_PROVIDER_REF:-main}"
 SOURCE_DIR="${APORT_CODEX_PROVIDER_SOURCE_DIR:-}"
 TMP_ROOT="${APORT_CODEX_PROVIDER_TMP_ROOT:-}"
+PROVIDER_CACHE_DIR="${APORT_CODEX_PROVIDER_CACHE_DIR:-}"
+PROVIDER_CACHE_ROOT="${APORT_CODEX_PROVIDER_CACHE_ROOT:-}"
+TOOL_TIMEOUT_SECONDS="${APORT_CODEX_PROVIDER_TOOL_TIMEOUT:-20}"
 CLEANUP_TMP=0
 
 cleanup() {
@@ -17,11 +20,58 @@ cleanup() {
 }
 trap cleanup EXIT
 
+cache_component() {
+    local value="$1"
+    local safe checksum
+    safe="$(printf '%s' "$value" | tr -c 'A-Za-z0-9._-' '_' | cut -c 1-80)"
+    checksum="$(printf '%s' "$value" | cksum | awk '{print $1}')"
+    printf '%s-%s' "${safe:-value}" "$checksum"
+}
+
+ensure_provider_remote() {
+    local source_dir="$1"
+    local expected_repo="$2"
+    local current_repo
+
+    current_repo="$(git -C "$source_dir" remote get-url origin 2> /dev/null || true)"
+    if [ -z "$current_repo" ]; then
+        git -C "$source_dir" remote add origin "$expected_repo" >&2
+        return 0
+    fi
+
+    if [ "$current_repo" != "$expected_repo" ]; then
+        git -C "$source_dir" remote set-url origin "$expected_repo" >&2
+    fi
+}
+
 if [ -z "$SOURCE_DIR" ]; then
-    TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/aport-codex-provider.XXXXXX")"
-    CLEANUP_TMP=1
-    SOURCE_DIR="$TMP_ROOT/codex"
-    git clone --depth 1 --branch "$PROVIDER_REF" "$PROVIDER_REPO" "$SOURCE_DIR" >&2
+    if [ -z "$PROVIDER_CACHE_DIR" ] && [ -z "${CI:-}" ]; then
+        if [ -z "$PROVIDER_CACHE_ROOT" ] && [ -n "${HOME:-}" ]; then
+            PROVIDER_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/aport/codex-provider"
+        fi
+        if [ -n "$PROVIDER_CACHE_ROOT" ]; then
+            repo_key="$(cache_component "$PROVIDER_REPO")"
+            ref_key="$(cache_component "$PROVIDER_REF")"
+            PROVIDER_CACHE_DIR="$PROVIDER_CACHE_ROOT/$repo_key/$ref_key"
+        fi
+    fi
+
+    if [ -n "$PROVIDER_CACHE_DIR" ]; then
+        SOURCE_DIR="$PROVIDER_CACHE_DIR"
+        if [ -d "$SOURCE_DIR/.git" ]; then
+            ensure_provider_remote "$SOURCE_DIR" "$PROVIDER_REPO"
+            git -C "$SOURCE_DIR" fetch --depth 1 origin "$PROVIDER_REF" >&2
+            git -C "$SOURCE_DIR" checkout --quiet FETCH_HEAD >&2
+        else
+            mkdir -p "$(dirname "$SOURCE_DIR")"
+            git clone --depth 1 --branch "$PROVIDER_REF" "$PROVIDER_REPO" "$SOURCE_DIR" >&2
+        fi
+    else
+        TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/aport-codex-provider.XXXXXX")"
+        CLEANUP_TMP=1
+        SOURCE_DIR="$TMP_ROOT/codex"
+        git clone --depth 1 --branch "$PROVIDER_REF" "$PROVIDER_REPO" "$SOURCE_DIR" >&2
+    fi
 fi
 
 if [ ! -f "$SOURCE_DIR/codex-rs/core/src/tools/spec_plan.rs" ]; then
@@ -51,6 +101,17 @@ export OPENCLAW_PASSPORT_FILE="$TEST_ROOT/aport/passport.json"
 export OPENCLAW_DECISION_FILE="$TEST_ROOT/aport/decision.json"
 export OPENCLAW_AUDIT_LOG="$TEST_ROOT/aport/audit.log"
 export APORT_CODEX_TOOL_FALLBACK=off
+
+case "$TOOL_TIMEOUT_SECONDS" in
+    '' | *[!0-9]*)
+        echo "FAIL: APORT_CODEX_PROVIDER_TOOL_TIMEOUT must be a positive integer number of seconds" >&2
+        exit 1
+        ;;
+    0)
+        echo "FAIL: APORT_CODEX_PROVIDER_TOOL_TIMEOUT must be greater than zero" >&2
+        exit 1
+        ;;
+esac
 
 payload_for_tool() {
     local tool="$1"
@@ -87,17 +148,50 @@ payload_for_tool() {
       }'
 }
 
+kill_process_tree() {
+    local pid="$1"
+    local child children
+    children="$(pgrep -P "$pid" 2> /dev/null || true)"
+    for child in $children; do
+        kill_process_tree "$child"
+    done
+    kill "$pid" 2> /dev/null || true
+}
+
 failures=0
 while IFS= read -r tool; do
     [ -n "$tool" ] || continue
     out="$TEST_ROOT/out.json"
     err="$TEST_ROOT/err.txt"
-    rm -f "$out" "$err"
+    timeout_marker="$TEST_ROOT/timed-out"
+    rm -f "$out" "$err" "$timeout_marker"
 
     set +e
-    payload_for_tool "$tool" | "$REPO_ROOT/bin/aport-codex-hook.sh" > "$out" 2> "$err"
+    (
+        payload_for_tool "$tool" | "$REPO_ROOT/bin/lib/command-hook-adapter.sh" codex --classify-only
+    ) > "$out" 2> "$err" &
+    hook_pid=$!
+    (
+        sleep "$TOOL_TIMEOUT_SECONDS"
+        if kill -0 "$hook_pid" 2> /dev/null; then
+            printf '%s\n' "$tool" > "$timeout_marker"
+            kill_process_tree "$hook_pid"
+        fi
+    ) &
+    watchdog_pid=$!
+    wait "$hook_pid"
     exit_code=$?
+    kill "$watchdog_pid" 2> /dev/null || true
+    wait "$watchdog_pid" 2> /dev/null || true
     set -e
+
+    if [ -f "$timeout_marker" ]; then
+        echo "FAIL: Codex provider tool $tool exceeded ${TOOL_TIMEOUT_SECONDS}s during hook classification" >&2
+        cat "$out" >&2 || true
+        cat "$err" >&2 || true
+        failures=$((failures + 1))
+        continue
+    fi
 
     if [ -s "$out" ] && ! jq -e . "$out" > /dev/null 2>&1; then
         echo "FAIL: Codex provider tool $tool produced non-JSON hook stdout" >&2
