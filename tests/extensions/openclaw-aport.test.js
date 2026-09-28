@@ -239,6 +239,40 @@ describe("local evaluator", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("matches documented shell allowlist and blocked-pattern semantics locally", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const passport = JSON.parse(await readFile(passportPath, "utf8"));
+    passport.limits["system.command.execute"].allowed_commands = ["git"];
+    passport.limits["system.command.execute"].blocked_patterns = ["rm*"];
+    await writeFile(passportPath, JSON.stringify(passport), "utf8");
+
+    const prefixedExecutableDecision = evaluateLocalDecision({
+      policyName: "system.command.execute.v1",
+      context: { command: "github --version" },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(prefixedExecutableDecision.allow, false);
+    assert.strictEqual(prefixedExecutableDecision.reasons[0].code, "oap.command_not_allowed");
+
+    const globBlockedDecision = evaluateLocalDecision({
+      policyName: "system.command.execute.v1",
+      context: { command: "git rm -rf /tmp/x" },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(globBlockedDecision.allow, false);
+    assert.strictEqual(globBlockedDecision.reasons[0].code, "oap.blocked_pattern");
+
+    const chainedDecision = evaluateLocalDecision({
+      policyName: "system.command.execute.v1",
+      context: { command: "git status && rm -rf /tmp/x" },
+      passportFile: passportPath,
+    });
+    assert.strictEqual(chainedDecision.allow, false);
+    assert.strictEqual(chainedDecision.reasons[0].code, "oap.command_chain_unsupported");
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("denies catastrophic commands even when the command allowlist is wildcard", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const passport = JSON.parse(await readFile(passportPath, "utf8"));
@@ -261,6 +295,27 @@ describe("local evaluator", () => {
 
       assert.strictEqual(decision.allow, false, command);
       assert.strictEqual(decision.reasons[0].code, "oap.dangerous_operation", command);
+    }
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("denies exact default sensitive read directories locally", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const passport = JSON.parse(await readFile(passportPath, "utf8"));
+    passport.capabilities.push({ id: "data.file.read" });
+    passport.limits["data.file.read"] = { allowed_paths: ["*"] };
+    await writeFile(passportPath, JSON.stringify(passport), "utf8");
+
+    for (const filePath of ["/home/u/.ssh", "/home/u/.aws", "/home/u/.gnupg", "/home/u/.kube"]) {
+      const decision = evaluateLocalDecision({
+        policyName: "data.file.read.v1",
+        context: { file_path: filePath },
+        passportFile: passportPath,
+      });
+
+      assert.strictEqual(decision.allow, false, filePath);
+      assert.strictEqual(decision.reasons[0].code, "oap.blocked_pattern", filePath);
     }
 
     await rm(tempDir, { recursive: true, force: true });
@@ -707,7 +762,7 @@ describe("plugin hook contract", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("allows unmapped tools in warn mode while surfacing the unknown-tool warning", async () => {
+  it("keeps unmapped tools blocking in warn mode", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const beforeToolCall = await registerPlugin({
       mode: "local",
@@ -716,7 +771,8 @@ describe("plugin hook contract", () => {
     });
 
     const result = await beforeToolCall({ toolName: "new_host_tool", params: {} });
-    assert.deepStrictEqual(result, {});
+    assert.strictEqual(result.block, true);
+    assert.match(result.blockReason, /oap\.unknown_tool/);
 
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -877,7 +933,7 @@ describe("plugin hook contract", () => {
     }
   });
 
-  it("honors warn mode when an API decision integrity check fails", async () => {
+  it("keeps API decision integrity failures blocking in warn mode", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => ({
       ok: true,
@@ -900,7 +956,28 @@ describe("plugin hook contract", () => {
         enforcementMode: "warn",
       });
       const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
-      assert.deepStrictEqual(result, {});
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.decision_integrity_failed/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps API evaluator errors blocking in warn mode", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("network down");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.policy_error/);
     } finally {
       globalThis.fetch = originalFetch;
     }

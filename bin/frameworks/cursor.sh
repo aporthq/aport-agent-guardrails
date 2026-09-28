@@ -20,7 +20,25 @@ source "$LIB/runtime.sh"
 source "$LIB/quick-hosted.sh"
 
 APORT_HOOK_MARKER="__aport_hook"
-APORT_HOOK_TIMEOUT=10
+# Cursor reads "timeout" in seconds. failClosed: true makes crashes, timeouts and
+# non-2 exit codes block instead of Cursor's default fail-open. The budget follows the
+# evaluator's request bound (APORT_API_TIMEOUT, default 15 s, src/evaluator.js) plus a
+# 15 s margin for node startup and the audit write, so a slow hosted evaluator is
+# reported as oap.evaluation_error with a reason instead of a bare hook timeout.
+# aport_hook_timeout_seconds applies the evaluator's own normalization and clamps explicit overrides, so low
+# values cannot make the host timeout before the evaluator.
+APORT_HOOK_TIMEOUT="$(aport_hook_timeout_seconds)"
+
+# beforeTabFileRead gates file reads made by Tab (inline completions), not by
+# the Agent. It is opt-in because it runs the evaluator on every Tab file read
+# and a passport without data.file.read would block completions entirely.
+# Set APORT_CURSOR_TAB_READ_HOOK=1 at install time to register it.
+aport_cursor_tab_read_hook_enabled() {
+    case "${APORT_CURSOR_TAB_READ_HOOK:-}" in
+        1 | true | yes | on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 run_setup() {
     parse_guardrail_mode_args "$@"
@@ -73,10 +91,18 @@ run_setup() {
         HOOK_SCRIPT="$(cd "$(dirname "$HOOK_SCRIPT")" && pwd)/$(basename "$HOOK_SCRIPT")"
     fi
 
-    # Write Cursor hooks config: beforeShellExecution and preToolUse run the same script
+    # Write Cursor hooks config: every permission hook runs the same script.
+    # Cursor loads ~/.cursor/hooks.json (user), <project>/.cursor/hooks.json
+    # (project) and enterprise-managed files; cloud agents read only project,
+    # team and enterprise hooks, never the user file written here.
     CURSOR_HOOKS_DIR="${CURSOR_HOOKS_DIR:-$HOME/.cursor}"
+    CURSOR_HOOKS_DIR="${CURSOR_HOOKS_DIR/#\~/$HOME}"
     CURSOR_HOOKS_FILE="$CURSOR_HOOKS_DIR/hooks.json"
+    refuse_symlink_path "$CURSOR_HOOKS_DIR" || exit 1
+    refuse_symlink_path "$CURSOR_HOOKS_FILE" || exit 1
     mkdir -p "$CURSOR_HOOKS_DIR"
+    local tab_json=false
+    aport_cursor_tab_read_hook_enabled && tab_json=true
 
     # Merge with existing hooks.json if present; otherwise create new.
     if [ -f "$CURSOR_HOOKS_FILE" ]; then
@@ -88,22 +114,28 @@ run_setup() {
             log_error "Refusing to overwrite invalid Cursor hooks JSON: $CURSOR_HOOKS_FILE"
             exit 1
         fi
-        # Add APort hook to all supported lifecycle events.
+        # Add APort hook to all supported permission events.
         # Replace marker-owned or legacy APort entries, preserve non-APort hooks.
-        NEW_HOOKS=$(jq -c --arg cmd "$HOOK_SCRIPT" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" '
+        # beforeTabFileRead is only written when opted in; otherwise any APort
+        # entry left there by an earlier opt-in install is removed.
+        NEW_HOOKS=$(jq -c --arg cmd "$HOOK_SCRIPT" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" --argjson tab "$tab_json" '
         def aport_hook($cmd; $marker; $timeout):
           { "command": $cmd, ($marker): true, "timeout": $timeout, "failClosed": true };
         def is_aport_cursor_hook:
           (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-cursor-hook\\.sh($|[[:space:]])"));
+        def strip_hook:
+          (. // []) | map(select(is_aport_cursor_hook | not));
         def upsert_hook:
-          (. // []) | map(select(is_aport_cursor_hook | not)) | . + [aport_hook($cmd; $marker; $timeout)];
+          strip_hook | . + [aport_hook($cmd; $marker; $timeout)];
         .version = (.version // 1) |
         .hooks = (.hooks // {}) |
         .hooks.beforeShellExecution = ((.hooks.beforeShellExecution // []) | upsert_hook) |
         .hooks.preToolUse = ((.hooks.preToolUse // []) | upsert_hook) |
         .hooks.beforeMCPExecution = ((.hooks.beforeMCPExecution // []) | upsert_hook) |
         .hooks.beforeReadFile = ((.hooks.beforeReadFile // []) | upsert_hook) |
-        .hooks.subagentStart = ((.hooks.subagentStart // []) | upsert_hook)
+        .hooks.subagentStart = ((.hooks.subagentStart // []) | upsert_hook) |
+        .hooks.beforeTabFileRead = ((.hooks.beforeTabFileRead // []) | strip_hook | if $tab then . + [aport_hook($cmd; $marker; $timeout)] else . end) |
+        if (.hooks.beforeTabFileRead | length) == 0 then del(.hooks.beforeTabFileRead) else . end
       ' "$CURSOR_HOOKS_FILE")
         cp "$CURSOR_HOOKS_FILE" "${CURSOR_HOOKS_FILE}.bak"
         echo "$NEW_HOOKS" > "$CURSOR_HOOKS_FILE"
@@ -125,6 +157,11 @@ run_setup() {
     echo "  4. Mode config: $MODE_FILE"
     echo "  5. Restart Cursor (or reload window) so hooks are picked up."
     echo "  6. Shell commands and tool use will be checked by APort policy (exit 2 = block)."
+    if aport_cursor_tab_read_hook_enabled; then
+        echo "  7. beforeTabFileRead is registered: Tab completion file reads are checked too."
+    else
+        echo "  7. Tab completion file reads are not checked. Re-run with APORT_CURSOR_TAB_READ_HOOK=1 to add beforeTabFileRead."
+    fi
     echo ""
     echo "  For other frameworks like Claude Code, use the dedicated integration: docs/frameworks"
     echo ""
@@ -133,29 +170,39 @@ run_setup() {
 _write_cursor_hooks_file() {
     local file="$1"
     local cmd="$2"
+    local tab_json=false
+    aport_cursor_tab_read_hook_enabled && tab_json=true
     if command -v jq &> /dev/null; then
-        jq -n -c --arg cmd "$cmd" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" '{
+        jq -n -c --arg cmd "$cmd" --arg marker "$APORT_HOOK_MARKER" --argjson timeout "$APORT_HOOK_TIMEOUT" --argjson tab "$tab_json" '
+    def aport_hook: { command: $cmd, ($marker): true, timeout: $timeout, failClosed: true };
+    {
       version: 1,
-      hooks: {
-        beforeShellExecution: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }],
-        preToolUse: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }],
-        beforeMCPExecution: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }],
-        beforeReadFile: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }],
-        subagentStart: [{ command: $cmd, ($marker): true, timeout: $timeout, failClosed: true }]
-      }
+      hooks: ({
+        beforeShellExecution: [aport_hook],
+        preToolUse: [aport_hook],
+        beforeMCPExecution: [aport_hook],
+        beforeReadFile: [aport_hook],
+        subagentStart: [aport_hook]
+      } + (if $tab then { beforeTabFileRead: [aport_hook] } else {} end))
     }' > "$file"
     else
-        local escaped_cmd
+        # One hook entry, built once, so the timeout here and in the jq path are the same value.
+        local escaped_cmd entry tab_entry=""
         escaped_cmd="$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+        entry="{\"command\": \"${escaped_cmd}\", \"${APORT_HOOK_MARKER}\": true, \"timeout\": ${APORT_HOOK_TIMEOUT}, \"failClosed\": true}"
+        if [[ "$tab_json" = true ]]; then
+            tab_entry=",
+    \"beforeTabFileRead\": [${entry}]"
+        fi
         cat > "$file" << EOF
 {
   "version": 1,
   "hooks": {
-    "beforeShellExecution": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}],
-    "preToolUse": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}],
-    "beforeMCPExecution": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}],
-    "beforeReadFile": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}],
-    "subagentStart": [{"command": "${escaped_cmd}", "__aport_hook": true, "timeout": 10, "failClosed": true}]
+    "beforeShellExecution": [${entry}],
+    "preToolUse": [${entry}],
+    "beforeMCPExecution": [${entry}],
+    "beforeReadFile": [${entry}],
+    "subagentStart": [${entry}]${tab_entry}
   }
 }
 EOF

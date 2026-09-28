@@ -1,5 +1,19 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.34
+
+### Minor Changes
+
+- Installer: reuse an APort passport that another framework already has on this device. Interactive installs list hosted and local passports found under the other frameworks' state directories and offer them before the hosted/local menu; non-interactive installs opt in with `--reuse-from=<framework|passport.json path|agent_id>` (env `APORT_REUSE_PASSPORT_FROM`). Local reuse copies the file and skips the wizard; hosted reuse configures the same agent id, API key and URL. See docs/PASSPORT_REUSE.md.
+
+  Hosted mode: the context sent to the verify API for shell tools is now shaped to the API schema. An empty or path-form `shell` (for example `""` from Codex, or `/bin/bash`) was rejected with HTTP 400 `context_validation_failed` and surfaced to the agent as `oap.evaluation_error`, denying every Bash call in API mode. The value is reduced to its basename and dropped when it is not one of the accepted shells.
+
+  Claude Code: a Bash call with no `timeout` now sends the CLI's documented default (120000 ms, as `timeout: 120`). The hosted `system.command.execute.v1` rule requires timeout evidence whenever the passport sets `max_execution_time`, so every ordinary shell command under such a passport was denied with `oap.limit_exceeded`.
+
+### Patch Changes
+
+- Review the Claude Code PreToolUse hook against the current upstream hooks reference (framework drift issue #107). Raise the registered hook `timeout` from 10 to 30 seconds because Claude Code now documents that a timed-out PreToolUse command hook does not block and the hosted evaluator request alone may take 15 seconds. Convert the Bash/PowerShell/Monitor `tool_input.timeout` from milliseconds to seconds before the `max_execution_time` check. Read the `mcp_server` object (`name`, `source`) that Claude Code 2.1.274+ sends for MCP tools instead of stringifying it. Allow the new read-only and internal tools `ListAgents`, `ReportFindings` and `SubagentHandback`; `SendUserFile` stays unmapped and denied. Export `CLAUDE_CODE_INTERNAL_TOOLS` from the Node package, drop the stale `TodoWrite: write` mapping there, add `Workflow`, and document the output contract, permission-mode behaviour and settings precedence in `docs/frameworks/claude-code.md`.
+
 ## 1.0.33
 
 ### Patch Changes

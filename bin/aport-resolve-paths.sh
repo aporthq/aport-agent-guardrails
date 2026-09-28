@@ -17,7 +17,7 @@ resolve_aport_paths() {
     local explicit_passport="${APORT_PASSPORT_FILE:-${OPENCLAW_PASSPORT_FILE:-}}"
     local explicit_decision="${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-}}"
     local explicit_audit="${APORT_AUDIT_LOG:-${OPENCLAW_AUDIT_LOG:-}}"
-    local explicit_config="${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+    local explicit_config="${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}"
 
     # Source validation if available (for validate_passport_path)
     local _resolve_script_dir

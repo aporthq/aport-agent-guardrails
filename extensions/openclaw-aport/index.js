@@ -71,15 +71,18 @@ export default definePluginEntry({
             return {};
           }
           const notice = formatGuardrailNotice({
-            outcome: enforcement === "warn" ? "warn" : "deny",
+            outcome: "deny",
             policy: "hook.tool.map",
             code: "oap.unknown_tool",
             message: `No policy mapping for ${toolName}`,
             agentId,
             passportFile,
           });
-          log(`[APort] ${enforcement === "warn" ? "WARN" : "BLOCKED"}: ${toolName} - no policy mapping`);
-          if (enforcement === "warn") return {};
+          log(`[APort] ${failClosed ? "BLOCKED" : "ALLOW"}: ${toolName} - no policy mapping`);
+          if (!failClosed) {
+            warn(`[APort] Allowing unmapped tool because failClosed is disabled. ${notice}`);
+            return {};
+          }
           return {
             block: true,
             blockReason: notice,
@@ -138,7 +141,7 @@ export default definePluginEntry({
 
         if (!verifyDecisionIntegrity(decision)) {
           const notice = formatGuardrailNotice({
-            outcome: enforcement === "warn" ? "warn" : "deny",
+            outcome: "deny",
             policy: effectivePolicyName,
             code: "oap.decision_integrity_failed",
             message: "Decision integrity verification failed.",
@@ -146,8 +149,8 @@ export default definePluginEntry({
             passportFile,
           });
           err(`[APort] Decision integrity check failed for ${effectiveToolName} - content_hash mismatch`);
-          if (enforcement === "warn") {
-            warn(`[APort] WARN: decision integrity failed; report-only mode allowed the tool. ${notice}`);
+          if (!failClosed) {
+            warn(`[APort] Allowing tool despite decision integrity failure because failClosed is disabled. ${notice}`);
             return {};
           }
           return {
@@ -194,7 +197,7 @@ export default definePluginEntry({
         return {};
       } catch (error) {
         err(`[APort] Error evaluating policy: ${sanitizeDisplayText(error.message)}`);
-        if (failClosed && enforcement !== "warn") {
+        if (failClosed) {
           return {
             block: true,
             blockReason: formatGuardrailNotice({
@@ -208,9 +211,7 @@ export default definePluginEntry({
           };
         }
         warn(
-          enforcement === "warn"
-            ? `[APort] WARN: policy evaluation failed; report-only mode allowed the tool. ${policyReference({ agentId, passportFile })}`
-            : "[APort] Allowing tool despite policy evaluation error because failClosed is disabled.",
+          `[APort] Allowing tool despite policy evaluation error because failClosed is disabled. ${policyReference({ agentId, passportFile })}`,
         );
         return {};
       }

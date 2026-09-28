@@ -1,5 +1,11 @@
 # Changelog - APort OpenClaw Plugin
 
+## 1.0.34
+
+### Patch Changes
+
+- Review the OpenClaw plugin against OpenClaw v2026.9.5 (framework drift issue #107): the `before_tool_call` hook name, event fields, and `block`/`blockReason` return shape are unchanged, no deprecated SDK subpaths are imported, and the manifest still validates. Align the README OpenClaw badge with the declared `>=2026.4.11` host floor, document the Node 24.16+ host requirement introduced in OpenClaw 2026.9.3, rewrite `docs/OPENCLAW_COMPATIBILITY.md` as a hook contract matrix with reviewed deprecations and open risks, and add `tests/unit/test-openclaw-plugin-contract.sh` to pin the contract.
+
 ## 1.0.33
 
 ### Patch Changes

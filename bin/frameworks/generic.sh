@@ -183,6 +183,8 @@ run_setup() {
     elif aport_maybe_configure_hosted_passport "$framework" "$config_dir"; then
         hosted_agent_id="$APORT_AGENT_ID"
         log_info "Using hosted passport (agent_id: $hosted_agent_id) — skipping wizard."
+    elif [[ -n "${APORT_PASSPORT_REUSED:-}" ]]; then
+        log_info "Using passport reused from ${APORT_PASSPORT_REUSED_FROM:-another framework}; the wizard is skipped."
     elif ((${#FORWARD_ARGS[@]} > 0)); then
         run_passport_wizard "${FORWARD_ARGS[@]}"
     else

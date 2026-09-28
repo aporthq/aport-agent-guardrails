@@ -163,6 +163,15 @@ cat > "$CURSOR_DIR/hooks.json" << 'EOF'
     ],
     "preToolUse": [
       {"command":"/tmp/aport-cursor-hook.sh","__aport_hook":true,"timeout":10}
+    ],
+    "beforeReadFile": [
+      {"command":"/tmp/aport-cursor-hook.sh","__aport_hook":true,"timeout":10,"failClosed":true}
+    ],
+    "beforeTabFileRead": [
+      {"command":"/tmp/aport-cursor-hook.sh","__aport_hook":true,"timeout":10,"failClosed":true}
+    ],
+    "afterFileEdit": [
+      {"command":"/usr/local/bin/custom-after-edit.sh"}
     ]
   }
 }
@@ -177,17 +186,19 @@ if [[ -d "$CURSOR_DIR/aport" ]]; then
     exit 1
 fi
 
-CURSOR_APORT_COUNT=$(jq -r '[
-    .hooks.beforeShellExecution[]?,
-    .hooks.preToolUse[]?,
-    .hooks.beforeMCPExecution[]?,
-    .hooks.subagentStart[]?
-] | map(select(.__aport_hook == true)) | length' "$CURSOR_DIR/hooks.json")
+# Every event, including beforeReadFile and beforeTabFileRead: an entry left behind would point at the removed
+# script with failClosed and block reads.
+CURSOR_APORT_COUNT=$(jq -r '[.hooks // {} | .[] | .[]? | select(.__aport_hook == true)] | length' "$CURSOR_DIR/hooks.json")
 if [[ "$CURSOR_APORT_COUNT" -ne 0 ]]; then
-    echo "FAIL: expected marker-owned Cursor hook entries to be removed" >&2
+    echo "FAIL: expected marker-owned Cursor hook entries to be removed from every event" >&2
     cat "$CURSOR_DIR/hooks.json" >&2
     exit 1
 fi
+jq -e '(.hooks | has("beforeReadFile") | not) and (.hooks | has("beforeTabFileRead") | not) and (.hooks.afterFileEdit | length == 1)' "$CURSOR_DIR/hooks.json" > /dev/null || {
+    echo "FAIL: emptied events must be dropped and a custom event must survive reset" >&2
+    cat "$CURSOR_DIR/hooks.json" >&2
+    exit 1
+}
 
 CURSOR_UNMARKED_COUNT=$(jq -r '[.hooks.beforeShellExecution[]? | select(.command == "/opt/custom/aport-cursor-hook.sh")] | length' "$CURSOR_DIR/hooks.json")
 if [[ "$CURSOR_UNMARKED_COUNT" -ne 0 ]]; then
@@ -266,6 +277,84 @@ if [[ "$CURSOR_SPECIFIC_OVERRIDE_COUNT" -ne 0 ]]; then
 fi
 
 echo "  ✅ reset cursor prefers framework-specific config over generic APORT_CONFIG_DIR"
+
+CURSOR_SPLIT_STATE_DIR="$TEST_DIR/cursor-split-state"
+CURSOR_SPLIT_HOOKS_DIR="$TEST_DIR/cursor-split-hooks"
+mkdir -p "$CURSOR_SPLIT_STATE_DIR/aport" "$CURSOR_SPLIT_HOOKS_DIR"
+cat > "$CURSOR_SPLIT_HOOKS_DIR/hooks.json" << EOF
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {"command":"$CURSOR_SPLIT_STATE_DIR/aport/runtime/bin/aport-cursor-hook.sh","__aport_hook":true,"timeout":30,"failClosed":true},
+      {"command":"/usr/local/bin/custom-cursor-hook.sh"}
+    ]
+  }
+}
+EOF
+touch "$CURSOR_SPLIT_STATE_DIR/aport/passport.json"
+
+echo "  Test: reset cursor honors CURSOR_HOOKS_DIR when state is split..."
+APORT_CURSOR_CONFIG_DIR="$CURSOR_SPLIT_STATE_DIR" CURSOR_HOOKS_DIR="$CURSOR_SPLIT_HOOKS_DIR" "$DISPATCHER" reset cursor --yes > "$TEST_DIR/reset-cursor-split-hooks.txt" 2>&1
+if [[ -d "$CURSOR_SPLIT_STATE_DIR/aport" ]]; then
+    echo "FAIL: expected split Cursor state to be removed after hooks cleanup" >&2
+    cat "$TEST_DIR/reset-cursor-split-hooks.txt" >&2
+    exit 1
+fi
+CURSOR_SPLIT_APORT_COUNT=$(jq -r '[.hooks.preToolUse[]? | select(.__aport_hook == true)] | length' "$CURSOR_SPLIT_HOOKS_DIR/hooks.json")
+if [[ "$CURSOR_SPLIT_APORT_COUNT" -ne 0 ]]; then
+    echo "FAIL: reset cursor should remove APort hook entries from CURSOR_HOOKS_DIR" >&2
+    cat "$CURSOR_SPLIT_HOOKS_DIR/hooks.json" >&2
+    exit 1
+fi
+CURSOR_SPLIT_CUSTOM_COUNT=$(jq -r '[.hooks.preToolUse[]? | select(.command == "/usr/local/bin/custom-cursor-hook.sh")] | length' "$CURSOR_SPLIT_HOOKS_DIR/hooks.json")
+if [[ "$CURSOR_SPLIT_CUSTOM_COUNT" -ne 1 ]]; then
+    echo "FAIL: reset cursor should preserve custom hooks in CURSOR_HOOKS_DIR" >&2
+    cat "$CURSOR_SPLIT_HOOKS_DIR/hooks.json" >&2
+    exit 1
+fi
+
+echo "  ✅ reset cursor honors CURSOR_HOOKS_DIR when state is split"
+
+OPENCLAW_STATE_RESET_DIR="$TEST_DIR/openclaw-state-reset"
+OPENCLAW_HOME_RESET_DIR="$TEST_DIR/openclaw-home-reset"
+mkdir -p "$OPENCLAW_STATE_RESET_DIR/aport" "$OPENCLAW_HOME_RESET_DIR/aport"
+cat > "$OPENCLAW_STATE_RESET_DIR/openclaw.json" << 'EOF'
+{
+  "plugins": {
+    "entries": {
+      "openclaw-aport": {
+        "enabled": true,
+        "config": {"mode": "api", "agentId": "ap_state_existing"}
+      },
+      "custom-plugin": {
+        "enabled": true
+      }
+    }
+  }
+}
+EOF
+touch "$OPENCLAW_STATE_RESET_DIR/aport/passport.json" "$OPENCLAW_HOME_RESET_DIR/aport/passport.json"
+
+echo "  Test: reset openclaw honors OPENCLAW_STATE_DIR..."
+OPENCLAW_STATE_DIR="$OPENCLAW_STATE_RESET_DIR" OPENCLAW_HOME="$OPENCLAW_HOME_RESET_DIR" "$DISPATCHER" reset openclaw --yes > "$TEST_DIR/reset-openclaw-state-dir.txt" 2>&1
+if [[ -d "$OPENCLAW_STATE_RESET_DIR/aport" ]]; then
+    echo "FAIL: expected OpenClaw state dir APort runtime to be removed" >&2
+    cat "$TEST_DIR/reset-openclaw-state-dir.txt" >&2
+    exit 1
+fi
+if [[ ! -f "$OPENCLAW_HOME_RESET_DIR/aport/passport.json" ]]; then
+    echo "FAIL: reset openclaw removed OPENCLAW_HOME instead of OPENCLAW_STATE_DIR" >&2
+    cat "$TEST_DIR/reset-openclaw-state-dir.txt" >&2
+    exit 1
+fi
+jq -e '(.plugins.entries | has("openclaw-aport") | not) and (.plugins.entries["custom-plugin"].enabled == true)' "$OPENCLAW_STATE_RESET_DIR/openclaw.json" > /dev/null || {
+    echo "FAIL: reset openclaw should clean only APort plugin entries from OPENCLAW_STATE_DIR" >&2
+    cat "$OPENCLAW_STATE_RESET_DIR/openclaw.json" >&2
+    exit 1
+}
+
+echo "  ✅ reset openclaw honors OPENCLAW_STATE_DIR"
 
 CODEX_DIR="$TEST_DIR/.codex"
 mkdir -p "$CODEX_DIR/aport"

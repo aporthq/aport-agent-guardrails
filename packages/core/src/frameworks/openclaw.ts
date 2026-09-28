@@ -9,7 +9,7 @@ export const openclawAdapter: BaseAdapter = {
   name: 'openclaw',
 
   async detect() {
-    // Check for ~/.openclaw or OPENCLAW_HOME
+    // Check for ~/.openclaw, OPENCLAW_STATE_DIR, or OPENCLAW_HOME.
     return false;
   },
 

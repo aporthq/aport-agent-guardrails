@@ -134,6 +134,7 @@ export HOME="$TEST_HOME"
 run_cmd "Validate passport schema JSON" jq . external/aport-spec/oap/examples/passport.template.v1.json
 run_cmd "ShellCheck" bash -lc "shellcheck -S error --color=always --shell=bash \$(find bin enterprise-scripts scripts tests -name '*.sh' -type f | tr '\n' ' ')"
 run_cmd "shfmt" bash -lc "find bin enterprise-scripts scripts tests -name '*.sh' -type f -print0 | xargs -0 shfmt -d"
+run_cmd "Codex provider tool surface drift" bash scripts/check-codex-provider-tool-surface.sh
 run_cmd "Repo test suite" make test
 run_cmd "Node build" npm run build
 run_cmd "Node workspace tests" npm run test -w @aporthq/aport-agent-guardrails-core -w @aporthq/aport-agent-guardrails-langchain
