@@ -23,18 +23,24 @@ if (!fs.existsSync(mustExist)) {
   process.exit(2);
 }
 
-const sourceRoots = [
+const staticSourceRoots = [
   "codex-rs/code-mode-protocol/src",
   "codex-rs/tools/src",
   "codex-rs/core/src/tools",
-  "codex-rs/ext/image-generation/src",
-  "codex-rs/ext/web-search/src",
-  "codex-rs/ext/memories/src",
-  "codex-rs/ext/goal/src",
-  "codex-rs/ext/skills/src/tools",
-  "codex-rs/ext/history-notes/src",
-  "codex-rs/ext/agent-message-board/src/tools",
 ];
+
+function extensionSourceRoots() {
+  const extRoot = path.join(absRoot, "codex-rs", "ext");
+  if (!fs.existsSync(extRoot)) return [];
+  return fs
+    .readdirSync(extRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join("codex-rs", "ext", entry.name, "src"))
+    .filter((dir) => fs.existsSync(path.join(absRoot, dir)))
+    .sort();
+}
+
+const sourceRoots = [...staticSourceRoots, ...extensionSourceRoots()];
 
 function walk(dir, files = []) {
   if (!fs.existsSync(dir)) return files;
@@ -52,7 +58,7 @@ function walk(dir, files = []) {
   return files;
 }
 
-const files = sourceRoots.flatMap((dir) => walk(path.join(absRoot, dir)));
+const files = [...new Set(sourceRoots.flatMap((dir) => walk(path.join(absRoot, dir))))];
 
 function productionText(text) {
   const cfgTest = text.search(/#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/);

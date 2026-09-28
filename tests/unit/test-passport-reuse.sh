@@ -232,6 +232,38 @@ rm -f "$HOME/.claude/aport/passport.json.bak"
 unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM APORT_PASSPORT_REUSE_DECIDED APORT_REUSE_PASSPORT_FROM_CLI
 echo "PASS: menu leaves an existing passport alone; explicit overwrite keeps a backup"
 
+write_test_passport "$HOME/.claude/aport/passport.json" "current-passport"
+write_test_passport "$HOME/.claude/aport/passport.json.bak" "requested-backup"
+export APORT_NONINTERACTIVE=1 APORT_REUSE_PASSPORT_FROM_CLI="$HOME/.claude/aport/passport.json.bak"
+if aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null; then fail "local backup reuse must return 1"; fi
+grep -q requested-backup "$HOME/.claude/aport/passport.json" || fail "requested backup passport must be installed"
+grep -q current-passport "$HOME/.claude/aport/passport.json.bak" || fail "current passport must become the new backup"
+unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM APORT_PASSPORT_REUSE_DECIDED APORT_REUSE_PASSPORT_FROM_CLI
+echo "PASS: explicit reuse from destination backup preserves both passports"
+
+write_test_passport "$HOME/.claude/aport/passport.json" "current-passport-relative"
+write_test_passport "$HOME/.claude/aport/passport.json.bak" "requested-backup-relative"
+(
+    cd "$HOME" || exit 1
+    export APORT_NONINTERACTIVE=1 APORT_REUSE_PASSPORT_FROM_CLI=".claude/aport/passport.json.bak"
+    unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM APORT_PASSPORT_REUSE_DECIDED
+    if aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null; then fail "relative local backup reuse must return 1"; fi
+)
+grep -q requested-backup-relative "$HOME/.claude/aport/passport.json" || fail "relative requested backup passport must be installed"
+grep -q current-passport-relative "$HOME/.claude/aport/passport.json.bak" || fail "relative current passport must become the new backup"
+rm -f "$HOME/.claude/aport/passport.json.bak"
+write_test_passport "$HOME/.claude/aport/passport.json" "same-destination"
+(
+    cd "$HOME" || exit 1
+    export APORT_NONINTERACTIVE=1 APORT_REUSE_PASSPORT_FROM_CLI=".claude/aport/passport.json"
+    unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM APORT_PASSPORT_REUSE_DECIDED
+    if aport_maybe_configure_hosted_passport claude-code "$HOME/.claude" < /dev/null; then fail "same-destination local reuse must return 1"; fi
+)
+grep -q same-destination "$HOME/.claude/aport/passport.json" || fail "same-destination reuse must leave the passport unchanged"
+[[ ! -f "$HOME/.claude/aport/passport.json.bak" ]] || fail "same-destination reuse must not rotate a backup"
+unset APORT_PASSPORT_REUSED APORT_PASSPORT_REUSED_FROM APORT_PASSPORT_REUSE_DECIDED APORT_REUSE_PASSPORT_FROM_CLI
+echo "PASS: local reuse detects backup and destination aliases by file identity"
+
 # 13. A planted symlink at the destination is refused, like every other passport write path.
 mkdir -p "$HOME/victim" "$HOME/.gemini/aport"
 printf '{"passport_id":"victim"}\n' > "$HOME/victim/secret.json"

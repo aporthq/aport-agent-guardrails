@@ -13,6 +13,7 @@ fail() {
 }
 
 mkdir -p "$SOURCE_DIR/codex-rs/core/src/tools"
+mkdir -p "$SOURCE_DIR/codex-rs/ext/future-provider/src"
 
 cat > "$SOURCE_DIR/codex-rs/core/src/tools/spec_plan.rs" << 'EOF'
 pub(crate) const SPEC_PLAN_TOOL: &str = "fixture_spec_plan_tool";
@@ -28,10 +29,18 @@ pub(crate) fn browser_tool() -> ToolName {
 }
 EOF
 
+cat > "$SOURCE_DIR/codex-rs/ext/future-provider/src/lib.rs" << 'EOF'
+pub(crate) fn future_extension_tool() -> ToolName {
+    ToolName::plain("fixture_future_extension_tool")
+}
+EOF
+
 out="$(node "$REPO_ROOT/scripts/extract-codex-provider-tools.mjs" "$SOURCE_DIR")"
 printf '%s\n' "$out" | grep -Fx "fixture_spec_plan_tool" > /dev/null \
     || fail "tool declared in core/src/tools/spec_plan.rs was not extracted: $out"
 printf '%s\n' "$out" | grep -Fx "fixture_sibling_spec_tool" > /dev/null \
     || fail "tool declared in a sibling core/src/tools spec module was not extracted: $out"
+printf '%s\n' "$out" | grep -Fx "fixture_future_extension_tool" > /dev/null \
+    || fail "tool declared in a newly discovered extension was not extracted: $out"
 
 echo "PASS: Codex provider extractor scans core tool specs"
