@@ -157,16 +157,16 @@ run_optional_scans() {
 
 cd "$REPO_ROOT"
 mkdir -p "$TEST_HOME"
-if [[ -z "${APORT_CODEX_PROVIDER_SOURCE_DIR:-}" && -z "${APORT_CODEX_PROVIDER_CACHE_DIR:-}" && -z "${CI:-}" && -n "$REAL_HOME" ]]; then
-    cache_root="${REAL_XDG_CACHE_HOME:-$REAL_HOME/.cache}/aport/codex-provider"
-    cache_key="$(printf '%s' "${APORT_CODEX_PROVIDER_REF:-main}" | tr -c 'A-Za-z0-9._-' '_')"
-    export APORT_CODEX_PROVIDER_CACHE_DIR="$cache_root/$cache_key"
+if [[ -z "${APORT_CODEX_PROVIDER_SOURCE_DIR:-}" && -z "${APORT_CODEX_PROVIDER_CACHE_DIR:-}" && -z "${APORT_CODEX_PROVIDER_CACHE_ROOT:-}" && -z "${CI:-}" && -n "$REAL_HOME" ]]; then
+    export APORT_CODEX_PROVIDER_CACHE_ROOT="${REAL_XDG_CACHE_HOME:-$REAL_HOME/.cache}/aport/codex-provider"
 fi
 export HOME="$TEST_HOME"
 
 case "$PRE_PUSH_LEVEL" in
     fast)
         run_fast_checks
+        run_openclaw_e2e
+        run_optional_scans
         log_step "Fast pre-push checks passed (set APORT_PRE_PUSH_LEVEL=full for CI-equivalent local checks)"
         exit 0
         ;;
