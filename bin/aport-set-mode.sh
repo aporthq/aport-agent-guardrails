@@ -15,7 +15,15 @@ source "$LIB/guardrail-mode.sh"
 # shellcheck source=lib/framework-setup.sh
 source "$LIB/framework-setup.sh"
 
-SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n)
+# Mode switching is only meaningful where an enforcement hook exists, so the gated targets that the
+# installer accepts (to explain why they are not enabled) are filtered out here rather than listed a
+# second time. Reporting "enforce mode" for a framework with no hook would promise protection that is
+# not installed.
+SUPPORTED_FRAMEWORKS=()
+for _fw in "${APORT_SUPPORTED_FRAMEWORKS[@]}"; do
+    aport_framework_is_gated "$_fw" || SUPPORTED_FRAMEWORKS+=("$_fw")
+done
+unset _fw
 
 usage() {
     cat << 'EOF'
@@ -54,12 +62,21 @@ for supported in "${SUPPORTED_FRAMEWORKS[@]}"; do
     fi
 done
 if [[ "$is_supported" != true ]]; then
-    log_error "Unsupported framework: $framework"
-    echo "Supported: ${SUPPORTED_FRAMEWORKS[*]}" >&2
+    if aport_framework_is_gated "$framework"; then
+        log_error "$framework has no APort enforcement hook yet, so there is no mode to switch."
+        echo "Run: aport-agent-guardrails $framework    (it explains what is still missing)" >&2
+    else
+        log_error "Unsupported framework: $framework"
+        echo "Supported: ${SUPPORTED_FRAMEWORKS[*]}" >&2
+    fi
     exit 1
 fi
 
 parse_guardrail_mode_args "$@"
+if [[ -n "${APORT_REUSE_PASSPORT_FROM_CLI:-}" ]]; then
+    log_error "--reuse-from is an install option, not a mode option. Run: aport-agent-guardrails $framework --reuse-from=${APORT_REUSE_PASSPORT_FROM_CLI}"
+    exit 1
+fi
 if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -gt 0 ]]; then
     if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -eq 1 && ("${APORT_FRAMEWORK_ARGS[0]}" == "--help" || "${APORT_FRAMEWORK_ARGS[0]}" == "-h") ]]; then
         usage
@@ -75,7 +92,7 @@ has_explicit_config_dir_override() {
 
     case "$framework" in
         openclaw)
-            [[ -n "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}" ]]
+            [[ -n "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}" ]]
             ;;
         cursor)
             [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" ]]
@@ -113,7 +130,7 @@ has_explicit_config_dir_override() {
 framework_specific_config_dir_override() {
     case "$framework" in
         openclaw)
-            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}"
             ;;
         cursor)
             printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}"

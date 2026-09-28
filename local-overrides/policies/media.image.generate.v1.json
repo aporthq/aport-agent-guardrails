@@ -1,0 +1,153 @@
+{
+  "id": "media.image.generate.v1",
+  "name": "Image Generation Policy",
+  "description": "Pre-action governance for AI image generation and image editing requests. Enforces provider allowlists, prompt metadata limits, referenced-image limits, output count limits, and output format restrictions without requiring raw prompts or image contents.",
+  "version": "1.0.0",
+  "status": "active",
+  "requires_capabilities": ["media.image.generate"],
+  "min_assurance": "L0",
+  "limits_required": [
+    "allowed_providers",
+    "max_prompt_length",
+    "max_referenced_images",
+    "max_output_images",
+    "allowed_output_formats"
+  ],
+  "required_fields": [
+    "provider",
+    "prompt_length",
+    "referenced_image_count",
+    "output_count",
+    "output_format"
+  ],
+  "optional_fields": [
+    "model",
+    "size",
+    "aspect_ratio"
+  ],
+  "enforcement": {
+    "provider_allowlist_enforced": true,
+    "prompt_length_enforced": true,
+    "referenced_image_limit_enforced": true,
+    "output_count_enforced": true,
+    "output_format_restrictions_enforced": true
+  },
+  "mcp": {
+    "require_allowlisted_if_present": false
+  },
+  "advice": [
+    "Forward only image-generation metadata to policy evaluation; do not forward raw prompt text or image contents.",
+    "Use allowed_providers to restrict generation to approved model providers.",
+    "Use max_prompt_length to limit accidental prompt or data exfiltration.",
+    "Set max_referenced_images to 0 unless the harness can separately authorize each local input image with data.file.read.v1.",
+    "Use max_output_images and allowed_output_formats to control cost and artifact types.",
+    "Audit provider, model, prompt length, reference count, output count, output format, size, and aspect ratio."
+  ],
+  "required_context": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": [
+      "provider",
+      "prompt_length",
+      "referenced_image_count",
+      "output_count",
+      "output_format"
+    ],
+    "properties": {
+      "provider": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "description": "Image generation provider, for example openai."
+      },
+      "model": {
+        "type": "string",
+        "maxLength": 200,
+        "description": "Provider model name, when available."
+      },
+      "prompt_length": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200000,
+        "description": "Character length of the prompt. Raw prompt text must not be sent to policy evaluation."
+      },
+      "referenced_image_count": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 50,
+        "description": "Number of referenced images, not their paths or contents."
+      },
+      "output_count": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "description": "Requested number of generated images."
+      },
+      "output_format": {
+        "type": "string",
+        "enum": ["png", "jpg", "jpeg", "webp", "gif", "svg"],
+        "description": "Requested output format."
+      },
+      "size": {
+        "type": "string",
+        "maxLength": 100,
+        "description": "Requested image size, when available."
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "maxLength": 50,
+        "description": "Requested aspect ratio, when available."
+      }
+    }
+  },
+  "evaluation_rules_version": "1.0",
+  "evaluation_rules": [
+    {
+      "name": "provider_allowlist",
+      "type": "expression",
+      "condition": "limits.allowed_providers.includes('*') || limits.allowed_providers.includes(context.provider)",
+      "deny_code": "oap.provider_not_allowed",
+      "description": "Image generation provider must be allowed.",
+      "message": "Provider is not in allowed_providers."
+    },
+    {
+      "name": "prompt_length_limit",
+      "type": "expression",
+      "condition": "context.prompt_length <= limits.max_prompt_length",
+      "deny_code": "oap.prompt_too_large",
+      "description": "Prompt length must not exceed max_prompt_length.",
+      "message": "Prompt length exceeds the configured limit."
+    },
+    {
+      "name": "referenced_image_limit",
+      "type": "expression",
+      "condition": "context.referenced_image_count <= limits.max_referenced_images",
+      "deny_code": "oap.referenced_image_limit_exceeded",
+      "description": "Referenced image count must not exceed max_referenced_images.",
+      "message": "Referenced image count exceeds the configured limit."
+    },
+    {
+      "name": "output_count_limit",
+      "type": "expression",
+      "condition": "context.output_count <= limits.max_output_images",
+      "deny_code": "oap.output_image_limit_exceeded",
+      "description": "Requested output count must not exceed max_output_images.",
+      "message": "Requested image count exceeds the configured limit."
+    },
+    {
+      "name": "output_format_allowlist",
+      "type": "expression",
+      "condition": "limits.allowed_output_formats.includes('*') || limits.allowed_output_formats.includes(context.output_format)",
+      "deny_code": "oap.output_format_not_allowed",
+      "description": "Output format must be allowed when allowed_output_formats is configured.",
+      "message": "Output format is not allowed."
+    }
+  ],
+  "cache": {
+    "default_ttl_seconds": 60,
+    "suspend_invalidate_seconds": 30
+  },
+  "deprecation": null,
+  "created_at": "2026-09-25T00:00:00Z",
+  "updated_at": "2026-09-25T00:00:00Z"
+}

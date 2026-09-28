@@ -64,7 +64,7 @@ has_project_aport_gemini_config() {
 framework_specific_config_dir_override() {
     case "$framework" in
         openclaw)
-            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}"
             ;;
         cursor)
             printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}"
@@ -157,6 +157,20 @@ resolve_gemini_hook_config_dir() {
         printf '%s/.gemini' "$PWD"
     else
         printf '%s/.gemini' "$HOME"
+    fi
+}
+
+resolve_cursor_hook_config_dir() {
+    if [[ -n "${CURSOR_HOOKS_DIR:-}" ]]; then
+        printf '%s' "${CURSOR_HOOKS_DIR/#\~/$HOME}"
+    elif [[ "$reset_scope" = "project" ]]; then
+        printf '%s/.cursor' "$PWD"
+    elif [[ "$reset_scope" = "global" ]]; then
+        printf '%s/.cursor' "$HOME"
+    elif [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" && -f "${APORT_CURSOR_CONFIG_DIR/#\~/$HOME}/hooks.json" ]]; then
+        printf '%s' "${APORT_CURSOR_CONFIG_DIR/#\~/$HOME}"
+    else
+        printf '%s/.cursor' "$HOME"
     fi
 }
 
@@ -272,6 +286,7 @@ cleanup_cursor_hooks() {
     if [[ ! -f "$hooks_file" ]]; then
         return 0
     fi
+    refuse_symlink_path "$hooks_file"
     if ! command -v jq &> /dev/null; then
         log_error "jq not found; cannot safely remove Cursor hook entries from $hooks_file"
         return 1
@@ -289,14 +304,11 @@ cleanup_cursor_hooks() {
             (.[$marker] == true) or (((.command // "") | tostring) | test("(^|/)aport-cursor-hook\\.sh($|[[:space:]])"));
         def strip_aport_hooks:
             (. // []) | map(select(is_aport_cursor_hook | not));
-        .hooks.beforeShellExecution = ((.hooks.beforeShellExecution // []) | strip_aport_hooks) |
-        .hooks.preToolUse = ((.hooks.preToolUse // []) | strip_aport_hooks) |
-        .hooks.beforeMCPExecution = ((.hooks.beforeMCPExecution // []) | strip_aport_hooks) |
-        .hooks.subagentStart = ((.hooks.subagentStart // []) | strip_aport_hooks) |
-        if ((.hooks.beforeShellExecution // []) | length) == 0 then del(.hooks.beforeShellExecution) else . end |
-        if ((.hooks.preToolUse // []) | length) == 0 then del(.hooks.preToolUse) else . end |
-        if ((.hooks.beforeMCPExecution // []) | length) == 0 then del(.hooks.beforeMCPExecution) else . end |
-        if ((.hooks.subagentStart // []) | length) == 0 then del(.hooks.subagentStart) else . end |
+        # Every event, not a hand-kept list: an APort entry left under any event (beforeReadFile,
+        # beforeTabFileRead, or one added later) would keep pointing at the removed script with failClosed.
+        .hooks = ((.hooks // {}) | with_entries(
+            if (.value | type) == "array" then .value |= strip_aport_hooks else . end
+        ) | with_entries(select((.value | type) != "array" or (.value | length) > 0))) |
         if ((.hooks // {}) | keys | length) == 0 then del(.hooks) else . end
     ' "$hooks_file" > "$tmpfile"; then
         if ! backup_file "$hooks_file"; then
@@ -363,8 +375,13 @@ cleanup_claude() {
 }
 
 cleanup_cursor() {
-    local hooks_file="$config_dir/hooks.json"
+    local cursor_hooks_dir hooks_file
+    cursor_hooks_dir="$(resolve_cursor_hook_config_dir)"
+    hooks_file="$cursor_hooks_dir/hooks.json"
     cleanup_cursor_hooks "$hooks_file"
+    if preserve_command_hook_state_if_referenced "Cursor" "$config_dir" "shared"; then
+        return 0
+    fi
     remove_dir_if_exists "$config_dir/aport"
 }
 
@@ -618,6 +635,7 @@ command_hook_any_state_has_remaining_reference() {
     [[ -n "${APORT_GEMINI_CLI_HOOKS_DIR:-}" ]] && candidate_files+=("${APORT_GEMINI_CLI_HOOKS_DIR/#\~/$HOME}/settings.json")
     [[ -n "${APORT_CLAUDE_CODE_CONFIG_DIR:-}" ]] && candidate_files+=("${APORT_CLAUDE_CODE_CONFIG_DIR/#\~/$HOME}/settings.json")
     [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" ]] && candidate_files+=("${APORT_CURSOR_CONFIG_DIR/#\~/$HOME}/hooks.json")
+    [[ -n "${CURSOR_HOOKS_DIR:-}" ]] && candidate_files+=("${CURSOR_HOOKS_DIR/#\~/$HOME}/hooks.json")
     [[ -n "${APORT_GOOSE_PLUGIN_DIR:-}" ]] && candidate_files+=("${APORT_GOOSE_PLUGIN_DIR/#\~/$HOME}/scripts/aport-goose-hook.sh")
 
     for candidate_file in "${candidate_files[@]}"; do

@@ -74,6 +74,13 @@ function buildRuntimeMetadata(options = {}) {
  * @param {boolean} options.policyInBody - If true, POST to /api/verify/policy/IN_BODY and send body.policy (for dynamic/generated policies).
  * @returns {Promise<object>} OAP v1.0 compliant decision object
  */
+/** Seconds in (any string), whole milliseconds out, 15 s when the value is unusable. Exported for tests. */
+function apiTimeoutMs(raw) {
+  const n = Number(raw);
+  if (raw === undefined || raw === "" || !Number.isFinite(n) || n <= 0) return 15000;
+  return Math.max(1, Math.round(n * 1000));
+}
+
 async function evaluatePolicy(policyPack, passport, context, options = {}) {
   const apiUrl = (
     options.apiUrl ||
@@ -126,10 +133,15 @@ async function evaluatePolicy(policyPack, passport, context, options = {}) {
   const body = JSON.stringify(bodyObj);
 
   try {
+    // Bound the request: a hook that outlives Claude Code's own hook timeout does not block the tool call, so
+    // the evaluator must give up first. APORT_API_TIMEOUT is seconds; a value that is not a finite number
+    // falls back to 15 rather than making AbortSignal.timeout throw and deny every call.
+    const timeoutMs = apiTimeoutMs(process.env.APORT_API_TIMEOUT);
     const response = await fetch(url, {
       method: "POST",
       headers,
       body,
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
@@ -247,6 +259,7 @@ function writeDecision(decision, decisionPath) {
 }
 
 module.exports = {
+  apiTimeoutMs,
   evaluatePolicy,
   loadPolicyPack,
   loadPassport,

@@ -37,4 +37,12 @@
 - **Messaging**: `message.send`, `messaging.*`
 - **Data Operations**: `database.write`, `data.export`
 
+## Limits to Remember
+
+- The shell policy checks only the command text: `allowed_commands` is a prefix match; `blocked_patterns` uses word-boundary and glob matching, case-insensitive: a single word such as `sudo` matches only as a whole word (it does not block `sudoku`), an entry containing `*` or `?` is a glob, and a multi-word entry such as `rm -rf` matches as written; when `allowed_commands` is restrictive (not `*`), a command containing an unquoted `&&`, `||`, `;`, `|`, `&`, newline, `(`, `)`, `$(`, `<(`, `>(`, a `#` comment or `$'...'` quoting is denied with `oap.command_chain_unsupported`. It does not see what `git push`, `cat`, `curl` or a `>` redirect touch. Do not treat a shell allow as proof that a file, domain or branch rule was satisfied.
+- Reads of `.env` and anything starting with `.env`, the `.ssh`, `.aws`, `.gnupg` and `.kube` directories, `id_rsa`, `id_dsa`, `id_ecdsa` and `id_ed25519` anywhere in the path, files ending in `.pem` or `.key`, and any path containing `credentials` or `password` are always denied (case-insensitive). Other `id_*` names such as `id_token` are not on the list. Other secret files are denied only if listed in `limits["data.file.read"].blocked_patterns` (substring match). Writes have no built-in list; use `limits["data.file.write"].blocked_paths` (path prefix).
+- A passport that sets `limits["system.command.execute"].max_execution_time` denies shell calls that carry no timeout and have no harness default (`oap.missing_required_context`). Claude Code Bash defaults to 120 s and Codex `shell` to 10 s; Cursor, Gemini CLI, Goose, Codex `exec_command` and background calls are unbounded. Drop the limit or use a bounded tool.
+- Spawning sessions or sub-agents needs the `agent.session.create` capability in the passport; otherwise the call is denied with `oap.unknown_capability`.
+- The config directory may not be `~/.openclaw`. Use the paths the installer printed, or `OPENCLAW_CONFIG_DIR` / `APORT_OPENCLAW_CONFIG_DIR` when set.
+
 See full documentation: https://github.com/aporthq/aport-agent-guardrails
