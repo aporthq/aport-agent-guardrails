@@ -340,7 +340,7 @@ aport-create-passport.sh
 
 **Resolution**:
 - Retry request
-- Increase timeout: `APORT_API_TIMEOUT=30`
+- Increase the evaluator bound: `APORT_API_TIMEOUT=30` (seconds). The installers write the harness hook timeout as this value plus a 15 s margin, so after changing the variable run the framework setup again (or edit the `timeout` in the hook config by hand) or the hook will time out before the evaluator does.
 - Check network latency to API
 
 #### `oap.api.invalid_response`

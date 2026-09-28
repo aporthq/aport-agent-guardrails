@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/aport-agent-guardrails",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "description": "APort Repository Guard and pre-action authorization guardrails for GitHub, Claude Code, Cursor, Codex, Gemini CLI, Goose, OpenClaw, LangChain, CrewAI, DeerFlow, and n8n",
   "workspaces": [
     "packages/*",
@@ -23,8 +23,10 @@
     "version": "node scripts/normalize-changeset-bumps.mjs && CI=1 changeset version && node scripts/sync-version.mjs",
     "sync-version": "node scripts/sync-version.mjs",
     "prepush:check": "bash scripts/pre-push-check.sh",
+    "prepush:full": "APORT_PRE_PUSH_LEVEL=full bash scripts/pre-push-check.sh",
     "build": "npm run build:core && npm run build --workspaces --if-present",
     "build:core": "npm run build -w @aporthq/aport-agent-guardrails-core",
+    "codex:tool-surface": "bash scripts/check-codex-provider-tool-surface.sh",
     "local-codex-review": "bash scripts/local-codex-review.sh",
     "local-pr-audit": "npm run prepush:check",
     "local-pr-review": "npm run local-codex-review",

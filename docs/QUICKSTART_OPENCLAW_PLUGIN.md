@@ -99,10 +99,11 @@ On every tool call:
 2. APort maps the OpenClaw tool to an OAP policy pack
 3. APort evaluates the passport and limits
 4. `allow` lets the tool run
-5. `deny` returns `block: true` and the tool never executes
+5. `deny` returns `block: true` with a `blockReason` string and the tool never executes
 
 ## Notes
 
 - Current public OpenClaw integration is plugin-based
+- Requires OpenClaw `>=2026.4.11`; reviewed against v2026.9.5. See [OPENCLAW_COMPATIBILITY.md](OPENCLAW_COMPATIBILITY.md)
 - No upstream native guardrail-provider merge is required for this path
 - If setup cannot install the plugin, it now stops immediately instead of writing broken config

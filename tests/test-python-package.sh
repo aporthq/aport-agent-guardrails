@@ -15,12 +15,13 @@ BUILD_ROOT="$TEST_DIR/build-root"
 PKG_SRC="$BUILD_ROOT/python/aport_guardrails"
 
 rm -rf "$VENV_DIR" "$CONFIG_DIR" "$STUB_DIR" "$DIST_DIR" "$BUILD_ROOT"
-mkdir -p "$(dirname "$PKG_SRC")" "$BUILD_ROOT/external/aport-spec/oap" "$BUILD_ROOT/local-overrides"
+mkdir -p "$(dirname "$PKG_SRC")" "$BUILD_ROOT/external/aport-spec/oap"
 cp -R "$REPO_ROOT/python/aport_guardrails" "$PKG_SRC"
 find "$PKG_SRC" \( -name '__pycache__' -o -name '.pytest_cache' -o -name 'build' -o -name 'dist' -o -name '*.egg-info' \) -prune -exec rm -rf {} +
 cp -R "$REPO_ROOT/bin" "$BUILD_ROOT/bin"
 cp -R "$REPO_ROOT/src" "$BUILD_ROOT/src"
 cp -R "$REPO_ROOT/external/aport-policies" "$BUILD_ROOT/external/aport-policies"
+cp -R "$REPO_ROOT/local-overrides" "$BUILD_ROOT/local-overrides"
 cp "$REPO_ROOT/external/aport-spec/oap/passport-schema.json" "$BUILD_ROOT/external/aport-spec/oap/passport-schema.json"
 
 echo ""

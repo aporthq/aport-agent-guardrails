@@ -8,7 +8,7 @@ APort guardrails for [Claude Code](https://code.claude.com) via the **PreToolUse
 npx @aporthq/aport-agent-guardrails claude-code
 ```
 
-This installs the passport wizard and writes `~/.claude/settings.json` with the APort hook for all tools (`"matcher": "*"`). Restart Claude Code after setup.
+This installs the passport wizard and writes `~/.claude/settings.json` with the APort hook for all tools (`"matcher": "*"`). Restart Claude Code after setup. `jq` must be on the PATH Claude Code uses; without it the hook denies every tool call. Set `APORT_CLAUDE_CODE_CONFIG_DIR` (at install time and in Claude Code's environment) to use a directory other than `~/.claude`.
 
 ## Full docs
 
@@ -16,7 +16,7 @@ See [docs/frameworks/claude-code.md](../../docs/frameworks/claude-code.md) for:
 
 - How it works (PreToolUse, hook output format)
 - Tool → policy mapping (Bash, Write, WebSearch, Task, MCP, etc.)
-- What's not protected (`--dangerously-skip-permissions`)
+- What's not protected (sessions without the hook, your own terminal, and what a shell command does internally; bypass-permissions mode does not override a PreToolUse deny)
 - Testing and audit log location
 
 ## Implementation

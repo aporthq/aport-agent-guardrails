@@ -18,6 +18,7 @@ ACTION_REF="${APORT_GITHUB_ACTION_REF:-aporthq/policy-verify-action@v1}"
 PASSPORT_PATH="${APORT_GITHUB_PASSPORT_PATH:-.aport/passport.json}"
 PROTECTED_PATHS="${APORT_GITHUB_PROTECTED_PATHS:-}"
 BLOCK_PROTECTED_PATHS="${APORT_GITHUB_BLOCK_PROTECTED_PATHS:-}"
+PROTECT_DEFAULT_BRANCH="${APORT_GITHUB_PROTECT_DEFAULT_BRANCH:-}"
 
 usage() {
     cat << 'EOF'
@@ -36,6 +37,13 @@ Options:
   --block-protected-paths
                         Fail hosted verification when protected paths change.
                         Useful for security-critical repositories.
+  --protect-default-branch
+                        Pass protect-default-branch: true to the Action, which
+                        fails the check on a force push to the default branch
+                        or on a direct push whose tip is not the merge commit of
+                        a pull request. Needs policy-verify-action 1.1.0 or
+                        newer; older pins ignore the input. Runs after the push
+                        lands; pair it with a GitHub ruleset to prevent pushes.
   --passport-path <path>
                         Trusted base-ref passport path for --mode local-json.
                         Default: .aport/passport.json.
@@ -45,6 +53,9 @@ Options:
 This setup writes .github/workflows/aport-guard.yml using
 aporthq/policy-verify-action@v1. Default mode uses GitHub OIDC, does not
 require APort API keys, and avoids shell-piped installers.
+
+Set APORT_GITHUB_ACTION_REF=aporthq/policy-verify-action@<commit-sha> to pin
+the Action to a full commit SHA, which GitHub documents as the safest form.
 EOF
 }
 
@@ -96,6 +107,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --block-protected-paths)
             BLOCK_PROTECTED_PATHS="true"
+            shift
+            ;;
+        --protect-default-branch)
+            PROTECT_DEFAULT_BRANCH="true"
             shift
             ;;
         --project-dir)
@@ -152,14 +167,21 @@ if [[ "$PROTECTED_PATHS" == *$'\n'* || "$PROTECTED_PATHS" == *$'\r'* ]]; then
     exit 1
 fi
 
-case "$BLOCK_PROTECTED_PATHS" in
-    "" | 0 | false | FALSE | False | no | NO | No) BLOCK_PROTECTED_PATHS="" ;;
-    1 | true | TRUE | True | yes | YES | Yes) BLOCK_PROTECTED_PATHS="true" ;;
-    *)
-        log_error "APORT_GITHUB_BLOCK_PROTECTED_PATHS must be true or false"
-        exit 1
-        ;;
-esac
+# "true" for any accepted spelling of yes, "" for any accepted spelling of no, exit for anything else.
+normalize_bool_flag() {
+    local value="$1" name="$2"
+    case "$value" in
+        "" | 0 | false | FALSE | False | no | NO | No) printf '' ;;
+        1 | true | TRUE | True | yes | YES | Yes) printf 'true' ;;
+        *)
+            log_error "$name must be true or false"
+            exit 1
+            ;;
+    esac
+}
+
+BLOCK_PROTECTED_PATHS="$(normalize_bool_flag "$BLOCK_PROTECTED_PATHS" APORT_GITHUB_BLOCK_PROTECTED_PATHS)"
+PROTECT_DEFAULT_BRANCH="$(normalize_bool_flag "$PROTECT_DEFAULT_BRANCH" APORT_GITHUB_PROTECT_DEFAULT_BRANCH)"
 
 if [[ ! "$ACTION_REF" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[A-Za-z0-9_.:/-]+$ ]]; then
     log_error "Invalid APORT_GITHUB_ACTION_REF. Expected owner/repo@ref."
@@ -248,6 +270,12 @@ render_action_inputs() {
     if [[ -n "$BLOCK_PROTECTED_PATHS" ]]; then
         echo "          block-protected-paths: true"
     fi
+    if [[ -n "$PROTECT_DEFAULT_BRANCH" ]]; then
+        # Handled by the Action itself (policy-verify-action >= 1.1.0): fails the run on a
+        # force push to the default branch or a direct push that is not a merged pull
+        # request's merge commit, and exposes the push-classification output.
+        echo "          protect-default-branch: true"
+    fi
     if [[ "$MODE" == "local-json" ]]; then
         echo "          passport-path: \"$PASSPORT_PATH\""
     fi
@@ -298,6 +326,12 @@ $branch_lines
 
 permissions:
 $(render_permissions)
+
+# Superseded pull request runs are cancelled. Push and merge-queue runs are
+# never cancelled so every landed commit keeps its audit record.
+concurrency:
+  group: aport-guard-\${{ github.workflow }}-\${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: \${{ github.event_name == 'pull_request' }}
 
 jobs:
   aport:
@@ -399,6 +433,9 @@ if [[ -n "$PROTECTED_PATHS" ]]; then
 fi
 if [[ -n "$BLOCK_PROTECTED_PATHS" ]]; then
     echo "  - Protected path changes will fail hosted verification."
+fi
+if [[ -n "$PROTECT_DEFAULT_BRANCH" ]]; then
+    echo "  - Default-branch protection requested (protect-default-branch input). It is enforced by policy-verify-action 1.1.0 or newer; an older pin such as @v1 today ignores the input and logs an unknown-input warning, so nothing fails until the Action is updated. It runs after the push lands; add a GitHub ruleset to prevent pushes."
 fi
 if [[ "$MODE" == "local-json" ]]; then
     echo "  - Local JSON passport path: $PASSPORT_PATH"

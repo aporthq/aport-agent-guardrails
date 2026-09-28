@@ -3,6 +3,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REAL_HOME="${HOME:-}"
+REAL_XDG_CACHE_HOME="${XDG_CACHE_HOME:-}"
 if [[ -n "${APORT_PRE_PUSH_TMP_ROOT:-}" ]]; then
     TMP_ROOT="$APORT_PRE_PUSH_TMP_ROOT"
     CLEANUP_TMP_ROOT=0
@@ -17,6 +19,10 @@ CREWAI_HOME="$TMP_ROOT/homes/crewai"
 LANGCHAIN_HOME="$TMP_ROOT/homes/langchain"
 OPENCLAW_HOME="$TMP_ROOT/openclaw"
 DEFAULT_AGENT_ID="ap_8955f5450cd542fe8f67bbbf07c3e103"
+PRE_PUSH_LEVEL="${APORT_PRE_PUSH_LEVEL:-fast}"
+if [[ "${APORT_PRE_PUSH_FULL:-0}" = "1" ]]; then
+    PRE_PUSH_LEVEL="full"
+fi
 
 cleanup() {
     if [[ "${CLEANUP_TMP_ROOT:-0}" = "1" ]]; then
@@ -33,6 +39,28 @@ run_cmd() {
     log_step "$1"
     shift
     "$@"
+}
+
+run_shellcheck() {
+    if command -v shellcheck > /dev/null 2>&1; then
+        bash -lc "shellcheck -S error --color=always --shell=bash \$(find bin enterprise-scripts scripts tests -name '*.sh' -type f | tr '\n' ' ')"
+    else
+        echo "shellcheck not installed; CI still enforces it"
+    fi
+}
+
+run_fast_checks() {
+    local include_shellcheck="${1:-${APORT_PRE_PUSH_INCLUDE_SHELLCHECK:-0}}"
+    run_cmd "Validate passport schema JSON" jq . external/aport-spec/oap/examples/passport.template.v1.json
+    run_cmd "Shell syntax" bash -n bin/*.sh bin/lib/*.sh bin/frameworks/*.sh enterprise-scripts/*.sh scripts/*.sh tests/*.sh tests/unit/*.sh tests/frameworks/*/*.sh
+    if [[ "$include_shellcheck" = "1" ]]; then
+        run_cmd "ShellCheck" run_shellcheck
+    else
+        log_step "Skipping ShellCheck in fast mode (set APORT_PRE_PUSH_INCLUDE_SHELLCHECK=1 or APORT_PRE_PUSH_LEVEL=full)"
+    fi
+    run_cmd "shfmt" bash -lc "find bin enterprise-scripts scripts tests -name '*.sh' -type f -print0 | xargs -0 shfmt -d"
+    run_cmd "Codex provider tool surface drift" bash scripts/check-codex-provider-tool-surface.sh
+    run_cmd "Evaluator API timeout parsing" node tests/unit/test-evaluator-api-timeout.cjs
 }
 
 ensure_crewai_venv() {
@@ -129,11 +157,28 @@ run_optional_scans() {
 
 cd "$REPO_ROOT"
 mkdir -p "$TEST_HOME"
+if [[ -z "${APORT_CODEX_PROVIDER_SOURCE_DIR:-}" && -z "${APORT_CODEX_PROVIDER_CACHE_DIR:-}" && -z "${APORT_CODEX_PROVIDER_CACHE_ROOT:-}" && -z "${CI:-}" && -n "$REAL_HOME" ]]; then
+    export APORT_CODEX_PROVIDER_CACHE_ROOT="${REAL_XDG_CACHE_HOME:-$REAL_HOME/.cache}/aport/codex-provider"
+fi
 export HOME="$TEST_HOME"
 
-run_cmd "Validate passport schema JSON" jq . external/aport-spec/oap/examples/passport.template.v1.json
-run_cmd "ShellCheck" bash -lc "shellcheck -S error --color=always --shell=bash \$(find bin enterprise-scripts scripts tests -name '*.sh' -type f | tr '\n' ' ')"
-run_cmd "shfmt" bash -lc "find bin enterprise-scripts scripts tests -name '*.sh' -type f -print0 | xargs -0 shfmt -d"
+case "$PRE_PUSH_LEVEL" in
+    fast)
+        run_fast_checks
+        run_openclaw_e2e
+        run_optional_scans
+        log_step "Fast pre-push checks passed (set APORT_PRE_PUSH_LEVEL=full for CI-equivalent local checks)"
+        exit 0
+        ;;
+    full | ci)
+        run_fast_checks 1
+        ;;
+    *)
+        echo "FAIL: unsupported APORT_PRE_PUSH_LEVEL=$PRE_PUSH_LEVEL (expected fast or full)" >&2
+        exit 1
+        ;;
+esac
+
 run_cmd "Repo test suite" make test
 run_cmd "Node build" npm run build
 run_cmd "Node workspace tests" npm run test -w @aporthq/aport-agent-guardrails-core -w @aporthq/aport-agent-guardrails-langchain

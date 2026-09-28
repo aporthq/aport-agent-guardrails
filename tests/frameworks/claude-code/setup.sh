@@ -89,19 +89,63 @@ if command -v jq &> /dev/null; then
         echo "FAIL: Claude Code hook should point to stable APort runtime, got: $HOOK_CMD" >&2
         exit 1
     fi
+    if [[ "$HOOK_CMD" != APORT_API_TIMEOUT=15* ]]; then
+        echo "FAIL: hook command should bind the evaluator timeout used for the installed timeout, got: $HOOK_CMD" >&2
+        exit 1
+    fi
     [[ -x "$CLAUDE_DIR/aport/runtime/bin/aport-claude-code-hook.sh" ]] || {
         echo "FAIL: expected stable Claude Code runtime hook at $CLAUDE_DIR/aport/runtime/bin/aport-claude-code-hook.sh" >&2
         exit 1
     }
     echo "  ✅ settings.json uses stable APort runtime hook"
 
-    MARKER_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true and .timeout == 10)] | length' "$CLAUDE_DIR/settings.json")
+    # timeout=30: a PreToolUse command hook that hits its timeout does not block in
+    # Claude Code, so the registered value must exceed the evaluator's 15s API timeout.
+    MARKER_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true and .timeout == 30)] | length' "$CLAUDE_DIR/settings.json")
     if [[ "$MARKER_COUNT" -ne 1 ]]; then
-        echo "FAIL: expected exactly one marker-owned APort hook with timeout=10" >&2
+        echo "FAIL: expected exactly one marker-owned APort hook with timeout=30" >&2
         jq -c '.hooks.PreToolUse' "$CLAUDE_DIR/settings.json" >&2
         exit 1
     fi
-    echo "  ✅ marker-owned APort hook with timeout=10"
+    echo "  ✅ marker-owned APort hook with timeout=30"
+
+    # The hook timeout follows the evaluator bound plus a 15 s margin, so raising APORT_API_TIMEOUT cannot
+    # reintroduce the fail-open that a fixed 30 s would.
+    DERIVED_DIR="$TEST_DIR/claude-derived-timeout"
+    mkdir -p "$DERIVED_DIR/aport"
+    cp "$CLAUDE_DIR/aport/passport.json" "$DERIVED_DIR/aport/passport.json"
+    DERIVED_PASSPORT_BEFORE="$(cksum "$DERIVED_DIR/aport/passport.json" | awk '{print $1 ":" $2}')"
+    APORT_API_TIMEOUT=45 APORT_CLAUDE_CODE_CONFIG_DIR="$DERIVED_DIR" \
+        "$REPO_ROOT/bin/agent-guardrails" --framework=claude-code --output "$DERIVED_DIR/aport/passport.json" --non-interactive --mode=local > "$TEST_DIR/claude-derived.out" 2>&1 || {
+        echo "FAIL: Claude Code setup with APORT_API_TIMEOUT=45 failed" >&2
+        cat "$TEST_DIR/claude-derived.out" >&2
+        exit 1
+    }
+    DERIVED_PASSPORT_AFTER="$(cksum "$DERIVED_DIR/aport/passport.json" | awk '{print $1 ":" $2}')"
+    if [[ "$DERIVED_PASSPORT_BEFORE" != "$DERIVED_PASSPORT_AFTER" ]]; then
+        echo "FAIL: rerunning Claude Code setup should reuse the existing local passport, not recreate it" >&2
+        cat "$TEST_DIR/claude-derived.out" >&2
+        exit 1
+    fi
+    grep -q 'Found existing local passport' "$TEST_DIR/claude-derived.out" || {
+        echo "FAIL: rerun should report existing local passport reuse" >&2
+        cat "$TEST_DIR/claude-derived.out" >&2
+        exit 1
+    }
+    echo "  ✅ existing local passport is reused on setup rerun"
+    DERIVED_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true and .timeout == 60)] | length' "$DERIVED_DIR/settings.json")
+    if [[ "$DERIVED_COUNT" -ne 1 ]]; then
+        echo "FAIL: APORT_API_TIMEOUT=45 should install a 60 s hook timeout" >&2
+        jq -c '.hooks.PreToolUse' "$DERIVED_DIR/settings.json" >&2
+        exit 1
+    fi
+    DERIVED_CMD=$(jq -r '.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true) | .command // empty' "$DERIVED_DIR/settings.json" | head -n 1)
+    if [[ "$DERIVED_CMD" != APORT_API_TIMEOUT=45* ]]; then
+        echo "FAIL: APORT_API_TIMEOUT=45 install should bind evaluator timeout in the hook command, got: $DERIVED_CMD" >&2
+        jq -c '.hooks.PreToolUse' "$DERIVED_DIR/settings.json" >&2
+        exit 1
+    fi
+    echo "  ✅ hook timeout follows APORT_API_TIMEOUT plus the margin"
 
     # Stale marker-owned npx APort Claude hook path should be replaced
     STALE_COUNT=$(jq -r '[.hooks.PreToolUse[]?.hooks[]? | select(.__aport_hook == true) | .command // ""] | map(select(test("aport-claude-code-hook\\.sh$") and test("/\\.npm/_npx/"))) | length' "$CLAUDE_DIR/settings.json")

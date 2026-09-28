@@ -5,10 +5,11 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d)}"
+export HOME="$TEST_DIR/home"
 FAKE_BIN="$TEST_DIR/bin"
 CONFIG_DIR="$TEST_DIR/.claude"
 LOG_FILE="$TEST_DIR/curl.log"
-mkdir -p "$FAKE_BIN" "$CONFIG_DIR"
+mkdir -p "$FAKE_BIN" "$CONFIG_DIR" "$HOME"
 
 cat > "$FAKE_BIN/curl" << 'EOF'
 #!/bin/bash
@@ -109,8 +110,19 @@ APORT_API_KEY=apk_existing_runtime
 EOF
 : > "$LOG_FILE"
 unset APORT_AGENT_ID APORT_API_KEY APORT_API_URL APORT_SELECTED_API_URL
-aport_maybe_configure_hosted_passport "claude-code" "$EXISTING_CONFIG_DIR" || {
+if ! aport_maybe_configure_hosted_passport "claude-code" "$EXISTING_CONFIG_DIR" 2> "$TEST_DIR/existing-hosted-reuse.err"; then
     echo "FAIL: expected existing hosted mode file to be reused" >&2
+    exit 1
+fi
+reuse_out="$(cat "$TEST_DIR/existing-hosted-reuse.err")"
+echo "$reuse_out" | grep -q 'https://aport.io/passports?details=agt_inst_existing123' || {
+    echo "FAIL: existing hosted reuse should print the hosted passport URL" >&2
+    echo "$reuse_out" >&2
+    exit 1
+}
+echo "$reuse_out" | grep -q "$EXISTING_CONFIG_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: existing hosted reuse should print the reused mode file path" >&2
+    echo "$reuse_out" >&2
     exit 1
 }
 [ "$APORT_AGENT_ID" = "agt_inst_existing123" ] || {
