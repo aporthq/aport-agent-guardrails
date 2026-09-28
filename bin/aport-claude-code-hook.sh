@@ -2,7 +2,11 @@
 # APort Claude Code hook: reads tool_name + tool_input from JSON stdin (path-based Read uses guardrail).
 # maps to APort policy, calls guardrail, outputs hookSpecificOutput deny or exit 0.
 # Exit 0 with no output = allow; exit 0 with hookSpecificOutput deny = block.
-# Exit 2 with stderr also blocks, but Claude Code ignores JSON on exit 2.
+# Exit 2 also blocks (reason taken from permissionDecisionReason when present, else stderr);
+# this hook always exits 0 with JSON so the structured reason reaches Claude.
+# A hook that exceeds the settings.json "timeout" does NOT block in Claude Code (the call
+# continues through the normal permission flow), so the installer's timeout must stay
+# above the evaluator's own timeouts (see bin/frameworks/claude-code.sh).
 # Output format: Claude Code official schema (hookSpecificOutput.permissionDecision), NOT Cursor format.
 
 set -e
@@ -138,12 +142,20 @@ deny_or_warn() {
     local failure_class="${4:-hard}"
     local notice user_warning
     if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message")"
-        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message")"
+        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "claude-code")"
+        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "claude-code")"
         warn_allow "$notice" "$user_warning"
     fi
-    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message")"
+    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "claude-code")"
     deny "$notice"
+}
+
+map_claude_mcp_context() {
+    if aport_hook_payload_has_conflicting_mcp_routing_aliases "$INPUT"; then
+        deny_or_warn "mcp.tool.execute" "oap.invalid_tool_arguments" "MCP tool supplied conflicting server or tool aliases"
+    fi
+    GUARDRAIL_TOOL="mcp.tool"
+    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
 }
 
 if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then
@@ -194,20 +206,21 @@ case "$TOOL_NAME_NORM" in
         fi
         :
         ;;
-    artifact | endconversation | sendfeedback)
+    artifact | endconversation | sendfeedback | reportfindings | subagenthandback)
         # Claude Code internal UX/feedback tools do not act on the user's system.
+        # ReportFindings renders review findings in the transcript; SubagentHandback
+        # delivers a subagent's final report to its parent conversation (auto mode).
         exit 0
         ;;
     readmcpresourcetool)
-        GUARDRAIL_TOOL="mcp.tool"
-        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
+        map_claude_mcp_context
         ;;
     glob | ls | lsp | todoread | todowrite | toolsearch | askuserquestion | listmcpresourcestool | waitformcpservers)
         # Search/list/read tools without a single file_path: allow without evaluator
         exit 0
         ;;
-    taskget | tasklist | taskoutput | cronlist | schedulewakeup | pushnotification)
-        # Read-only task/cron queries and notifications: allow without evaluator
+    taskget | tasklist | taskoutput | cronlist | listagents | schedulewakeup | pushnotification)
+        # Read-only task/cron/agent queries and notifications: allow without evaluator
         exit 0
         ;;
     enterplanmode | exitplanmode)
@@ -223,8 +236,17 @@ case "$TOOL_NAME_NORM" in
         CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" web)"
         ;;
     browser)
+        if aport_hook_payload_has_malformed_browser_action_aliases "$INPUT"; then
+            deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser action aliases must be strings"
+        fi
+        if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
+            deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting URL or domain aliases"
+        fi
+        if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
+            deny_or_warn "web.browser" "oap.invalid_tool_arguments" "Browser tool supplied conflicting action aliases"
+        fi
         GUARDRAIL_TOOL="browser"
-        CONTEXT_JSON="$(safe_jq "$TOOL_INPUT" '{url: (.url // "")}')"
+        CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
         ;;
     agent | task | taskcreate | taskupdate | taskstop | skill | enterworktree | exitworktree | subagent | subagentstart | sendmessage | teamcreate | teamdelete | remotetrigger)
         GUARDRAIL_TOOL="session.create"
@@ -235,8 +257,7 @@ case "$TOOL_NAME_NORM" in
         CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "claude-code")"
         ;;
     mcp__* | mcp:* | callmcptool)
-        GUARDRAIL_TOOL="mcp.tool"
-        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" mcp "$TOOL_NAME")"
+        map_claude_mcp_context
         ;;
     workflow)
         GUARDRAIL_TOOL="session.create"

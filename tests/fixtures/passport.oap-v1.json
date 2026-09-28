@@ -13,6 +13,7 @@
     {"id": "data.file.read"},
     {"id": "data.file.write"},
     {"id": "web.fetch"},
+    {"id": "media.image.generate"},
     {"id": "web.browser"},
     {"id": "agent.session.create"},
     {"id": "mcp.tool.execute"}
@@ -42,6 +43,13 @@
       "allowed_domains": ["*"],
       "blocked_domains": [],
       "max_requests_per_min": 60
+    },
+    "media.image.generate": {
+      "allowed_providers": ["*"],
+      "max_prompt_length": 8000,
+      "max_referenced_images": 0,
+      "max_output_images": 4,
+      "allowed_output_formats": ["png", "jpg", "jpeg", "webp"]
     },
     "web.browser": {
       "allowed_domains": ["*"],

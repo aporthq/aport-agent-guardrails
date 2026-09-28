@@ -32,7 +32,9 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRAMEWORKS_DIR="$SCRIPT_DIR/frameworks"
 LIB_DIR="$SCRIPT_DIR/lib"
-SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n opencode)
+# shellcheck source=lib/config.sh
+source "$LIB_DIR/config.sh"
+SUPPORTED_FRAMEWORKS=("${APORT_SUPPORTED_FRAMEWORKS[@]}")
 reset_requested=""
 
 canonical_framework_name() {

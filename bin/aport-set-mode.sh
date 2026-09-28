@@ -15,7 +15,15 @@ source "$LIB/guardrail-mode.sh"
 # shellcheck source=lib/framework-setup.sh
 source "$LIB/framework-setup.sh"
 
-SUPPORTED_FRAMEWORKS=(openclaw langchain crewai cursor claude-code codex gemini-cli goose deerflow n8n)
+# Mode switching is only meaningful where an enforcement hook exists, so the gated targets that the
+# installer accepts (to explain why they are not enabled) are filtered out here rather than listed a
+# second time. Reporting "enforce mode" for a framework with no hook would promise protection that is
+# not installed.
+SUPPORTED_FRAMEWORKS=()
+for _fw in "${APORT_SUPPORTED_FRAMEWORKS[@]}"; do
+    aport_framework_is_gated "$_fw" || SUPPORTED_FRAMEWORKS+=("$_fw")
+done
+unset _fw
 
 usage() {
     cat << 'EOF'
@@ -54,12 +62,21 @@ for supported in "${SUPPORTED_FRAMEWORKS[@]}"; do
     fi
 done
 if [[ "$is_supported" != true ]]; then
-    log_error "Unsupported framework: $framework"
-    echo "Supported: ${SUPPORTED_FRAMEWORKS[*]}" >&2
+    if aport_framework_is_gated "$framework"; then
+        log_error "$framework has no APort enforcement hook yet, so there is no mode to switch."
+        echo "Run: aport-agent-guardrails $framework    (it explains what is still missing)" >&2
+    else
+        log_error "Unsupported framework: $framework"
+        echo "Supported: ${SUPPORTED_FRAMEWORKS[*]}" >&2
+    fi
     exit 1
 fi
 
 parse_guardrail_mode_args "$@"
+if [[ -n "${APORT_REUSE_PASSPORT_FROM_CLI:-}" ]]; then
+    log_error "--reuse-from is an install option, not a mode option. Run: aport-agent-guardrails $framework --reuse-from=${APORT_REUSE_PASSPORT_FROM_CLI}"
+    exit 1
+fi
 if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -gt 0 ]]; then
     if [[ "${#APORT_FRAMEWORK_ARGS[@]}" -eq 1 && ("${APORT_FRAMEWORK_ARGS[0]}" == "--help" || "${APORT_FRAMEWORK_ARGS[0]}" == "-h") ]]; then
         usage
@@ -72,80 +89,11 @@ fi
 
 has_explicit_config_dir_override() {
     [[ -n "${APORT_CONFIG_DIR:-}" ]] && return 0
-
-    case "$framework" in
-        openclaw)
-            [[ -n "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}" ]]
-            ;;
-        cursor)
-            [[ -n "${APORT_CURSOR_CONFIG_DIR:-}" ]]
-            ;;
-        claude-code)
-            [[ -n "${APORT_CLAUDE_CODE_CONFIG_DIR:-}" ]]
-            ;;
-        codex)
-            [[ -n "${APORT_CODEX_CONFIG_DIR:-}" ]]
-            ;;
-        gemini-cli)
-            [[ -n "${APORT_GEMINI_CLI_CONFIG_DIR:-}" ]]
-            ;;
-        goose)
-            [[ -n "${APORT_GOOSE_CONFIG_DIR:-}" ]]
-            ;;
-        langchain)
-            [[ -n "${APORT_LANGCHAIN_CONFIG_DIR:-}" ]]
-            ;;
-        crewai)
-            [[ -n "${APORT_CREWAI_CONFIG_DIR:-}" ]]
-            ;;
-        deerflow)
-            [[ -n "${APORT_DEERFLOW_CONFIG_DIR:-}" ]]
-            ;;
-        n8n)
-            [[ -n "${APORT_N8N_CONFIG_DIR:-}" ]]
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+    [[ -n "$(get_framework_config_dir_override "$framework")" ]]
 }
 
 framework_specific_config_dir_override() {
-    case "$framework" in
-        openclaw)
-            printf '%s' "${APORT_OPENCLAW_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
-            ;;
-        cursor)
-            printf '%s' "${APORT_CURSOR_CONFIG_DIR:-}"
-            ;;
-        claude-code)
-            printf '%s' "${APORT_CLAUDE_CODE_CONFIG_DIR:-}"
-            ;;
-        codex)
-            printf '%s' "${APORT_CODEX_CONFIG_DIR:-}"
-            ;;
-        gemini-cli)
-            printf '%s' "${APORT_GEMINI_CLI_CONFIG_DIR:-}"
-            ;;
-        goose)
-            printf '%s' "${APORT_GOOSE_CONFIG_DIR:-}"
-            ;;
-        langchain)
-            printf '%s' "${APORT_LANGCHAIN_CONFIG_DIR:-}"
-            ;;
-        crewai)
-            printf '%s' "${APORT_CREWAI_CONFIG_DIR:-}"
-            ;;
-        deerflow)
-            printf '%s' "${APORT_DEERFLOW_CONFIG_DIR:-}"
-            ;;
-        n8n)
-            printf '%s' "${APORT_N8N_CONFIG_DIR:-}"
-            ;;
-        *)
-            printf ''
-            ;;
-    esac
+    get_framework_config_dir_override "$framework"
 }
 
 read_hook_config_dir_from_file() {

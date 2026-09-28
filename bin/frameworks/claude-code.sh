@@ -20,7 +20,16 @@ source "$LIB/runtime.sh"
 source "$LIB/quick-hosted.sh"
 
 APORT_HOOK_MARKER="__aport_hook"
-APORT_HOOK_TIMEOUT=10
+# Seconds before Claude Code cancels the hook. Per the upstream hooks reference a
+# PreToolUse command hook that reaches its timeout does NOT block the tool call, so
+# this must stay above the evaluator's own request bound (APORT_API_TIMEOUT, default 15 s,
+# enforced with an AbortSignal in src/evaluator.js) or a slow hosted evaluator would fail
+# open. The budget is derived, not a second constant: the evaluator bound plus a 15 s
+# margin for node startup and the audit write. Upstream default for command hooks is 600s.
+# aport_hook_timeout_seconds applies the evaluator's own normalization and clamps explicit overrides, so low
+# values such as 5 cannot make Claude time out before the evaluator.
+APORT_EVALUATOR_TIMEOUT="$(aport_api_timeout_seconds)"
+APORT_HOOK_TIMEOUT="$(aport_hook_timeout_seconds)"
 
 run_setup() {
     parse_guardrail_mode_args "$@"
@@ -77,7 +86,9 @@ run_setup() {
     SETTINGS_FILE="$CLAUDE_DIR/settings.json"
     mkdir -p "$CLAUDE_DIR"
 
-    _write_claude_settings "$SETTINGS_FILE" "$HOOK_SCRIPT"
+    # Bind the evaluator timeout in the installed command. Otherwise an APORT_API_TIMEOUT raised later in the
+    # Claude runtime environment could outlive the static settings.json hook timeout and fail open.
+    _write_claude_settings "$SETTINGS_FILE" "APORT_API_TIMEOUT=$APORT_EVALUATOR_TIMEOUT \"$HOOK_SCRIPT\""
     chmod 600 "$SETTINGS_FILE"
 
     # Audit log is appended by hooks; create empty file so the advertised path exists after install.
@@ -169,7 +180,7 @@ _write_claude_settings() {
               "type": "command",
               "command": "${escaped_cmd}",
               "__aport_hook": true,
-              "timeout": 10
+              "timeout": ${APORT_HOOK_TIMEOUT}
             }
         ]
       }

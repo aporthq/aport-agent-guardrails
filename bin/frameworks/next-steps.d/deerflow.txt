@@ -1,14 +1,18 @@
-  Next steps (DeerFlow):
-  ──────────────────────
-  1. Install the guardrails package:
-     uv add aport-agent-guardrails
+  Next steps (DeerFlow 2.0.0 or later):
+  ─────────────────────────────────────
+  1. Install the guardrails package in the DeerFlow backend:
+     cd backend && uv add aport-agent-guardrails
 
-  2. Add to your DeerFlow config.yaml:
+  2. Add to your DeerFlow config.yaml (the make setup wizard does not add this):
 
      guardrails:
        enabled: true
+       fail_closed: true
        passport: $config_dir/aport/passport.json
        provider:
          use: aport_guardrails.providers.generic:OAPGuardrailProvider
+
+  3. Optional: DeerFlow's own authorization block (RBAC) is a separate outer guard.
+     Tools it denies never reach APort; tools it allows are still checked here.
 
   See: docs/frameworks/deerflow.md

@@ -32,13 +32,24 @@ echo "  Unit — bin/lib/config.sh"
 echo "  Test dir: $TEST_DIR"
 echo ""
 
-# get_config_dir openclaw -> $HOME/.openclaw (or APORT_OPENCLAW_CONFIG_DIR)
+# get_config_dir openclaw -> APort override, OpenClaw aliases, or $HOME/.openclaw.
+unset APORT_OPENCLAW_CONFIG_DIR OPENCLAW_CONFIG_DIR OPENCLAW_STATE_DIR OPENCLAW_HOME
 got=$(get_config_dir openclaw)
-[[ "$got" == *".openclaw"* ]] || {
-    echo "FAIL: get_config_dir openclaw" >&2
-    exit 1
-}
-echo "  ✅ get_config_dir openclaw"
+assert_eq "$got" "$HOME/.openclaw" "get_config_dir openclaw default"
+export OPENCLAW_HOME="$TEST_DIR/openclaw-home"
+got=$(get_config_dir openclaw)
+assert_eq "$got" "$OPENCLAW_HOME" "get_config_dir openclaw OPENCLAW_HOME"
+export OPENCLAW_STATE_DIR="$TEST_DIR/openclaw-state"
+got=$(get_config_dir openclaw)
+assert_eq "$got" "$OPENCLAW_STATE_DIR" "get_config_dir openclaw OPENCLAW_STATE_DIR"
+export OPENCLAW_CONFIG_DIR="$TEST_DIR/openclaw-config"
+got=$(get_config_dir openclaw)
+assert_eq "$got" "$OPENCLAW_CONFIG_DIR" "get_config_dir openclaw OPENCLAW_CONFIG_DIR"
+export APORT_OPENCLAW_CONFIG_DIR="$TEST_DIR/openclaw-aport"
+got=$(get_config_dir openclaw)
+assert_eq "$got" "$APORT_OPENCLAW_CONFIG_DIR" "get_config_dir openclaw APORT_OPENCLAW_CONFIG_DIR"
+unset APORT_OPENCLAW_CONFIG_DIR OPENCLAW_CONFIG_DIR OPENCLAW_STATE_DIR OPENCLAW_HOME
+echo "  ✅ get_config_dir openclaw aliases and precedence"
 
 # get_config_dir langchain -> $HOME/.aport/langchain
 got=$(get_config_dir langchain)

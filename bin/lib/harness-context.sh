@@ -127,6 +127,47 @@ aport_hook_payload_has_conflicting_file_target_aliases() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_payload_has_conflicting_write_content_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def arr(v): if (v | type) == "array" then v elif v == null then [] else [v] end;
+      def content_values($o):
+        [
+          $o.content,
+          $o.text,
+          $o.file_text,
+          $o.new_source,
+          $o.newSource,
+          $o.new_string,
+          $o.newText,
+          $o.new_str,
+          $o.replacement
+        ] | map(select(type == "string"));
+      def has_content_conflict($o): (content_values($o) | unique | length) > 1;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      ([$root] + [$root | argument_containers[]]) as $containers |
+      any($containers[]; has_content_conflict(.)) or
+      any($containers[] | (arr(.edits) + arr(.replacements) + arr(.changes))[] | select(type == "object"); has_content_conflict(.))
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
 aport_hook_payload_has_malformed_file_target_aliases() {
     local payload="$1"
     jq -e '
@@ -177,6 +218,7 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
         else {}
         end;
       def str(v): if v == null then "" else (v | tostring) end;
+      def arr(v): if (v | type) == "array" then v elif v == null then [] else [v] end;
       def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
       def methodish(v): if (v | type) == "string" and (v | length) > 0 then (v | ascii_upcase) else "" end;
       def url_host(v):
@@ -209,6 +251,12 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
           obj(obj(.args).args),
           obj(obj(.args).arguments)
         ];
+      def open_targets($o):
+        arr($o.open)[] |
+        if type == "object" then (.ref_id // .url // "")
+        elif type == "string" then .
+        else ""
+        end;
       . as $root |
       ([
         $root.url,
@@ -217,14 +265,161 @@ aport_hook_payload_has_conflicting_web_target_aliases() {
         (if urlish($root.source) then $root.source else null end),
         $root.domain,
         ($root | argument_containers[] | .url, .uri, .href, (if urlish(.source) then .source else null end), .domain)
-      ] | map(select(type == "string" and length > 0)) | map(url_host(.)) | map(select(. != "")) | unique) as $hosts |
+      ] | map(select(type == "string" and length > 0)) | map(url_host(.)) | map(select(. != "")) | unique) as $scalar_hosts |
+      ([
+        (open_targets($root) | select(urlish(.))),
+        ($root | argument_containers[] | (open_targets(.) | select(urlish(.))))
+      ] | map(select(type == "string" and length > 0)) | map(url_host(.)) | map(select(. != "")) | unique) as $open_hosts |
       ([
         methodish($root.method),
         methodish($root.http_method),
         methodish($root.request_method),
         ($root | argument_containers[] | methodish(.method), methodish(.http_method), methodish(.request_method))
       ] | map(select(. != "")) | unique) as $methods |
-      (($hosts | length) > 1) or (($methods | length) > 1)
+      (($scalar_hosts | length) > 1) or
+      ((($scalar_hosts | length) > 0) and (($open_hosts | length) > 0) and ((($scalar_hosts + $open_hosts) | unique | length) > 1)) or
+      (($methods | length) > 1)
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_conflicting_browser_action_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def normalize_action(v):
+        if (v | type) != "string" or (v | length) == 0 then ""
+        else
+          (v | ascii_downcase) as $a |
+          if ($a == "open" or $a == "goto" or $a == "go" or $a == "visit" or $a == "browse") then "navigate"
+          else $a
+          end
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      ([
+        normalize_action($root.action),
+        normalize_action($root.operation),
+        normalize_action($root.type),
+        ($root | argument_containers[] | normalize_action(.action), normalize_action(.operation), normalize_action(.type))
+      ] | map(select(. != "")) | unique | length) > 1
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_conflicting_stdin_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def root_input_value:
+        if (.input | type) != "string" then null
+        elif (try ((.input | fromjson | type) == "object") catch false) then null
+        else .input
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      ([
+        $root.chars,
+        root_input_value,
+        $root.text,
+        $root.data,
+        $root.stdin,
+        ($root | argument_containers[] | .chars, .input, .text, .data, .stdin)
+      ] | map(select(type == "string")) | unique | length) > 1
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_malformed_browser_action_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def malformed_action(v): v != null and (v | type) != "string";
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      malformed_action($root.action) or
+      malformed_action($root.operation) or
+      malformed_action($root.type) or
+      any($root | argument_containers[]; (
+        malformed_action(.action) or
+        malformed_action(.operation) or
+        malformed_action(.type)
+      ))
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_browser_action_evidence() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def action_string(v): (v | type) == "string" and (v | length) > 0;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      . as $root |
+      action_string($root.action) or
+      action_string($root.operation) or
+      action_string($root.type) or
+      any($root | argument_containers[]; (
+        action_string(.action) or
+        action_string(.operation) or
+        action_string(.type)
+      ))
     ' <<< "$payload" > /dev/null 2>&1
 }
 
@@ -248,6 +443,21 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
         else
           $s
         end;
+      def strip_functions_prefix(v):
+        (v | tostring) as $original |
+        if ($original | ascii_downcase | startswith("functions.")) then $original[10:] else $original end;
+      def parse_mcp_tool_name($raw):
+        strip_functions_prefix($raw) as $name |
+        ($name | ascii_downcase) as $lower |
+        if ($lower | startswith("mcp__")) then
+          ($name | split("__")) as $parts |
+          if ($parts | length) >= 3 then {server: $parts[1], tool: ($parts[2:] | join("__"))} else {} end
+        elif ($lower | startswith("mcp:")) then
+          ($name[4:] | split(":")) as $parts |
+          if ($parts | length) >= 2 then {server: $parts[0], tool: ($parts[1:] | join(":"))} else {} end
+        else
+          {}
+        end;
       def argument_containers:
         [
           obj(.tool_input),
@@ -263,6 +473,8 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
       . as $root |
       (obj($root.mcp_context)) as $mcp |
       (($root.hook_event_name // $root.event // "") | ascii_downcase) as $event |
+      (parse_mcp_tool_name($root.tool_name // "")) as $parsed |
+      ((($parsed.server // "") == "") and (($parsed.tool // "") == "")) as $use_argument_routing_aliases |
       ([
         $mcp.mcp_server,
         $mcp.mcp_server_name,
@@ -270,20 +482,144 @@ aport_hook_payload_has_conflicting_mcp_routing_aliases() {
         $mcp.server_name,
         $mcp.url,
         $root.mcp_server,
+        (if ($root.mcp_server | type) == "object" and (($root.mcp_server.name // "") | type) == "string" and ($root.mcp_server.name // "") != "" then $root.mcp_server.name else null end),
+        $root.mcp_server_name,
+        (if $event == "beforemcpexecution" then $root.server else null end),
+        (if $event == "beforemcpexecution" then $root.url else null end)
+      ] | map(select(type == "string" and length > 0)) | map(route(.)) | map(select(. != "")) | unique) as $host_servers |
+      ([
+        $mcp.mcp_tool,
+        $mcp.tool,
+        $mcp.tool_name,
+        $root.mcp_tool
+      ] | map(select(type == "string" and length > 0)) | unique) as $host_tools |
+      ([
+        $mcp.mcp_server,
+        $mcp.mcp_server_name,
+        $mcp.server,
+        $mcp.server_name,
+        $mcp.url,
+        $root.mcp_server,
+        (if ($root.mcp_server | type) == "object" and (($root.mcp_server.name // "") | type) == "string" and ($root.mcp_server.name // "") != "" then $root.mcp_server.name else null end),
         $root.mcp_server_name,
         (if $event == "beforemcpexecution" then $root.server else null end),
         (if $event == "beforemcpexecution" then $root.url else null end),
-        ($root | argument_containers[] | .mcp_server, .mcp_server_name, .server, .server_name)
+        (if $use_argument_routing_aliases then (
+          $root | argument_containers[] |
+          (if (.mcp_server | type) == "object" and ((.mcp_server.name // "") | type) == "string" and (.mcp_server.name // "") != "" then .mcp_server.name else .mcp_server end),
+          .mcp_server_name,
+          .server,
+          .server_name
+        ) else null end)
       ] | map(select(type == "string" and length > 0)) | map(route(.)) | map(select(. != "")) | unique) as $servers |
       ([
         $mcp.mcp_tool,
         $mcp.tool,
         $mcp.tool_name,
         $root.mcp_tool,
-        ($root | argument_containers[] | .mcp_tool, .tool, .name, .operation)
+        (if $use_argument_routing_aliases then ($root | argument_containers[] | .mcp_tool, .tool, .name, .operation) else null end)
       ] | map(select(type == "string" and length > 0)) | unique) as $tools |
-      (($servers | length) > 1) or (($tools | length) > 1)
+      (($servers | length) > 1) or
+      (($tools | length) > 1) or
+      ((($parsed.server // "") != "") and (([$parsed.server] + $host_servers | unique) | length) > 1) or
+      ((($parsed.tool // "") != "") and (([$parsed.tool] + $host_tools | unique) | length) > 1)
     ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_payload_has_conflicting_image_generation_aliases() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def argument_containers:
+        [
+          obj(.tool_input),
+          obj(.input),
+          obj(.args),
+          obj(obj(.tool_input).args),
+          obj(obj(.tool_input).arguments),
+          obj(obj(.input).args),
+          obj(obj(.input).arguments),
+          obj(obj(.args).args),
+          obj(obj(.args).arguments)
+        ];
+      def present_values($key):
+        [argument_containers[] | select(has($key) and .[$key] != null) | .[$key]];
+      def string_values($key):
+        present_values($key)
+        | map(if type == "string" then . else "__APORT_MALFORMED__" end)
+        | unique;
+      def format_values:
+        [argument_containers[] | (.output_format, .format) | select(. != null)]
+        | map(if type == "string" then ascii_downcase else "__APORT_MALFORMED__" end)
+        | unique;
+      def positive_int_values:
+        [argument_containers[] | (.n, .num_images, .output_count) | select(. != null)]
+        | map(
+            if type == "number" and . > 0 and (floor == .) then tostring
+            elif type == "string" and test("^[1-9][0-9]*$") then (tonumber | tostring)
+            else "__APORT_MALFORMED__"
+            end
+          )
+        | unique;
+      def nonnegative_int_values($key):
+        present_values($key)
+        | map(
+            if type == "number" and . >= 0 and (floor == .) then tostring
+            elif type == "string" and test("^[0-9]+$") then (tonumber | tostring)
+            else "__APORT_MALFORMED__"
+            end
+          )
+        | unique;
+      def referenced_path_values:
+        present_values("referenced_image_paths")
+        | map(
+            if type == "array" and all(type == "string" and length > 0) then tojson
+            else "__APORT_MALFORMED__"
+            end
+          )
+        | unique;
+      (
+        (string_values("prompt") | length) > 1 or
+        (string_values("model") | length) > 1 or
+        (string_values("size") | length) > 1 or
+        (string_values("aspect_ratio") | length) > 1 or
+        (format_values | length) > 1 or
+        (positive_int_values | length) > 1 or
+        (nonnegative_int_values("num_last_images_to_include") | length) > 1 or
+        (referenced_path_values | length) > 1
+      )
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
+aport_hook_browser_context_from_payload() {
+    local payload="$1"
+    local base_context
+
+    base_context="$(aport_hook_context_from_payload "$payload" web 2> /dev/null || printf '{}')"
+    [ -n "$base_context" ] || base_context='{}'
+
+    jq -c --argjson base "$base_context" '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def first_string(v): (v | map(select(type == "string" and length > 0)) | .[0] // "");
+      def normalize_action(v):
+        (v | ascii_downcase) as $a |
+        if $a == "" then "navigate"
+        elif ($a == "open" or $a == "goto" or $a == "go" or $a == "visit" or $a == "browse") then "navigate"
+        else $a
+        end;
+      (obj(.tool_input) + obj(.input) + obj(.args)) as $ti_base |
+      ($ti_base + obj($ti_base.args) + obj($ti_base.arguments)) as $ti |
+      first_string([.action, .operation, .type, $ti.action, $ti.operation, $ti.type]) as $action |
+      $base + {action: normalize_action($action)}
+    ' <<< "$payload"
 }
 
 aport_hook_context_from_payload() {
@@ -292,7 +628,18 @@ aport_hook_context_from_payload() {
     local default_tool="${3:-}"
     local event_hint="${4:-}"
 
-    jq -c --arg default_tool "$default_tool" --arg kind "$kind" --arg event_hint "$event_hint" '
+    # Claude Code's own kill bound for a Bash call that carries no timeout: BASH_DEFAULT_TIMEOUT_MS, capped by
+    # BASH_MAX_TIMEOUT_MS, else its documented 120000 ms. The hook inherits these from Claude Code's environment,
+    # so the evidence matches the bound the command really runs under. Rounded up so it never understates.
+    local claude_default_timeout=120
+    if [[ "${BASH_DEFAULT_TIMEOUT_MS:-}" =~ ^[0-9]+$ ]]; then
+        claude_default_timeout=$(((BASH_DEFAULT_TIMEOUT_MS + 999) / 1000))
+    fi
+    if [[ "${BASH_MAX_TIMEOUT_MS:-}" =~ ^[0-9]+$ ]] && (((BASH_MAX_TIMEOUT_MS + 999) / 1000 < claude_default_timeout)); then
+        claude_default_timeout=$(((BASH_MAX_TIMEOUT_MS + 999) / 1000))
+    fi
+
+    jq -c --arg default_tool "$default_tool" --arg kind "$kind" --arg event_hint "$event_hint" --argjson claude_default_timeout "$claude_default_timeout" '
       def obj(v):
         if (v | type) == "object" then v
         elif (v | type) == "string" then (try (v | fromjson) catch {})
@@ -320,7 +667,13 @@ aport_hook_context_from_payload() {
         end;
       def safe_timeout_ms(v):
         safe_timeout(v) as $timeout_ms |
-        if $timeout_ms == null then null else ($timeout_ms / 1000) end;
+        # Rounded up to a whole second, never left a fraction. jq division yields a float, so a 1500 ms timeout
+        # became 1.5 and the hosted API refused the whole context with "timeout must be an integer", which denies
+        # every tool call rather than the one that carried the odd value. Up rather than down so the evidence never
+        # claims a shorter bound than the harness will actually enforce, and never zero for a sub-second timeout,
+        # which a policy comparing against max_execution_time would read as no bound at all.
+        if $timeout_ms == null then null
+        else (((($timeout_ms + 999) / 1000) | floor) | if . < 1 then 1 else . end) end;
       def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
       def url_host(v):
         str(v) as $s |
@@ -403,6 +756,7 @@ aport_hook_context_from_payload() {
           $name == "subagent_start" or
           $name == "spawnagent" or
           $name == "spawn_agent" or
+          $name == "multi_agent_v1.spawn_agent" or
           $name == "collaboration.spawnagent" or
           $name == "collaboration.spawn_agent" or
           $name == "createagent" or
@@ -415,16 +769,56 @@ aport_hook_context_from_payload() {
       (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
       ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
       if $kind == "shell" then
+        ($event_hint == "claude-code" and ($default_tool | ascii_downcase | IN("bash", "powershell", "monitor"))) as $claude_bounded_shell |
         (
-          safe_timeout($ti.timeout // $ti.timeout_seconds // $ti.timeoutSeconds // .timeout // null) //
-          safe_timeout_ms($ti.timeout_ms // $ti.timeoutMs // .timeout_ms // .timeoutMs // null)
+          # The raw values are bound once, so the unit-aware chain and the "carries a timeout key" guard below
+          # can never disagree about which fields count.
+          ($ti.timeout_seconds // $ti.timeoutSeconds // .timeout // null) as $raw_s |
+          ($ti.timeout_ms // $ti.timeoutMs // .timeout_ms // .timeoutMs // null) as $raw_ms |
+          ($ti.timeout // null) as $raw_tool_timeout |
+          # Claude Code Bash/PowerShell/Monitor send tool_input.timeout in milliseconds.
+          # Other shell aliases use seconds when they provide timeout evidence at all.
+          # The evaluator compares seconds.
+          (if $claude_bounded_shell then
+             (safe_timeout_ms($raw_tool_timeout) // safe_timeout($raw_s))
+           else
+             safe_timeout($raw_tool_timeout // $raw_s)
+           end) //
+          safe_timeout_ms($raw_ms) //
+          # A call that carries no timeout at all runs under the harness default, and that default is what
+          # the policy judges; without it a passport that sets max_execution_time denies every ordinary
+          # shell command, because the rule requires context.timeout. The default applies only when the
+          # call is bounded by it: not when a timeout key is present but malformed (left null, so the
+          # evidence check denies), not for a background or persistent call (nothing bounds it), and not
+          # for harness tools whose "timeout" is a yield window rather than a kill.
+          #   claude-code Bash/PowerShell/Monitor: BASH_DEFAULT_TIMEOUT_MS (capped by BASH_MAX_TIMEOUT_MS),
+          #     120000 ms when unset; computed in bash above and passed in as $claude_default_timeout.
+          #   codex shell/local_shell: DEFAULT_EXEC_COMMAND_TIMEOUT_MS = 10000 ms hard kill.
+          #   codex exec_command/unified_exec: the process outlives the call (write_stdin can drive it);
+          #     no default, the passport must not set max_execution_time or the call must carry timeout_ms.
+          #   cursor, gemini-cli, goose: their shell tools carry no timeout; treated as unbounded.
+          (
+            ($raw_tool_timeout != null or $raw_s != null or $raw_ms != null) as $has_timeout_key |
+            (($ti.run_in_background == true) or ($ti.persistent == true) or ($ti.background == true)) as $unbounded |
+            if $has_timeout_key or $unbounded then null
+            elif $claude_bounded_shell then $claude_default_timeout
+            elif $event_hint == "codex" and ($default_tool | IN("shell", "local_shell", "localshell")) then 10
+            else null
+            end
+          )
         ) as $command_timeout |
+        # `shell` is emitted only when the call names one, and it keeps the RAW value the harness sent,
+        # path and all. aport_hook_shell_override_is_trusted has to see the full path: basenaming here
+        # turned "/tmp/bash" into "bash" and let an attacker-controlled interpreter pass as trusted while
+        # APort judged only the nominal command. The hosted enum (bash, sh, zsh, fish, powershell, cmd)
+        # rejects "" and paths, so the basename is taken later, in normalize_api_context, on the way out.
         ({
           command: (
             .command // $ti.command // $ti.cmd // $ti.script // $ti.shell_command // ""
-          ),
-          shell: (.shell // $ti.shell // "")
-        } + (if $command_timeout == null then {} else {timeout: $command_timeout} end))
+          )
+        }
+        + (if $command_timeout == null then {} else {timeout: $command_timeout} end)
+        + (((.shell // $ti.shell // "") | tostring) as $sh | if $sh == "" then {} else {shell: $sh} end))
       elif $kind == "file_read" then
         {
           file_path: first_string([
@@ -483,7 +877,24 @@ aport_hook_context_from_payload() {
           replace_all: (($ti.replace_all // $ti.replaceAll // false) == true or (($edits | map((.replace_all // .replaceAll // false) == true) | any) // false))
         }
       elif $kind == "web" then
-        (.url // $ti.url // (if urlish($ti.source) then $ti.source else null end) // "") as $raw_url |
+        (arr($ti.open) + arr(.open)) as $open_entries |
+        ($open_entries | map(
+          (if type == "object" then (.ref_id // .url // "")
+           elif type == "string" then .
+           else ""
+           end) |
+          select(type == "string" and length > 0)
+        )) as $open_targets |
+        ([
+          .url,
+          $ti.url,
+          (if urlish(.source) then .source else null end),
+          (if urlish($ti.source) then $ti.source else null end)
+        ] | map(select(type == "string" and length > 0)) | unique) as $scalar_targets |
+        ($open_targets | unique) as $unique_open_targets |
+        ($unique_open_targets | map(select(urlish(.)))) as $open_urls |
+        ($open_urls | .[0] // null) as $open_url |
+        ($scalar_targets[0] // $open_url // "") as $raw_url |
         (.domain // $ti.domain // "") as $raw_domain |
         clean_url($raw_url) as $safe_url |
         url_host($safe_url) as $safe_host |
@@ -491,6 +902,19 @@ aport_hook_context_from_payload() {
         {
           url: $safe_url,
           domain: (if $safe_url != "" then $safe_host elif $raw_url != "" then "" else $domain_host end),
+          web_target_count: (($scalar_targets | length) + ($open_targets | length)),
+          web_operation_group_count: ([
+            (if ((arr($ti.open) + arr(.open)) | length) > 0 then "open" else empty end),
+            (if ((arr($ti.search_query) + arr(.search_query)) | length) > 0 then "search_query" else empty end),
+            (if ((arr($ti.click) + arr(.click)) | length) > 0 then "click" else empty end),
+            (if ((arr($ti.find) + arr(.find)) | length) > 0 then "find" else empty end),
+            (if ((arr($ti.screenshot) + arr(.screenshot)) | length) > 0 then "screenshot" else empty end),
+            (if ((arr($ti.image_query) + arr(.image_query)) | length) > 0 then "image_query" else empty end),
+            (if ((arr($ti.sports) + arr(.sports)) | length) > 0 then "sports" else empty end),
+            (if ((arr($ti.finance) + arr(.finance)) | length) > 0 then "finance" else empty end),
+            (if ((arr($ti.weather) + arr(.weather)) | length) > 0 then "weather" else empty end),
+            (if ((arr($ti.time) + arr(.time)) | length) > 0 then "time" else empty end)
+          ] | unique | length),
           invalid_url: ($raw_url != "" and $safe_url == ""),
           domain_mismatch: ($safe_host != "" and $domain_host != "" and $domain_host != $safe_host),
           method: (.method // $ti.method // "GET")
@@ -500,22 +924,40 @@ aport_hook_context_from_payload() {
         ((.hook_event_name // .event // $event_hint // "") | ascii_downcase) as $event |
         strip_functions_prefix($default_tool) as $default_tool_clean |
         ($default_tool_clean | ascii_downcase | gsub("\\s+"; "")) as $tool_key |
-        ($tool_key == "readmcpresourcetool" or $tool_key == "read_mcp_resource_tool") as $is_resource_read |
+        (
+          $tool_key == "readmcpresource" or
+          $tool_key == "read_mcp_resource" or
+          $tool_key == "readmcpresourcetool" or
+          $tool_key == "read_mcp_resource_tool"
+        ) as $is_resource_read |
+        ($tool_key == "listmcpresources" or $tool_key == "list_mcp_resources") as $is_resource_list |
+        ($tool_key == "listmcpresourcetemplates" or $tool_key == "list_mcp_resource_templates") as $is_resource_template_list |
         ($tool_key == "callmcptool" or $tool_key == "call_mcp_tool") as $is_generic_call |
-        ($is_resource_read or $is_generic_call) as $allows_input_routing |
+        ($is_resource_read or $is_resource_list or $is_resource_template_list or $is_generic_call) as $allows_input_routing |
         (parse_mcp_tool_name($default_tool)) as $parsed |
         (
-          if $event == "beforemcpexecution" and $default_tool_clean != "" and ($is_resource_read | not) and ($is_generic_call | not) then
+          if $event == "beforemcpexecution" and $default_tool_clean != "" and ($allows_input_routing | not) then
             $default_tool_clean
           else
             null
           end
         ) as $native_tool |
         (
+          if $is_resource_read then "resources.read"
+          elif $is_resource_list then "resources.list"
+          elif $is_resource_template_list then "resources.templates.list"
+          else $default_tool
+          end
+        ) as $default_mcp_tool |
+        (
           $mcp.server_name // $mcp.server // $mcp.url //
-          .mcp_server_name // .mcp_server //
+          .mcp_server_name // (if (.mcp_server | type) == "string" then .mcp_server else null end) //
           (if $event == "beforemcpexecution" then (.server // .url) else null end) //
           $parsed.server //
+          # Claude Code (v2.1.274+) sends mcp_server as {name, source}; use the host-reported
+          # name when the tool name carries no mcp__<server>__ prefix to parse.
+          (if (.mcp_server | type) == "object" and ((.mcp_server.name // "") | type) == "string" and (.mcp_server.name // "") != ""
+             then .mcp_server.name else null end) //
           (if $allows_input_routing then ($ti.server // $ti.mcp_server // $ti.mcp_server_name) else null end) //
           ""
         ) as $raw_server |
@@ -530,12 +972,12 @@ aport_hook_context_from_payload() {
           tool: (
             $mcp.tool_name // $mcp.tool // $parsed.tool // $native_tool //
             $ti.tool // $ti.mcp_tool // $ti.name // $ti.operation // .mcp_tool // .tool //
-            (if $is_resource_read then "resources.read" else $default_tool end)
+            $default_mcp_tool
           ),
           mcp_tool: (
             $mcp.tool_name // $mcp.tool // $parsed.tool // $native_tool //
             $ti.tool // $ti.mcp_tool // $ti.name // $ti.operation // .mcp_tool // .tool //
-            (if $is_resource_read then "resources.read" else $default_tool end)
+            $default_mcp_tool
           ),
           parameters: {},
           parameter_keys: keys_or_empty($ti),

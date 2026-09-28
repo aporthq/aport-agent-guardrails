@@ -54,7 +54,7 @@ npx --yes @aporthq/aport-agent-guardrails claude-code \
   --non-interactive
 ```
 
-Use `--api-url https://your-aport.example` for a private APort deployment. Non-interactive setup uses framework defaults for config directory and strict mode.
+Use `--api-url https://your-aport.example` for a private APort deployment. Non-interactive setup uses the framework default config directory (or `APORT_<FRAMEWORK>_CONFIG_DIR` when set) and strict mode. For a non-interactive install that writes a local passport file instead of a hosted one, see [QUICKSTART.md](QUICKSTART.md#non-interactive-installs).
 
 If you already have your agent_id, pass it directly:
 

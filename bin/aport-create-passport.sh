@@ -45,8 +45,8 @@ fi
 PASSPORT_FILE="${PASSPORT_FILE/#\~/$HOME}"
 
 # Config dir: from env, or derived from passport path (e.g. .../aport/passport.json -> parent of aport)
-if [ -n "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}" ]; then
-    CONFIG_DIR="${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-}}"
+if [ -n "${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}" ]; then
+    CONFIG_DIR="${APORT_CONFIG_DIR:-${OPENCLAW_CONFIG_DIR:-${OPENCLAW_STATE_DIR:-}}}"
     CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
 else
     CONFIG_DIR="$(dirname "$PASSPORT_FILE")"
@@ -108,6 +108,7 @@ DEFAULT_OWNER_TYPE="user"
 # Agent name/description: try OpenClaw IDENTITY.md first; overridden per framework below
 DEFAULT_AGENT_NAME=$(get_identity_name) || true
 DEFAULT_AGENT_DESC=$(get_identity_description) || true
+DEFAULT_IMAGE_GENERATE=n
 
 # Framework-aware defaults: capabilities and agent identity vary by framework
 case "${APORT_FRAMEWORK:-}" in
@@ -188,6 +189,7 @@ case "${APORT_FRAMEWORK:-}" in
         DEFAULT_FILE_WRITE=y
         DEFAULT_WEB_FETCH=n
         DEFAULT_WEB_BROWSER=n
+        DEFAULT_IMAGE_GENERATE=y
         DEFAULT_AGENT_SESSION=y
         DEFAULT_MCP_TOOL=y
         ;;
@@ -237,6 +239,7 @@ if [ -n "$NON_INTERACTIVE" ]; then
     file_write_cap=$DEFAULT_FILE_WRITE
     web_fetch_cap=$DEFAULT_WEB_FETCH
     web_browser_cap=$DEFAULT_WEB_BROWSER
+    image_generate_cap=$DEFAULT_IMAGE_GENERATE
     agent_session_cap=$DEFAULT_AGENT_SESSION
     mcp_tool_cap=$DEFAULT_MCP_TOOL
     max_pr_size=500
@@ -313,7 +316,7 @@ else
     echo "  ───────────────"
     case "${APORT_FRAMEWORK:-}" in
         claude-code) echo "  Choose what your agent can do (y/n). Claude Code defaults: most capabilities = yes." ;;
-        codex) echo "  Choose what your agent can do (y/n). Codex defaults: file ops, exec, sub-agents, and MCP = yes." ;;
+        codex) echo "  Choose what your agent can do (y/n). Codex defaults: file ops, exec, image generation, sub-agents, and MCP = yes." ;;
         cursor) echo "  Choose what your agent can do (y/n). Cursor defaults: file ops, exec, web, sub-agents = yes." ;;
         gemini-cli | gemini) echo "  Choose what your agent can do (y/n). Gemini CLI defaults: file ops, exec, web, and MCP = yes." ;;
         goose) echo "  Choose what your agent can do (y/n). Goose defaults: file ops, exec, web, sub-agents, and MCP = yes." ;;
@@ -357,6 +360,13 @@ else
         read -p "  • Automate web browser? [y/N]: " web_browser_cap
     fi
     web_browser_cap=${web_browser_cap:-$DEFAULT_WEB_BROWSER}
+
+    if [ "$DEFAULT_IMAGE_GENERATE" = "y" ]; then
+        read -p "  • Generate images? [Y/n]: " image_generate_cap
+    else
+        read -p "  • Generate images? [y/N]: " image_generate_cap
+    fi
+    image_generate_cap=${image_generate_cap:-$DEFAULT_IMAGE_GENERATE}
 
     read -p "  • Export data (database, files, etc.)? [y/N]: " data_cap
     data_cap=${data_cap:-n}
@@ -502,6 +512,9 @@ fi
 if [ "$web_browser_cap" = "y" ] || [ "$web_browser_cap" = "Y" ]; then
     capabilities_json="$capabilities_json{\"id\": \"web.browser\"},"
 fi
+if [ "${image_generate_cap:-n}" = "y" ] || [ "${image_generate_cap:-n}" = "Y" ]; then
+    capabilities_json="$capabilities_json{\"id\": \"media.image.generate\"},"
+fi
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
     capabilities_json="$capabilities_json{\"id\": \"data.export\"},"
 fi
@@ -592,6 +605,10 @@ if [ "$web_browser_cap" = "y" ] || [ "$web_browser_cap" = "Y" ]; then
     done
     allowed_domains_json="${allowed_domains_json%,}]"
     limits_json="$limits_json\"web.browser\": {\"allowed_domains\": $allowed_domains_json, \"max_screenshots_per_hour\": 100},"
+fi
+
+if [ "${image_generate_cap:-n}" = "y" ] || [ "${image_generate_cap:-n}" = "Y" ]; then
+    limits_json="$limits_json\"media.image.generate\": {\"allowed_providers\": [\"*\"], \"max_prompt_length\": 8000, \"max_referenced_images\": 0, \"max_output_images\": 4, \"allowed_output_formats\": [\"png\", \"jpg\", \"jpeg\", \"webp\"]},"
 fi
 
 if [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ]; then
@@ -712,6 +729,7 @@ echo "  🔐 Capabilities:"
 [ "$file_write_cap" = "y" ] || [ "$file_write_cap" = "Y" ] && echo "    • Write/edit files"
 [ "$web_fetch_cap" = "y" ] || [ "$web_fetch_cap" = "Y" ] && echo "    • Fetch from web"
 [ "$web_browser_cap" = "y" ] || [ "$web_browser_cap" = "Y" ] && echo "    • Automate browser"
+[ "${image_generate_cap:-n}" = "y" ] || [ "${image_generate_cap:-n}" = "Y" ] && echo "    • Generate images"
 [ "$data_cap" = "y" ] || [ "$data_cap" = "Y" ] && echo "    • Export data"
 [ "${agent_session_cap:-n}" = "y" ] || [ "${agent_session_cap:-n}" = "Y" ] && echo "    • Spawn sub-agents and tasks"
 [ "${mcp_tool_cap:-n}" = "y" ] || [ "${mcp_tool_cap:-n}" = "Y" ] && echo "    • Use MCP tools"

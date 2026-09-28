@@ -16,6 +16,14 @@ is_aport_api_key() {
     [[ ! "$value" =~ [[:space:][:cntrl:]] ]]
 }
 
+validate_passport_selector_conflict() {
+    local requested_reuse="${APORT_REUSE_PASSPORT_FROM_CLI:-${APORT_REUSE_PASSPORT_FROM:-}}"
+    if [[ -n "$requested_reuse" && -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
+        echo "[aport] ERROR: --reuse-from and hosted agent id name two different passports; pass one of them" >&2
+        return 1
+    fi
+}
+
 parse_guardrail_mode_args() {
     APORT_GUARDRAIL_MODE_CLI="${APORT_GUARDRAIL_MODE_CLI:-}"
     APORT_GUARDRAIL_API_URL_CLI="${APORT_GUARDRAIL_API_URL_CLI:-}"
@@ -48,6 +56,24 @@ parse_guardrail_mode_args() {
                     return 1
                 fi
                 APORT_GUARDRAIL_API_URL_CLI="$2"
+                shift
+                ;;
+            --reuse-from=*)
+                # An empty suffix is refused like the separated form with no argument. Storing "" would read
+                # as "not provided" at every later check, so a non-interactive setup would mint a new passport
+                # despite the operator explicitly asking to reuse one.
+                if [[ -z "${1#*=}" ]]; then
+                    echo "[aport] ERROR: --reuse-from requires a framework name, a passport.json path, or a hosted agent id" >&2
+                    return 1
+                fi
+                APORT_REUSE_PASSPORT_FROM_CLI="${1#*=}"
+                ;;
+            --reuse-from)
+                if [[ -z "${2:-}" ]]; then
+                    echo "[aport] ERROR: --reuse-from requires a framework name, a passport.json path, or a hosted agent id" >&2
+                    return 1
+                fi
+                APORT_REUSE_PASSPORT_FROM_CLI="$2"
                 shift
                 ;;
             --enforcement=*)
@@ -108,6 +134,8 @@ parse_guardrail_mode_args() {
         esac
         shift
     done
+
+    validate_passport_selector_conflict || return 1
 
     export APORT_GUARDRAIL_MODE_CLI APORT_GUARDRAIL_API_URL_CLI APORT_HOSTED_AGENT_ID_CLI
     export APORT_QUICK_HOSTED_CLI APORT_OWNER_EMAIL_CLI APORT_ISSUE_URL_CLI
