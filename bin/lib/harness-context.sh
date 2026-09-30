@@ -674,6 +674,10 @@ aport_hook_context_from_payload() {
         # which a policy comparing against max_execution_time would read as no bound at all.
         if $timeout_ms == null then null
         else (((($timeout_ms + 999) / 1000) | floor) | if . < 1 then 1 else . end) end;
+      def ceil_seconds:
+        . as $n |
+        ($n | floor) as $f |
+        if $n == $f then $f else ($f + 1) end;
       def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
       def url_host(v):
         str(v) as $s |
@@ -793,43 +797,52 @@ aport_hook_context_from_payload() {
           end
         end;
       def session_duration_evidence($ti):
+        [
+          $ti.requested_duration,
+          $ti.requestedDuration,
+          $ti.requested_duration_seconds,
+          $ti.requestedDurationSeconds,
+          $ti.session_duration_seconds,
+          $ti.sessionDurationSeconds,
+          $ti.duration_seconds,
+          $ti.durationSeconds,
+          $ti.ttl_seconds,
+          $ti.ttlSeconds
+        ] | map(select(. != null)) as $second_values |
+        [
+          $ti.requested_duration_ms,
+          $ti.requestedDurationMs,
+          $ti.session_duration_ms,
+          $ti.sessionDurationMs,
+          $ti.duration_ms,
+          $ti.durationMs,
+          $ti.timeout_ms,
+          $ti.timeoutMs
+        ] | map(select(. != null)) as $millisecond_values |
         (
           [
-            {
-              unit: "s",
-              value: (
-                $ti.requested_duration // $ti.requestedDuration //
-                $ti.requested_duration_seconds // $ti.requestedDurationSeconds //
-                $ti.session_duration_seconds // $ti.sessionDurationSeconds //
-                $ti.duration_seconds // $ti.durationSeconds //
-                $ti.ttl_seconds // $ti.ttlSeconds //
-                null
-              )
-            },
-            {
-              unit: "ms",
-              value: (
-                $ti.requested_duration_ms // $ti.requestedDurationMs //
-                $ti.session_duration_ms // $ti.sessionDurationMs //
-                $ti.duration_ms // $ti.durationMs //
-                $ti.timeout_ms // $ti.timeoutMs //
-                null
-              )
-            }
-          ] | map(select(.value != null)) | .[0] // null
-        ) as $raw |
-        if $raw == null then {present: false, invalid: false}
+            ($second_values[] | {unit: "s", value: .}),
+            ($millisecond_values[] | {unit: "ms", value: .})
+          ]
+        ) as $raw_values |
+        if ($raw_values | length) == 0 then {present: false, invalid: false}
         else (
-          if $raw.unit == "ms" then safe_timeout_ms($raw.value)
-          else safe_timeout($raw.value)
-          end
-        ) as $duration |
-          if $duration == null then {present: true, invalid: true}
-          else ($duration | floor) as $floored |
-            if $floored >= 60 and $floored <= 86400 then
-              {present: true, invalid: false, value: $floored}
+          $raw_values | map(
+            if .unit == "ms" then
+              (safe_timeout_ms(.value)) as $duration |
+              if $duration == null then {invalid: true} else {invalid: false, value: $duration} end
             else
-              {present: true, invalid: true}
+              (safe_timeout(.value)) as $duration |
+              if $duration == null then {invalid: true} else {invalid: false, value: ($duration | ceil_seconds)} end
+            end
+          )
+        ) as $durations |
+          if (($durations | map(select(.invalid == true)) | length) > 0) then {present: true, invalid: true}
+          elif (($durations | map(.value) | unique | length) != 1) then {present: true, invalid: true}
+          else ($durations[0].value) as $seconds |
+            if $seconds >= 60 and $seconds <= 86400 then
+              {present: true, invalid: false, value: $seconds}
+            else {present: true, invalid: true}
             end
           end
         end;

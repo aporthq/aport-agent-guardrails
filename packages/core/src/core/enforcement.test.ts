@@ -26,6 +26,7 @@ describe("enforcement helpers", () => {
     for (const code of [
       "oap.context_not_serializable",
       "oap.context_too_nested",
+      "oap.invalid_session_count",
       "oap.path_traversal_attempt",
       "oap.path_resolution_error",
     ]) {

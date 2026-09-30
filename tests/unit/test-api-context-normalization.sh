@@ -75,6 +75,14 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_se
 printf '%s' "$out" | jq -e 'has("requested_duration") | not' > /dev/null \
     || fail "session context must not emit schema-invalid requested_duration values: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting duration","duration_seconds":60,"duration_ms":172800000}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
+    || fail "session context must flag conflicting duration aliases: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"fractional overflow","duration_ms":86400999}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
+    || fail "session context must reject millisecond durations that round over the max: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"CronCreate","active_session_count":0,"tool_input":{"description":"daily check"}}' session 'CronCreate' claude-code)"
 printf '%s' "$out" | jq -e '.session_type == "scheduled"' > /dev/null \
     || fail "CronCreate session context should be scheduled: $out"

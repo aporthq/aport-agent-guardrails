@@ -20,6 +20,7 @@ export const HARD_FAILURE_CODES = new Set([
   "oap.invalid_json",
   "oap.invalid_limit",
   "oap.invalid_passport_path",
+  "oap.invalid_session_count",
   "oap.invalid_session_duration",
   "oap.invalid_session_type",
   "oap.invalid_tool_arguments",

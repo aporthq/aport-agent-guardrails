@@ -129,7 +129,7 @@ fi
 
 # Require jq for JSON parsing
 if ! command -v jq &> /dev/null; then
-    deny_or_warn "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "hard"
+    deny_or_warn "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "mandatory"
 fi
 
 if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then

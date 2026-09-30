@@ -129,7 +129,7 @@ fi
 
 # Parse tool_name and tool_input (requires jq)
 if ! command -v jq &> /dev/null; then
-    deny_or_warn "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "hard"
+    deny_or_warn "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "mandatory"
 fi
 
 # Parse with error handling: jq failure must deny, never undefined exit codes.

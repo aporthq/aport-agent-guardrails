@@ -129,6 +129,39 @@ printf '%s' "$FALLBACK_JSON" | "$JQ_BIN" -e '
 }
 echo "  ✅ no-jq Claude Code response fallback: valid escaped JSON"
 
+NO_JQ_HOOK_PATH="$TEST_DIR/no-jq-hook-path"
+mkdir -p "$NO_JQ_HOOK_PATH"
+for tool in dirname tr sed cut; do
+    ln -sf "$(command -v "$tool")" "$NO_JQ_HOOK_PATH/$tool"
+done
+BASH_BIN="$(command -v bash)"
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=observe
+EOF
+OUT_NO_JQ_OBSERVE="$TEST_DIR/claude-observe-no-jq.txt"
+set +e
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+    | PATH="$NO_JQ_HOOK_PATH" OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$BASH_BIN" "$HOOK_SCRIPT" > "$OUT_NO_JQ_OBSERVE" 2> /dev/null
+EXIT_NO_JQ_OBSERVE=$?
+set -e
+[[ "$EXIT_NO_JQ_OBSERVE" -eq 0 ]] || {
+    echo "FAIL: Claude observe-mode no-jq path should return structured deny, got $EXIT_NO_JQ_OBSERVE" >&2
+    cat "$OUT_NO_JQ_OBSERVE" >&2
+    exit 1
+}
+"$JQ_BIN" -e '
+  .hookSpecificOutput.permissionDecision == "deny"
+  and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_dependency"))
+  and ((.hookSpecificOutput.permissionDecisionReason | contains("observe mode allowed")) | not)
+' "$OUT_NO_JQ_OBSERVE" > /dev/null || {
+    echo "FAIL: Claude observe mode must not allow missing jq" >&2
+    cat "$OUT_NO_JQ_OBSERVE" >&2
+    exit 1
+}
+echo "  ✅ no-jq Claude observe mode remains fail-closed"
+
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
