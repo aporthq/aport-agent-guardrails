@@ -766,6 +766,35 @@ aport_hook_context_from_payload() {
         ) then "create"
         else "other"
         end;
+      def session_type($raw):
+        (strip_functions_prefix($raw) | ascii_downcase) as $name |
+        if ($name | contains("cron") or contains("schedulewakeup") or contains("schedule_wakeup")) then "scheduled"
+        elif ($name | contains("remote") or contains("webhook")) then "webhook"
+        elif ($name | contains("batch")) then "batch"
+        elif ($name | contains("ephemeral")) then "ephemeral"
+        else "interactive"
+        end;
+      def session_duration($ti):
+        (
+          safe_timeout(
+            $ti.requested_duration // $ti.requestedDuration //
+            $ti.requested_duration_seconds // $ti.requestedDurationSeconds //
+            $ti.session_duration_seconds // $ti.sessionDurationSeconds //
+            $ti.duration_seconds // $ti.durationSeconds //
+            $ti.ttl_seconds // $ti.ttlSeconds //
+            null
+          ) //
+          safe_timeout_ms(
+            $ti.requested_duration_ms // $ti.requestedDurationMs //
+            $ti.session_duration_ms // $ti.sessionDurationMs //
+            $ti.duration_ms // $ti.durationMs //
+            $ti.timeout_ms // $ti.timeoutMs //
+            null
+          )
+        ) as $duration |
+        if $duration == null then null
+        else ($duration | floor | if . >= 60 and . <= 86400 then . else null end)
+        end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
       ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
       if $kind == "shell" then
@@ -989,12 +1018,16 @@ aport_hook_context_from_payload() {
           $ti.description // $ti.prompt // $ti.task // $ti.message // ""
         ) as $description |
         session_operation($default_tool) as $session_operation |
-        {
+        session_duration($ti) as $requested_duration |
+        (.active_session_count // .current_active_sessions // null) as $active_session_count |
+        ({
           description_length: (str($description) | length),
           session_operation: $session_operation,
+          session_type: session_type($default_tool),
           session_tracking: (if $event_hint == "codex" then "persistent" else "host_active_count" end),
           hook_event: (.hook_event_name // .event // ""),
-          active_session_count: (.active_session_count // .current_active_sessions // null),
+          active_session_count: $active_session_count,
+          current_active_sessions: $active_session_count,
           parent_session_id: (.session_id // .sessionId // ""),
           session_call_id: (.tool_call_id // .toolCallId // .tool_use_id // .toolUseId // .request_id // ""),
           session_id: (
@@ -1005,7 +1038,7 @@ aport_hook_context_from_payload() {
             end
           ),
           subagent_type: (.subagent_type // $ti.subagent_type // $ti.agent_type // "")
-        }
+        } + (if $requested_duration == null then {} else {requested_duration: $requested_duration} end))
       else
         {}
       end

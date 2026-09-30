@@ -854,7 +854,7 @@ echo "  ✅ Agent tool_input active_session_count is not trusted"
 echo "  Test: Agent tool -> allow..."
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 OUT10="$TEST_DIR/claude-allow-agent.txt"
-echo '{"tool_name":"Agent","active_session_count":0,"tool_input":{"description":"explore codebase","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
+echo '{"tool_name":"Agent","active_session_count":0,"tool_input":{"description":"explore codebase","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer","duration_ms":3600000}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
 EXIT10=$?
 [[ "$EXIT10" -eq 0 ]] || {
     echo "FAIL: expected exit 0 for Agent, got $EXIT10 (output: $(cat "$OUT10" 2> /dev/null))" >&2
@@ -865,8 +865,8 @@ if grep -q 'secret_prompt_should_not_persist\|explore codebase' "$TEST_DIR/aport
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 fi
-jq -e '.guardrail_tool == "session.create" and .context.description_length > 0 and .context.subagent_type == "reviewer"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
-    echo "FAIL: Claude session context should include description length and subagent type only" >&2
+jq -e '.guardrail_tool == "session.create" and .context.description_length > 0 and .context.subagent_type == "reviewer" and .context.session_type == "interactive" and .context.current_active_sessions == 0 and .context.requested_duration == 3600' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Claude session context should include minimal hosted session metadata" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 }
