@@ -83,6 +83,10 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_se
 printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
     || fail "session context must reject millisecond durations that round over the max: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"fractional ms","duration_ms":60000.1}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
+    || fail "session context must reject fractional millisecond durations: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"CronCreate","active_session_count":0,"tool_input":{"description":"daily check"}}' session 'CronCreate' claude-code)"
 printf '%s' "$out" | jq -e '.session_type == "scheduled"' > /dev/null \
     || fail "CronCreate session context should be scheduled: $out"
