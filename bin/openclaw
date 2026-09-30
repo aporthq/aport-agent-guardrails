@@ -433,7 +433,8 @@ YAML
         # Fail-closed: block on error (default: true)
         failClosed: true
 
-        # Enforcement: "enforce" blocks denied actions; "warn" records and allows
+        # Enforcement: "enforce" blocks, "warn" records completed policy denials,
+        # "observe" warns without blocking on APort mapping/runtime/API failures
         enforcementMode: $PLUGIN_ENFORCEMENT
 
         # Allow unmapped tools (false = strict: block custom skills/ClawHub unless mapped)

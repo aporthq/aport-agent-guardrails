@@ -129,6 +129,39 @@ printf '%s' "$FALLBACK_JSON" | "$JQ_BIN" -e '
 }
 echo "  ✅ no-jq Claude Code response fallback: valid escaped JSON"
 
+NO_JQ_HOOK_PATH="$TEST_DIR/no-jq-hook-path"
+mkdir -p "$NO_JQ_HOOK_PATH"
+for tool in dirname tr sed cut; do
+    ln -sf "$(command -v "$tool")" "$NO_JQ_HOOK_PATH/$tool"
+done
+BASH_BIN="$(command -v bash)"
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=observe
+EOF
+OUT_NO_JQ_OBSERVE="$TEST_DIR/claude-observe-no-jq.txt"
+set +e
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+    | PATH="$NO_JQ_HOOK_PATH" OPENCLAW_CONFIG_DIR="$TEST_DIR" OPENCLAW_PASSPORT_FILE="$TEST_DIR/aport/passport.json" \
+        OPENCLAW_DECISION_FILE="$TEST_DIR/aport/decision.json" "$BASH_BIN" "$HOOK_SCRIPT" > "$OUT_NO_JQ_OBSERVE" 2> /dev/null
+EXIT_NO_JQ_OBSERVE=$?
+set -e
+[[ "$EXIT_NO_JQ_OBSERVE" -eq 0 ]] || {
+    echo "FAIL: Claude observe-mode no-jq path should return structured deny, got $EXIT_NO_JQ_OBSERVE" >&2
+    cat "$OUT_NO_JQ_OBSERVE" >&2
+    exit 1
+}
+"$JQ_BIN" -e '
+  .hookSpecificOutput.permissionDecision == "deny"
+  and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_dependency"))
+  and ((.hookSpecificOutput.permissionDecisionReason | contains("observe mode allowed")) | not)
+' "$OUT_NO_JQ_OBSERVE" > /dev/null || {
+    echo "FAIL: Claude observe mode must not allow missing jq" >&2
+    cat "$OUT_NO_JQ_OBSERVE" >&2
+    exit 1
+}
+echo "  ✅ no-jq Claude observe mode remains fail-closed"
+
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=warn
@@ -398,6 +431,40 @@ grep -q 'fail-closed' "$OUT4" || {
     exit 1
 }
 echo "  ✅ Unknown tool: structured deny, fail-closed"
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=observe
+EOF
+echo "  Test: Unknown tool in observe mode -> allow with warning..."
+OUT4O="$TEST_DIR/claude-observe-unknown.txt"
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+set +e
+echo '{"tool_name":"UnknownTool","tool_input":{}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4O" 2> /dev/null
+EXIT4O=$?
+set -e
+[[ "$EXIT4O" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with observe warning for unknown tool, got $EXIT4O" >&2
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("observe mode allowed"))
+  and (.systemMessage | contains("oap.unknown_tool"))
+' "$OUT4O" > /dev/null || {
+    echo "FAIL: observe mode should allow unknown tools with warning" >&2
+    cat "$OUT4O" >&2
+    exit 1
+}
+jq -e '.guardrail_tool == "hook.tool.map" and .decision.allow == false and .decision.reasons[0].code == "oap.unknown_tool"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Claude observe-mode adapter failures should be recorded in session-decisions.jsonl" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2 || true
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Unknown tool in observe mode: allow with warning"
 
 echo "  Test: TodoWrite tool -> allow (internal bookkeeping)..."
 OUT4B="$TEST_DIR/claude-allow-todowrite.txt"
@@ -741,6 +808,45 @@ if grep -q 'apk_claude_secret' "$OUT8W"; then
 fi
 echo "  ✅ API mode warn still denies evaluator failures"
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=observe
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+APORT_API_KEY=apk_claude_secret_should_redact
+EOF
+OUT8O="$TEST_DIR/claude-api-mode-observe.txt"
+echo "  Test: API mode observe with unreachable endpoint -> allow with warning..."
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT8O" 2> /dev/null
+EXIT8O=$?
+set -e
+[[ "$EXIT8O" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 in observe mode, got $EXIT8O" >&2
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("observe mode allowed"))
+  and (.systemMessage | contains("oap.evaluation_error"))
+' "$OUT8O" > /dev/null || {
+    echo "FAIL: observe mode should allow unreachable API with warning" >&2
+    cat "$OUT8O" >&2
+    exit 1
+}
+if grep -q 'apk_claude_secret' "$OUT8O"; then
+    echo "FAIL: observe warning output must not leak API keys" >&2
+    cat "$OUT8O" >&2
+    exit 1
+fi
+echo "  ✅ API mode observe allows evaluator failures"
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=warn
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+EOF
 STALE_DECISION_BASE="$TEST_DIR/aport/stale-claude-decision.json"
 STALE_DECISION_OUT="$TEST_DIR/claude-stale-decision-out.json"
 STALE_DECISION_ERR="$TEST_DIR/claude-stale-decision-err.txt"
@@ -854,7 +960,7 @@ echo "  ✅ Agent tool_input active_session_count is not trusted"
 echo "  Test: Agent tool -> allow..."
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 OUT10="$TEST_DIR/claude-allow-agent.txt"
-echo '{"tool_name":"Agent","active_session_count":0,"tool_input":{"description":"explore codebase","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
+echo '{"tool_name":"Agent","active_session_count":0,"tool_input":{"description":"explore codebase","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer","duration_ms":3600000}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10" 2> /dev/null
 EXIT10=$?
 [[ "$EXIT10" -eq 0 ]] || {
     echo "FAIL: expected exit 0 for Agent, got $EXIT10 (output: $(cat "$OUT10" 2> /dev/null))" >&2
@@ -865,8 +971,8 @@ if grep -q 'secret_prompt_should_not_persist\|explore codebase' "$TEST_DIR/aport
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 fi
-jq -e '.guardrail_tool == "session.create" and .context.description_length > 0 and .context.subagent_type == "reviewer"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
-    echo "FAIL: Claude session context should include description length and subagent type only" >&2
+jq -e '.guardrail_tool == "session.create" and .context.description_length > 0 and .context.subagent_type == "reviewer" and .context.session_type == "interactive" and .context.current_active_sessions == 0 and .context.requested_duration == 3600' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Claude session context should include minimal hosted session metadata" >&2
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
     exit 1
 }

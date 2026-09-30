@@ -115,8 +115,14 @@ emit_response() {
         exit 0
     fi
 
-    if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "$FRAMEWORK")"
+    if aport_hook_should_allow_failure "$failure_class"; then
+        if [ "$failure_class" != "policy" ] && [ "${APORT_ADAPTER_DECISION_RECORDED:-0}" != "1" ]; then
+            aport_hook_record_synthetic_failure_decision \
+                "$policy" "$code" "$message" "$FRAMEWORK" \
+                "${INPUT:-{}}" "${ORIGINAL_TOOL:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || true
+            APORT_ADAPTER_DECISION_RECORDED=1
+        fi
+        notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "$FRAMEWORK")"
         user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "$FRAMEWORK")"
         # Some hosts do not surface allow-response warnings consistently. Keep
         # stderr human-readable and sanitized while returning allow semantics.
@@ -159,7 +165,7 @@ if [ -z "$INPUT" ]; then
 fi
 
 if ! command -v jq > /dev/null 2>&1; then
-    emit_response "deny" "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads"
+    emit_response "deny" "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "mandatory"
 fi
 
 if ! printf '%s' "$INPUT" | jq -e . > /dev/null 2>&1; then
@@ -642,16 +648,16 @@ map_codex_browser() {
 
 map_codex_computer_use() {
     if aport_hook_payload_has_malformed_browser_action_aliases "$INPUT"; then
-        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use action aliases must be strings"
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use action aliases must be strings" "mandatory"
     fi
     if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
-        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting URL or domain aliases"
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting URL or domain aliases" "mandatory"
     fi
     if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
-        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting action aliases"
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting action aliases" "mandatory"
     fi
     if ! aport_hook_payload_has_browser_action_evidence "$INPUT"; then
-        emit_response "deny" "web.browser" "oap.missing_required_context" "Computer-use tool did not provide an explicit action that APort can evaluate"
+        emit_response "deny" "web.browser" "oap.missing_required_context" "Computer-use tool did not provide an explicit action that APort can evaluate" "mandatory"
     fi
     CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
     if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
@@ -765,6 +771,15 @@ map_codex_plugin_install() {
 map_session() {
     GUARDRAIL_TOOL="session.create"
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$ORIGINAL_TOOL" "$FRAMEWORK")"
+    if aport_hook_context_has_invalid_session_duration "$CONTEXT_JSON"; then
+        emit_response "deny" "agent.session.create.v1" "oap.invalid_session_duration" \
+            "Session duration is malformed or outside the supported 60-86400 second range" "hard"
+    fi
+    if aport_hook_context_has_invalid_session_type "$CONTEXT_JSON"; then
+        emit_response "deny" "agent.session.create.v1" "oap.invalid_session_type" \
+            "Session type is malformed or outside the supported interactive, batch, webhook, scheduled, or ephemeral values" "hard"
+    fi
+    CONTEXT_JSON="$(aport_hook_strip_adapter_context_flags "$CONTEXT_JSON")"
 }
 
 map_metadata_or_path_read() {
@@ -1172,6 +1187,7 @@ fi
 
 if [ "$GUARDRAIL_EXIT" -eq 0 ]; then
     aport_append_local_session_decision "$HOOK_DECISION_FILE" "$FRAMEWORK" "$INPUT" "$ORIGINAL_TOOL" "$GUARDRAIL_TOOL" "$CONTEXT_JSON" || true
+    APORT_ADAPTER_DECISION_RECORDED=1
     [ -n "$HOOK_DECISION_FILE" ] && rm -f "$HOOK_DECISION_FILE" 2> /dev/null || true
     emit_response "allow" "" "" ""
 fi
@@ -1185,6 +1201,7 @@ fi
 [ -z "$REASON_CODE" ] && REASON_CODE="oap.denied"
 [ -z "$REASON_MESSAGE" ] && REASON_MESSAGE="$GUARDRAIL_OUTPUT"
 aport_append_local_session_decision "$HOOK_DECISION_FILE" "$FRAMEWORK" "$INPUT" "$ORIGINAL_TOOL" "$GUARDRAIL_TOOL" "$CONTEXT_JSON" || true
+APORT_ADAPTER_DECISION_RECORDED=1
 [ -n "$HOOK_DECISION_FILE" ] && rm -f "$HOOK_DECISION_FILE" 2> /dev/null || true
 if [ "$HAS_DECISION_FILE" -ne 1 ]; then
     emit_response "deny" "$GUARDRAIL_TOOL" "oap.evaluator_failed" "$REASON_MESSAGE" "hard"

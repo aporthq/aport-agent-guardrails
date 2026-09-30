@@ -61,12 +61,58 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
     fi
 fi
 
-emit_claude_input_too_large() {
-    local notice
-    notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-
-    aport_hook_build_response "deny" "$notice" "" "claude-code"
+# Deny helper: outputs hookSpecificOutput JSON and exits 0.
+deny() {
+    local reason="$1"
+    aport_hook_build_response "deny" "$reason" "" "claude-code"
     exit 0
+}
+
+warn_allow() {
+    local reason="$1"
+    local user_warning="${2:-}"
+    aport_hook_build_response "allow" "$reason" "$user_warning" "claude-code"
+    exit 0
+}
+
+deny_or_warn() {
+    local policy="$1"
+    local code="${2:-oap.denied}"
+    local message="${3:-}"
+    local failure_class="${4:-hard}"
+    local notice user_warning
+    if aport_hook_should_allow_failure "$failure_class"; then
+        if [ "$failure_class" != "policy" ] && [ "${APORT_ADAPTER_DECISION_RECORDED:-0}" != "1" ]; then
+            aport_hook_record_synthetic_failure_decision \
+                "$policy" "$code" "$message" "claude-code" \
+                "${INPUT:-{}}" "${TOOL_NAME:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || true
+            APORT_ADAPTER_DECISION_RECORDED=1
+        fi
+        notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "claude-code")"
+        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "claude-code")"
+        warn_allow "$notice" "$user_warning"
+    fi
+    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "claude-code")"
+    deny "$notice"
+}
+
+map_session_context() {
+    local source_tool="${1:-$TOOL_NAME}"
+    GUARDRAIL_TOOL="session.create"
+    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$source_tool" "claude-code")"
+    if aport_hook_context_has_invalid_session_duration "$CONTEXT_JSON"; then
+        deny_or_warn "agent.session.create.v1" "oap.invalid_session_duration" \
+            "Session duration is malformed or outside the supported 60-86400 second range" "hard"
+    fi
+    if aport_hook_context_has_invalid_session_type "$CONTEXT_JSON"; then
+        deny_or_warn "agent.session.create.v1" "oap.invalid_session_type" \
+            "Session type is malformed or outside the supported interactive, batch, webhook, scheduled, or ephemeral values" "hard"
+    fi
+    CONTEXT_JSON="$(aport_hook_strip_adapter_context_flags "$CONTEXT_JSON")"
+}
+
+emit_claude_input_too_large() {
+    deny_or_warn "hook.input" "oap.input_too_large" "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes." "hard"
 }
 
 # Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
@@ -78,20 +124,12 @@ fi
 
 # No input means the host did not provide a tool-call payload. Fail closed.
 if [ -z "$INPUT" ]; then
-    if command -v jq > /dev/null 2>&1; then
-        jq -n --arg reason "🛡️ APort: empty hook input — fail-closed policy" \
-            --arg event "PreToolUse" \
-            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"deny",permissionDecisionReason:$reason}}'
-    else
-        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"APort: empty hook input - fail-closed policy"}}\n'
-    fi
-    exit 0
+    deny_or_warn "hook.input" "oap.empty_input" "Host did not provide a hook payload" "hard"
 fi
 
 # Parse tool_name and tool_input (requires jq)
 if ! command -v jq &> /dev/null; then
-    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"🛡️ APort: jq is required"}}'
-    exit 0
+    deny_or_warn "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "mandatory"
 fi
 
 # Parse with error handling: jq failure must deny, never undefined exit codes.
@@ -119,35 +157,6 @@ safe_jq() {
     result="$(echo "$input" | jq -c "$filter" 2> /dev/null)" || result='{}'
     [ -z "$result" ] && result='{}'
     echo "$result"
-}
-
-# Deny helper: outputs hookSpecificOutput JSON and exits 0.
-deny() {
-    local reason="$1"
-    aport_hook_build_response "deny" "$reason" "" "claude-code"
-    exit 0
-}
-
-warn_allow() {
-    local reason="$1"
-    local user_warning="${2:-}"
-    aport_hook_build_response "allow" "$reason" "$user_warning" "claude-code"
-    exit 0
-}
-
-deny_or_warn() {
-    local policy="$1"
-    local code="${2:-oap.denied}"
-    local message="${3:-}"
-    local failure_class="${4:-hard}"
-    local notice user_warning
-    if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "claude-code")"
-        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "claude-code")"
-        warn_allow "$notice" "$user_warning"
-    fi
-    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "claude-code")"
-    deny "$notice"
 }
 
 map_claude_mcp_context() {
@@ -249,19 +258,16 @@ case "$TOOL_NAME_NORM" in
         CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
         ;;
     agent | task | taskcreate | taskupdate | taskstop | skill | enterworktree | exitworktree | subagent | subagentstart | sendmessage | teamcreate | teamdelete | remotetrigger)
-        GUARDRAIL_TOOL="session.create"
-        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "claude-code")"
+        map_session_context "$TOOL_NAME"
         ;;
     croncreate | crondelete)
-        GUARDRAIL_TOOL="session.create"
-        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "claude-code")"
+        map_session_context "$TOOL_NAME"
         ;;
     mcp__* | mcp:* | callmcptool)
         map_claude_mcp_context
         ;;
     workflow)
-        GUARDRAIL_TOOL="session.create"
-        CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "claude-code")"
+        map_session_context "$TOOL_NAME"
         ;;
     unknown | *)
         # Unknown tool: fail-closed (deny)
@@ -314,6 +320,7 @@ cleanup_decision() { [ -n "$HOOK_DECISION_FILE" ] && rm -f "$HOOK_DECISION_FILE"
 
 if [ "$GUARDRAIL_EXIT" -eq 0 ]; then
     aport_append_local_session_decision "$HOOK_DECISION_FILE" "claude-code" "$INPUT" "$TOOL_NAME" "$GUARDRAIL_TOOL" "$CONTEXT_JSON"
+    APORT_ADAPTER_DECISION_RECORDED=1
     cleanup_decision
     exit 0
 fi
@@ -338,6 +345,7 @@ if [ -z "$REASON" ]; then
     REASON="Policy denied this action (guardrail exit=${GUARDRAIL_EXIT}, no reason recorded)."
 fi
 aport_append_local_session_decision "$HOOK_DECISION_FILE" "claude-code" "$INPUT" "$TOOL_NAME" "$GUARDRAIL_TOOL" "$CONTEXT_JSON"
+APORT_ADAPTER_DECISION_RECORDED=1
 cleanup_decision
 if [ "$HAS_DECISION_FILE" -ne 1 ]; then
     deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "oap.evaluator_failed" "$REASON" "hard"

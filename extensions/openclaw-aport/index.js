@@ -13,6 +13,7 @@ import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { logAuditEntry } from "./audit.js";
 import { canonicalize, formatReasons, verifyDecisionIntegrity } from "./decision.js";
+import { normalizeEnforcementMode, shouldAllowDeniedDecision } from "./enforcement.js";
 import { evaluateLocalDecision } from "./local-evaluator.js";
 import { mapToolToPolicy, normalizePolicyContext } from "./tool-mapping.js";
 import { verifyViaApi } from "./api-client.js";
@@ -51,7 +52,7 @@ export default definePluginEntry({
     const err = (msg) => api.logger?.error?.(msg);
 
     log(
-      `[APort] Loaded: mode=${mode}, ${agentId ? `agentId=${agentId}` : `passportFile=${passportFile}`}, unmapped=${allowUnmappedTools ? "allow" : "block"}, mapExec=${mapExecToPolicy}`,
+      `[APort] Loaded: mode=${mode}, enforcement=${enforcement}, ${agentId ? `agentId=${agentId}` : `passportFile=${passportFile}`}, unmapped=${allowUnmappedTools ? "allow" : "block"}, mapExec=${mapExecToPolicy}`,
     );
 
     api.on("before_tool_call", async (event, hookContext = {}) => {
@@ -71,16 +72,17 @@ export default definePluginEntry({
             return {};
           }
           const notice = formatGuardrailNotice({
-            outcome: "deny",
+            outcome: failureOutcomeForEnforcement(enforcement),
             policy: "hook.tool.map",
             code: "oap.unknown_tool",
             message: `No policy mapping for ${toolName}`,
             agentId,
             passportFile,
           });
-          log(`[APort] ${failClosed ? "BLOCKED" : "ALLOW"}: ${toolName} - no policy mapping`);
-          if (!failClosed) {
-            warn(`[APort] Allowing unmapped tool because failClosed is disabled. ${notice}`);
+          const shouldAllowFailure = shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed);
+          log(`[APort] ${shouldAllowFailure ? "ALLOW" : "BLOCKED"}: ${toolName} - no policy mapping`);
+          if (shouldAllowFailure) {
+            warn(`[APort] ${failureAllowMessage(enforcement, "Allowing unmapped tool because failClosed is disabled.")} ${notice}`);
             return {};
           }
           return {
@@ -91,7 +93,12 @@ export default definePluginEntry({
 
         let effectivePolicyName = policyName;
         let effectiveToolName = toolName;
-        let context = normalizePolicyContext(policyName, toolName, params, event);
+        let context = normalizePolicyContext(
+          policyName,
+          toolName,
+          params,
+          buildPolicyContextHints(policyName, event, hookContext),
+        );
 
         const delegated = parseGuardrailInvocation(
           effectivePolicyName === "system.command.execute.v1" ? context.command : null,
@@ -105,7 +112,7 @@ export default definePluginEntry({
               innerPolicy,
               delegated.innerToolName,
               delegated.innerContext,
-              { params: delegated.innerContext },
+              buildPolicyContextHints(innerPolicy, { params: delegated.innerContext }, hookContext),
             );
           }
         }
@@ -116,6 +123,29 @@ export default definePluginEntry({
             log("[APort] ALLOW: exec - (empty command, skip)");
             return {};
           }
+        }
+
+        const sessionAdapterError =
+          effectivePolicyName === "agent.session.create.v1" ? sessionContextAdapterError(context) : null;
+        if (sessionAdapterError) {
+          const notice = formatGuardrailNotice({
+            outcome: failureOutcomeForEnforcement(enforcement),
+            policy: effectivePolicyName,
+            code: sessionAdapterError.code,
+            message: sessionAdapterError.message,
+            agentId,
+            passportFile,
+          });
+          const shouldAllowFailure = shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed);
+          log(`[APort] ${shouldAllowFailure ? "ALLOW" : "BLOCKED"}: ${effectiveToolName} - ${sessionAdapterError.summary}`);
+          if (shouldAllowFailure) {
+            warn(`[APort] ${failureAllowMessage(enforcement, sessionAdapterError.failOpenMessage)} ${notice}`);
+            return {};
+          }
+          return {
+            block: true,
+            blockReason: notice,
+          };
         }
 
         const requestContext = ensureIdempotencyKey(context, event, hookContext);
@@ -141,7 +171,7 @@ export default definePluginEntry({
 
         if (!verifyDecisionIntegrity(decision)) {
           const notice = formatGuardrailNotice({
-            outcome: "deny",
+            outcome: failureOutcomeForEnforcement(enforcement),
             policy: effectivePolicyName,
             code: "oap.decision_integrity_failed",
             message: "Decision integrity verification failed.",
@@ -149,8 +179,10 @@ export default definePluginEntry({
             passportFile,
           });
           err(`[APort] Decision integrity check failed for ${effectiveToolName} - content_hash mismatch`);
-          if (!failClosed) {
-            warn(`[APort] Allowing tool despite decision integrity failure because failClosed is disabled. ${notice}`);
+          if (shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed)) {
+            warn(
+              `[APort] ${failureAllowMessage(enforcement, "Allowing tool despite decision integrity failure because failClosed is disabled.")} ${notice}`,
+            );
             return {};
           }
           return {
@@ -174,16 +206,18 @@ export default definePluginEntry({
           const primaryReason = reasons[0] || {};
           const message = primaryMessage || "Policy denied.";
           const notice = formatGuardrailNotice({
-            outcome: enforcement === "warn" ? "warn" : "deny",
+            outcome: policyOutcomeForEnforcement(enforcement, decision),
             policy: effectivePolicyName,
             code: primaryReason.code || "oap.denied",
             message,
             agentId,
             passportFile,
           });
-          log(`[APort] ${enforcement === "warn" ? "WARN" : "BLOCKED"}: ${effectiveToolName} - ${sanitizeDisplayText(message)}`);
+          const policyAllows = shouldAllowPolicyDecision(enforcement, decision);
+          log(`[APort] ${policyAllows ? enforcement.toUpperCase() : "BLOCKED"}: ${effectiveToolName} - ${sanitizeDisplayText(message)}`);
 
-          if (enforcement === "warn") {
+          if (policyAllows) {
+            warn(`[APort] ${notice}`);
             return {};
           }
 
@@ -197,21 +231,22 @@ export default definePluginEntry({
         return {};
       } catch (error) {
         err(`[APort] Error evaluating policy: ${sanitizeDisplayText(error.message)}`);
-        if (failClosed) {
+        const notice = formatGuardrailNotice({
+          outcome: failureOutcomeForEnforcement(enforcement),
+          policy: "hook.runtime",
+          code: "oap.policy_error",
+          message: error.message,
+          agentId,
+          passportFile,
+        });
+        if (!shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed)) {
           return {
             block: true,
-            blockReason: formatGuardrailNotice({
-              outcome: "deny",
-              policy: "hook.runtime",
-              code: "oap.policy_error",
-              message: error.message,
-              agentId,
-              passportFile,
-            }),
+            blockReason: notice,
           };
         }
         warn(
-          `[APort] Allowing tool despite policy evaluation error because failClosed is disabled. ${policyReference({ agentId, passportFile })}`,
+          `[APort] ${failureAllowMessage(enforcement, "Allowing tool despite policy evaluation error because failClosed is disabled.")} ${notice}`,
         );
         return {};
       }
@@ -249,6 +284,39 @@ function ensureIdempotencyKey(context, event = {}, hookContext = {}) {
     ...context,
     idempotency_key: `idem_${ts}_${rand}`.slice(0, 64),
   };
+}
+
+function buildPolicyContextHints(policyName, event = {}, hookContext = {}) {
+  if (policyName !== "agent.session.create.v1") return event;
+  return {
+    ...(event && typeof event === "object" ? event : {}),
+    ...(hookContext && typeof hookContext === "object" ? hookContext : {}),
+    user_id: resolveSessionUserId(event),
+  };
+}
+
+function resolveSessionUserId(event = {}) {
+  const configUserId =
+    event && typeof event === "object"
+      ? event.user_id ?? event.userId ?? event.owner_id ?? event.ownerId
+      : "";
+  return firstNonEmptyString(
+    configUserId,
+    process.env.APORT_USER_ID,
+    process.env.APORT_TARGET_USER,
+    process.env.APORT_OWNER_EMAIL,
+    process.env.APORT_EMAIL,
+    process.env.APORT_AGENT_ID,
+    process.env.USER,
+    process.env.LOGNAME,
+  );
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
 function expandPath(value) {
@@ -344,18 +412,64 @@ function splitSimpleShellWords(input) {
   return words;
 }
 
-function normalizeEnforcementMode(value) {
-  const normalized = String(value || "enforce").toLowerCase().replace(/_/g, "-");
-  if (["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)) return "warn";
-  return "enforce";
-}
-
 function buildRuntimeMetadata(enforcement) {
   return {
-    enforcement_mode: enforcement === "warn" ? "warn" : "enforce",
+    enforcement_mode: enforcement === "observe" ? "observe" : enforcement === "warn" ? "warn" : "enforce",
     enforced_by: "@aporthq/openclaw-aport",
     harness: "openclaw",
   };
+}
+
+function sessionContextAdapterError(context) {
+  if (context?.invalid_session_duration === true) {
+    return {
+      code: "oap.invalid_session_duration",
+      message: "Session duration is malformed or outside the supported 60-86400 second range.",
+      summary: "invalid session duration",
+      failOpenMessage: "Allowing tool despite invalid session duration because failClosed is disabled.",
+    };
+  }
+  if (context?.invalid_session_type === true) {
+    return {
+      code: "oap.invalid_session_type",
+      message: "Session type is malformed or outside the supported interactive, batch, webhook, scheduled, or ephemeral values.",
+      summary: "invalid session type",
+      failOpenMessage: "Allowing tool despite invalid session type because failClosed is disabled.",
+    };
+  }
+  if (context?.invalid_session_count === true) {
+    return {
+      code: "oap.invalid_session_count",
+      message: "Active session count is malformed; expected a non-negative integer from trusted host metadata.",
+      summary: "invalid active session count",
+      failOpenMessage: "Allowing tool despite invalid active session count because failClosed is disabled.",
+    };
+  }
+  return null;
+}
+
+function shouldAllowPolicyDecision(enforcement, decision) {
+  return shouldAllowDeniedDecision(enforcement, decision);
+}
+
+function shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed) {
+  return enforcement === "observe" || !failClosed;
+}
+
+function policyOutcomeForEnforcement(enforcement, decision) {
+  if (!shouldAllowDeniedDecision(enforcement, decision)) return "deny";
+  return enforcement === "observe" ? "observe" : "warn";
+}
+
+function failureOutcomeForEnforcement(enforcement) {
+  return enforcement === "observe" ? "observe" : "deny";
+}
+
+function failureAllowMessage(enforcement, failOpenMessage) {
+  if (enforcement === "observe") {
+    return "Observe mode allowed an action that APort did not authorize.";
+  }
+  return failOpenMessage;
 }
 
 function sanitizeDisplayText(value) {
@@ -380,7 +494,9 @@ function policyReference({ agentId, passportFile }) {
 
 function formatGuardrailNotice({ outcome, policy, code, message, agentId, passportFile }) {
   const prefix =
-    outcome === "warn"
+    outcome === "observe"
+      ? "APort observation: observe mode allowed a tool call that APort did not authorize."
+      : outcome === "warn"
       ? "APort warning: policy would have denied this tool call."
       : "APort denied this tool call.";
   const detail = sanitizeDisplayText(message || "");

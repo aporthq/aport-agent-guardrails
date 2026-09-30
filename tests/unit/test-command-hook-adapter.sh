@@ -173,6 +173,18 @@ run_hook "Codex hosted computer_use without an explicit action fails closed befo
     '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
 
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT=observe
+EOF
+run_hook "Codex observe mode keeps computer_use missing action blocking" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+EOF
+
 run_hook "Codex hosted computer_use rejects non-string action evidence before API evaluation" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form","action":{"kind":"type"}}}' \
@@ -858,6 +870,66 @@ jq -e '.hookSpecificOutput.permissionDecision == "deny" and ((.hookSpecificOutpu
     exit 1
 }
 echo "  ✅ Stale decision files are cleared before evaluator execution"
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=observe
+EOF
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex observe mode allows unknown tools with warning" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))
+      and (.systemMessage | contains("mode codex --enforcement=enforce"))'
+jq -e '.guardrail_tool == "hook.tool.map" and .decision.allow == false and .decision.reasons[0].code == "oap.unknown_tool"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: observe-mode adapter failures should be recorded in session-decisions.jsonl" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2 || true
+    exit 1
+}
+
+SYNTHETIC_SYMLINK_VICTIM="$TEST_DIR/aport/synthetic-victim.txt"
+printf 'do-not-overwrite' > "$SYNTHETIC_SYMLINK_VICTIM"
+rm -f "$TEST_DIR/aport/decision.json"
+ln -s "$SYNTHETIC_SYMLINK_VICTIM" "$TEST_DIR/aport/decision.json"
+run_hook "Codex observe mode refuses symlinked synthetic decision target" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))'
+if [[ "$(cat "$SYNTHETIC_SYMLINK_VICTIM")" != "do-not-overwrite" ]]; then
+    echo "FAIL: observe-mode synthetic decision writer must not follow decision-file symlinks" >&2
+    cat "$SYNTHETIC_SYMLINK_VICTIM" >&2 || true
+    exit 1
+fi
+rm -f "$TEST_DIR/aport/decision.json"
+echo "  ✅ Observe-mode synthetic decision writer rejects symlinked targets"
+
+run_hook "Codex observe mode allows hard parser failures with warning" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status; unauthorized-command"}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.command_chain_unsupported"))'
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_AGENT_ID=ap_observe_unreachable_test
+APORT_ENFORCEMENT=observe
+EOF
+run_hook "Codex observe mode allows hosted evaluator failures with warning" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and ((.systemMessage | contains("oap.evaluation_error")) or (.systemMessage | contains("oap.evaluator_failed")))'
 
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
@@ -2779,6 +2851,55 @@ jq -e '.guardrail_tool == "session.create" and .decision.policy_id == "agent.ses
     exit 1
 }
 echo "  ✅ Codex collaboration tools map to session policy"
+
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+run_hook "Codex session preserves explicit session_type" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","tool_call_id":"batch-session-call","tool_input":{"prompt":"batch work","session_type":"batch"}}' \
+    '. == {}'
+jq -e '.guardrail_tool == "session.create" and .context.session_type == "batch" and (.context | has("invalid_session_type") | not)' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Codex session context should preserve explicit valid session_type" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2
+    exit 1
+}
+echo "  ✅ Codex session preserves explicit session_type"
+
+run_hook "Codex session rejects invalid explicit session_type" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"type-child","prompt":"review this","session_type":"root"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_type"))'
+
+run_hook "Codex session rejects unrepresentable requested duration" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-child","prompt":"review this","duration_ms":172800000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+
+run_hook "Codex session rejects conflicting requested duration aliases" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-conflict-child","prompt":"review this","duration_seconds":60,"duration_ms":172800000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+
+run_hook "Codex session rejects millisecond duration overflow after rounding up" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-overflow-child","prompt":"review this","duration_ms":86400999}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+
+run_hook "Codex session rejects fractional millisecond requested duration" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-fraction-child","prompt":"review this","duration_ms":60000.1}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+run_hook "Codex warn mode keeps invalid session durations blocking" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-child","prompt":"review this","duration_ms":172800000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {

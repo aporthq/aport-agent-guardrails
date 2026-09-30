@@ -31,7 +31,7 @@ Hook wiring is project-local by default, but APort state is not. Hosted API keys
 
 Non-interactive local passport: `npx --yes @aporthq/aport-agent-guardrails gemini --mode=local --non-interactive` (add `--output <path>` to choose the file). Interactive local passport: run the installer without flags and choose `3. Create local passport file`.
 
-**Prerequisites:** `jq` on the PATH Gemini CLI uses; the hook denies every tool call with `oap.missing_dependency` without it.
+**Prerequisites:** `jq` on the PATH Gemini CLI uses; the hook denies every tool call with `oap.missing_dependency` without it in enforce and warn modes. Observe mode may allow with a warning for adoption-only rollout, but install `jq` before setup.
 
 To keep state elsewhere, set `APORT_GEMINI_CLI_CONFIG_DIR` when running the installer. It writes `APORT_GEMINI_CLI_CONFIG_DIR=<dir>` into the hook command in `settings.json`, so the hook uses the same directory at run time. `mode` and `reset` read the variable too. A passport outside that directory needs `APORT_PASSPORT_FILE` plus `APORT_ALLOW_EXTERNAL_PASSPORT_FILE=1`.
 
@@ -79,6 +79,9 @@ npx @aporthq/aport-agent-guardrails mode gemini --enforcement=warn
 Warn mode records the original deny decision and returns allow semantics with a
 warning after APort completed policy evaluation. Malformed hook input, invalid
 config, missing dependencies, and unmapped effectful tools still fail closed.
+Use `--enforcement=observe` only for adoption-first rollout; observe returns
+allow semantics with warnings for policy denials and APort runtime/mapping/API
+failures while you tune mappings and passports.
 Restart Gemini CLI after setup or mode changes if your running process does not
 reload settings.
 

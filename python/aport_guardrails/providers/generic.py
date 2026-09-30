@@ -10,7 +10,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from aport_guardrails.core import Evaluator, build_tool_context, tool_to_pack_id
+from aport_guardrails.core import (
+    Evaluator,
+    build_tool_context,
+    normalize_enforcement_mode,
+    should_allow_denied_decision,
+    tool_to_pack_id,
+)
 from aport_guardrails.core.config import find_config_path, load_config
 
 
@@ -128,11 +134,12 @@ def _to_result(
 ) -> _ProviderResult:
     raw = decision.get("reasons") or []
     reasons = [_Reason(r.get("code", "oap.denied"), r.get("message", "")) for r in raw]
+    normalized_enforcement = normalize_enforcement_mode(enforcement_mode)
     original_allow = bool(decision.get("allow", False))
-    effective_allow = True if enforcement_mode == "warn" else original_allow
+    effective_allow = original_allow or should_allow_denied_decision(normalized_enforcement, decision)
     metadata = (
-        {"enforcement_mode": enforcement_mode, "original_allow": original_allow}
-        if enforcement_mode == "warn" or effective_allow != original_allow
+        {"enforcement_mode": normalized_enforcement, "original_allow": original_allow}
+        if normalized_enforcement != "enforce" or effective_allow != original_allow
         else None
     )
     return _ProviderResult(
@@ -144,13 +151,9 @@ def _to_result(
 
 
 def _normalize_enforcement_mode(value: Any) -> str:
-    raw = str(
+    return normalize_enforcement_mode(
         value
         or os.environ.get("APORT_ENFORCEMENT_MODE")
         or os.environ.get("APORT_ENFORCEMENT")
         or os.environ.get("APORT_GUARDRAIL_ENFORCEMENT")
-        or ""
-    ).strip().lower()
-    if raw in {"warn", "report-only", "report_only", "audit-only", "audit_only"}:
-        return "warn"
-    return "enforce"
+    )

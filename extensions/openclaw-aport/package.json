@@ -1,6 +1,6 @@
 {
   "name": "@aporthq/openclaw-aport",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "description": "OpenClaw plugin for deterministic pre-action authorization via APort guardrails",
   "main": "index.js",
   "type": "module",
@@ -9,6 +9,7 @@
     "api-client.js",
     "audit.js",
     "decision.js",
+    "enforcement.js",
     "local-evaluator.js",
     "tool-mapping.js",
     "openclaw.plugin.json",

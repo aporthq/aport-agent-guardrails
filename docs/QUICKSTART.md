@@ -68,7 +68,8 @@ remote suspend/status, and signed hosted decisions. Local JSON remains available
 for offline or privacy-sensitive deployments.
 
 All runtime hooks need `jq` on the PATH the host uses; without it the hook
-denies every tool call.
+denies every tool call in enforce and warn modes. Observe mode may allow with a
+warning for adoption-only rollout, but install `jq` before setup.
 
 ### Non-interactive installs
 
@@ -106,7 +107,7 @@ blocked patterns `rm -rf`, `sudo`, `chmod 777`, `dd if=`, `mkfs`), so edit
 5. Capability questions: `Create and merge pull requests?`, `Execute system commands?`, `Send messages?`, `Read files from disk?`, `Write/edit files on disk?`, `Fetch data from web?`, `Automate web browser?`, `Export data?`, `Spawn sub-agents and tasks?`, `Use MCP tools?`. Answer `Y` to `Spawn sub-agents and tasks?` for Claude Code, Cursor, Codex, Goose and OpenClaw; every subagent, task and team tool is denied without the `agent.session.create` capability.
 6. Limits: allowed repos, allowed commands (`Enter or *=allow any / list=fixed list`; a fixed list is a prefix allowlist and chained commands are then denied), allowed paths, allowed domains. Press Enter for `*` and tighten later in the JSON file.
 7. `Should this passport expire?` and, if yes, the number of days.
-8. Back in the installer: `Mode [1=local, 2=api]:` choose `1`. Enforcement is `enforce` unless you passed `--enforcement=warn`.
+8. Back in the installer: `Mode [1=local, 2=api]:` choose `1`. Enforcement is `enforce` unless you passed `--enforcement=warn` or `--enforcement=observe`.
 
 ### Custom install directory
 
@@ -127,13 +128,16 @@ This thin shim uses the
 
 ## 3. Change enforcement without recreating passports
 
-APort is fail-closed by default. Use warn/report-only mode only when you
-explicitly choose an audit rollout:
+APort is fail-closed by default. Use `warn` for conservative report-only rollout:
+completed policy denials allow with warnings, while unknown tools and APort
+runtime/API failures still block. Use `observe` for adoption-first rollout:
+policy denials, mapping gaps, and APort verifier/runtime failures allow with
+warnings so developers are not blocked while you tune passports and mappings.
 
 ```bash
 npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=warn
+npx @aporthq/aport-agent-guardrails mode codex --enforcement=observe
 npx @aporthq/aport-agent-guardrails mode cursor --enforcement=enforce
-npx @aporthq/aport-agent-guardrails mode codex --enforcement=warn
 npx @aporthq/aport-agent-guardrails mode gemini --enforcement=enforce
 npx @aporthq/aport-agent-guardrails mode goose --enforcement=enforce
 ```

@@ -18,6 +18,7 @@ from urllib.error import URLError
 from aport_guardrails.core.config import find_config_path, load_config
 from aport_guardrails.core.default_passport_paths import get_default_passport_paths
 from aport_guardrails.core.runtime_assets import resolve_runtime_script
+from aport_guardrails.core.enforcement import normalize_enforcement_mode
 from aport_guardrails.core.tool_pack_mapping import tool_to_pack_id as _tool_to_pack_id
 from aport_guardrails.core.validation import (
     validate_tool_name,
@@ -401,10 +402,7 @@ def _normalize_runtime_string(value: Any, fallback: str) -> str:
 
 
 def _normalize_runtime_enforcement(value: Any) -> str:
-    raw = str(value or "enforce").strip().lower().replace("_", "-")
-    if raw in {"warn", "report-only", "audit-only", "observe", "observation"}:
-        return "warn"
-    return "enforce"
+    return normalize_enforcement_mode(value)
 
 
 def _runtime_metadata(

@@ -62,6 +62,30 @@ if [[ -f "$TYPO_DIR/aport/guardrail-mode.env" ]]; then
     exit 1
 fi
 
+OBSERVE_DIR="$TEST_DIR/observe-langchain"
+mkdir -p "$OBSERVE_DIR"
+cat > "$OBSERVE_DIR/config.yaml" << 'EOF'
+framework: 'langchain'
+mode: local
+passport_path: '/tmp/passport.json'
+EOF
+APORT_LANGCHAIN_CONFIG_DIR="$OBSERVE_DIR" "$MODE_HELPER" langchain --mode=api --api-url=https://staging-api.aport.io --enforcement=observe > "$TEST_DIR/langchain-observe.out"
+grep -q '^APORT_ENFORCEMENT=observe$' "$OBSERVE_DIR/aport/guardrail-mode.env" || {
+    echo "FAIL: observe mode should be written to guardrail-mode.env" >&2
+    cat "$OBSERVE_DIR/aport/guardrail-mode.env" >&2
+    exit 1
+}
+grep -q "^enforcement_mode: 'observe'$" "$OBSERVE_DIR/config.yaml" || {
+    echo "FAIL: observe mode should be written to generic framework config" >&2
+    cat "$OBSERVE_DIR/config.yaml" >&2
+    exit 1
+}
+grep -q 'Enforcement: observe' "$TEST_DIR/langchain-observe.out" || {
+    echo "FAIL: set-mode output should report observe enforcement" >&2
+    cat "$TEST_DIR/langchain-observe.out" >&2
+    exit 1
+}
+
 CLAUDE_DIR="$TEST_DIR/.claude"
 mkdir -p "$CLAUDE_DIR/aport"
 cat > "$CLAUDE_DIR/aport/guardrail-mode.env" << 'EOF'
