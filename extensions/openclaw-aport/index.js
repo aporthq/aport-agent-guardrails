@@ -92,7 +92,12 @@ export default definePluginEntry({
 
         let effectivePolicyName = policyName;
         let effectiveToolName = toolName;
-        let context = normalizePolicyContext(policyName, toolName, params, event);
+        let context = normalizePolicyContext(
+          policyName,
+          toolName,
+          params,
+          buildPolicyContextHints(policyName, event, hookContext),
+        );
 
         const delegated = parseGuardrailInvocation(
           effectivePolicyName === "system.command.execute.v1" ? context.command : null,
@@ -106,7 +111,7 @@ export default definePluginEntry({
               innerPolicy,
               delegated.innerToolName,
               delegated.innerContext,
-              { params: delegated.innerContext },
+              buildPolicyContextHints(innerPolicy, { params: delegated.innerContext }, hookContext),
             );
           }
         }
@@ -117,6 +122,27 @@ export default definePluginEntry({
             log("[APort] ALLOW: exec - (empty command, skip)");
             return {};
           }
+        }
+
+        if (effectivePolicyName === "agent.session.create.v1" && context?.invalid_session_duration === true) {
+          const notice = formatGuardrailNotice({
+            outcome: failureOutcomeForEnforcement(enforcement),
+            policy: effectivePolicyName,
+            code: "oap.invalid_session_duration",
+            message: "Session duration is malformed or outside the supported 60-86400 second range.",
+            agentId,
+            passportFile,
+          });
+          const shouldAllowFailure = shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed);
+          log(`[APort] ${shouldAllowFailure ? "ALLOW" : "BLOCKED"}: ${effectiveToolName} - invalid session duration`);
+          if (shouldAllowFailure) {
+            warn(`[APort] ${failureAllowMessage(enforcement, "Allowing tool despite invalid session duration because failClosed is disabled.")} ${notice}`);
+            return {};
+          }
+          return {
+            block: true,
+            blockReason: notice,
+          };
         }
 
         const requestContext = ensureIdempotencyKey(context, event, hookContext);
@@ -255,6 +281,39 @@ function ensureIdempotencyKey(context, event = {}, hookContext = {}) {
     ...context,
     idempotency_key: `idem_${ts}_${rand}`.slice(0, 64),
   };
+}
+
+function buildPolicyContextHints(policyName, event = {}, hookContext = {}) {
+  if (policyName !== "agent.session.create.v1") return event;
+  return {
+    ...(event && typeof event === "object" ? event : {}),
+    ...(hookContext && typeof hookContext === "object" ? hookContext : {}),
+    user_id: resolveSessionUserId(event),
+  };
+}
+
+function resolveSessionUserId(event = {}) {
+  const configUserId =
+    event && typeof event === "object"
+      ? event.user_id ?? event.userId ?? event.owner_id ?? event.ownerId
+      : "";
+  return firstNonEmptyString(
+    configUserId,
+    process.env.APORT_USER_ID,
+    process.env.APORT_TARGET_USER,
+    process.env.APORT_OWNER_EMAIL,
+    process.env.APORT_EMAIL,
+    process.env.APORT_AGENT_ID,
+    process.env.USER,
+    process.env.LOGNAME,
+  );
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
 function expandPath(value) {

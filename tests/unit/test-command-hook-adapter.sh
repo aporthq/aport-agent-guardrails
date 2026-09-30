@@ -863,6 +863,7 @@ cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 APORT_ENFORCEMENT=observe
 EOF
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex observe mode allows unknown tools with warning" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool","tool_input":{"unknown":true}}' \
@@ -871,6 +872,11 @@ run_hook "Codex observe mode allows unknown tools with warning" \
       and (.systemMessage | contains("observe mode allowed"))
       and (.systemMessage | contains("oap.unknown_tool"))
       and (.systemMessage | contains("mode codex --enforcement=enforce"))'
+jq -e '.guardrail_tool == "hook.tool.map" and .decision.allow == false and .decision.reasons[0].code == "oap.unknown_tool"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: observe-mode adapter failures should be recorded in session-decisions.jsonl" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2 || true
+    exit 1
+}
 
 run_hook "Codex observe mode allows hard parser failures with warning" \
     codex "$CODEX" \
@@ -2814,6 +2820,23 @@ jq -e '.guardrail_tool == "session.create" and .decision.policy_id == "agent.ses
     exit 1
 }
 echo "  ✅ Codex collaboration tools map to session policy"
+
+run_hook "Codex session rejects unrepresentable requested duration" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-child","prompt":"review this","duration_ms":172800000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=warn
+EOF
+run_hook "Codex warn mode keeps invalid session durations blocking" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-child","prompt":"review this","duration_ms":172800000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'
 {

@@ -162,6 +162,7 @@ aport_hook_is_hard_failure_reason() {
             oap.input_too_large | \
             oap.invalid_json | \
             oap.invalid_tool_arguments | \
+            oap.invalid_session_duration | \
             oap.unrepresentable_tool | \
             oap.interactive_browser_unsupported | \
             oap.invalid_limit | \
@@ -390,6 +391,87 @@ aport_hook_reason_message() {
     if [ -n "$decision_file" ] && [ -f "$decision_file" ] && command -v jq > /dev/null 2>&1; then
         jq -r '.reasons[0].message // empty' "$decision_file" 2> /dev/null | head -n 1
         return 0
+    fi
+}
+
+aport_hook_context_has_invalid_session_duration() {
+    local default_context='{}'
+    local context_json="${1:-$default_context}"
+    command -v jq > /dev/null 2>&1 || return 1
+    printf '%s' "$context_json" | jq -e '.invalid_session_duration == true' > /dev/null 2>&1
+}
+
+aport_hook_strip_adapter_context_flags() {
+    local default_context='{}'
+    local context_json="${1:-$default_context}"
+    if command -v jq > /dev/null 2>&1; then
+        printf '%s' "$context_json" | jq -c 'del(.invalid_session_duration)' 2> /dev/null || printf '%s' "$context_json"
+        return 0
+    fi
+    printf '%s' "$context_json"
+}
+
+aport_hook_record_synthetic_failure_decision() {
+    local default_payload='{}'
+    local default_context='{}'
+    local policy="${1:-hook.runtime}"
+    local code="${2:-oap.denied}"
+    local message="${3:-}"
+    local framework="${4:-unknown}"
+    local hook_payload="${5:-$default_payload}"
+    local original_tool="${6:-unknown}"
+    local guardrail_tool="${7:-$policy}"
+    local context_json="${8:-$default_context}"
+    local decision_file decision_dir now expires decision_id safe_policy safe_code safe_message escaped_policy escaped_code escaped_message escaped_id escaped_now escaped_expires audit_ref audit_line audit_message
+
+    decision_file="${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-${DECISION_FILE:-}}}"
+    [ -n "$decision_file" ] || return 0
+
+    decision_dir="$(dirname "$decision_file")"
+    mkdir -p "$decision_dir" 2> /dev/null || return 0
+    [ ! -e "$decision_file" ] || [ -f "$decision_file" ] || return 0
+
+    now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    expires="$(date -u -v+1H +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || printf '%s' "$now")"
+    decision_id="synthetic-${framework}-$$-$(date -u +%s)"
+    safe_policy="$(aport_sanitize_display_text "$policy")"
+    safe_code="$(aport_sanitize_display_text "$code")"
+    safe_message="$(aport_sanitize_display_text "$message")"
+
+    escaped_policy="$(aport_hook_json_escape "$safe_policy")"
+    escaped_code="$(aport_hook_json_escape "$safe_code")"
+    escaped_message="$(aport_hook_json_escape "$safe_message")"
+    escaped_id="$(aport_hook_json_escape "$decision_id")"
+    escaped_now="$(aport_hook_json_escape "$now")"
+    escaped_expires="$(aport_hook_json_escape "$expires")"
+
+    {
+        printf '{'
+        printf '"decision_id":"%s",' "$escaped_id"
+        printf '"policy_id":"%s",' "$escaped_policy"
+        printf '"allow":false,'
+        printf '"reasons":[{"code":"%s","message":"%s"}],' "$escaped_code" "$escaped_message"
+        printf '"issued_at":"%s",' "$escaped_now"
+        printf '"created_at":"%s",' "$escaped_now"
+        printf '"expires_at":"%s",' "$escaped_expires"
+        printf '"expires_in":3600,'
+        printf '"verification_mode":"hook-adapter",'
+        printf '"signature":"synthetic-unsigned",'
+        printf '"kid":"oap:hook:synthetic"'
+        printf '}\n'
+    } > "$decision_file" 2> /dev/null || return 0
+    chmod 600 "$decision_file" 2> /dev/null || true
+
+    aport_append_local_session_decision "$decision_file" "$framework" "$hook_payload" "$original_tool" "$guardrail_tool" "$context_json" || true
+
+    audit_ref="${AUDIT_LOG:-${APORT_AUDIT_LOG:-}}"
+    if [ -n "$audit_ref" ]; then
+        mkdir -p "$(dirname "$audit_ref")" 2> /dev/null || true
+        audit_line="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$(aport_sanitize_display_text "$original_tool") framework=$(aport_sanitize_display_text "$framework") decision_id=$decision_id allow=false policy=$safe_policy code=$safe_code"
+        audit_message="${safe_message//\"/\\\"}"
+        [ -n "$audit_message" ] && audit_line="${audit_line} reason=\"${audit_message}\""
+        printf '%s\n' "$audit_line" >> "$audit_ref" 2> /dev/null || true
+        chmod 600 "$audit_ref" 2> /dev/null || true
     fi
 }
 

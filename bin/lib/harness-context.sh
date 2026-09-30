@@ -774,26 +774,46 @@ aport_hook_context_from_payload() {
         elif ($name | contains("ephemeral")) then "ephemeral"
         else "interactive"
         end;
-      def session_duration($ti):
+      def session_duration_evidence($ti):
         (
-          safe_timeout(
-            $ti.requested_duration // $ti.requestedDuration //
-            $ti.requested_duration_seconds // $ti.requestedDurationSeconds //
-            $ti.session_duration_seconds // $ti.sessionDurationSeconds //
-            $ti.duration_seconds // $ti.durationSeconds //
-            $ti.ttl_seconds // $ti.ttlSeconds //
-            null
-          ) //
-          safe_timeout_ms(
-            $ti.requested_duration_ms // $ti.requestedDurationMs //
-            $ti.session_duration_ms // $ti.sessionDurationMs //
-            $ti.duration_ms // $ti.durationMs //
-            $ti.timeout_ms // $ti.timeoutMs //
-            null
-          )
+          [
+            {
+              unit: "s",
+              value: (
+                $ti.requested_duration // $ti.requestedDuration //
+                $ti.requested_duration_seconds // $ti.requestedDurationSeconds //
+                $ti.session_duration_seconds // $ti.sessionDurationSeconds //
+                $ti.duration_seconds // $ti.durationSeconds //
+                $ti.ttl_seconds // $ti.ttlSeconds //
+                null
+              )
+            },
+            {
+              unit: "ms",
+              value: (
+                $ti.requested_duration_ms // $ti.requestedDurationMs //
+                $ti.session_duration_ms // $ti.sessionDurationMs //
+                $ti.duration_ms // $ti.durationMs //
+                $ti.timeout_ms // $ti.timeoutMs //
+                null
+              )
+            }
+          ] | map(select(.value != null)) | .[0] // null
+        ) as $raw |
+        if $raw == null then {present: false, invalid: false}
+        else (
+          if $raw.unit == "ms" then safe_timeout_ms($raw.value)
+          else safe_timeout($raw.value)
+          end
         ) as $duration |
-        if $duration == null then null
-        else ($duration | floor | if . >= 60 and . <= 86400 then . else null end)
+          if $duration == null then {present: true, invalid: true}
+          else ($duration | floor) as $floored |
+            if $floored >= 60 and $floored <= 86400 then
+              {present: true, invalid: false, value: $floored}
+            else
+              {present: true, invalid: true}
+            end
+          end
         end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
       ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
@@ -1018,7 +1038,7 @@ aport_hook_context_from_payload() {
           $ti.description // $ti.prompt // $ti.task // $ti.message // ""
         ) as $description |
         session_operation($default_tool) as $session_operation |
-        session_duration($ti) as $requested_duration |
+        session_duration_evidence($ti) as $requested_duration |
         (.active_session_count // .current_active_sessions // null) as $active_session_count |
         ({
           description_length: (str($description) | length),
@@ -1038,7 +1058,11 @@ aport_hook_context_from_payload() {
             end
           ),
           subagent_type: (.subagent_type // $ti.subagent_type // $ti.agent_type // "")
-        } + (if $requested_duration == null then {} else {requested_duration: $requested_duration} end))
+        }
+        + (if $requested_duration.invalid == true then {invalid_session_duration: true}
+           elif $requested_duration.value == null then {}
+           else {requested_duration: $requested_duration.value}
+           end))
       else
         {}
       end

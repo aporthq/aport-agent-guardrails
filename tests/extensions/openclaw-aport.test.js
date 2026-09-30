@@ -19,6 +19,7 @@ import {
   normalizeFileContext,
   normalizeMcpContext,
   normalizeMessageContext,
+  normalizeSessionContext,
 } from "../../extensions/openclaw-aport/tool-mapping.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -148,6 +149,25 @@ describe("normalizeFileContext", () => {
       file_path: "README.md",
       content: "hi",
     });
+  });
+});
+
+describe("normalizeSessionContext", () => {
+  it("builds hosted session metadata without forwarding raw prompts", () => {
+    const context = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "review this diff", agent_type: "reviewer", duration_ms: 60000 },
+      { toolCallId: "tool-1", session_id: "parent-1" },
+    );
+
+    assert.strictEqual(context.session_operation, "create");
+    assert.strictEqual(context.session_type, "interactive");
+    assert.strictEqual(context.requested_duration, 60);
+    assert.strictEqual(context.description_length, "review this diff".length);
+    assert.strictEqual(context.parent_session_id, "parent-1");
+    assert.strictEqual(context.session_call_id, "tool-1");
+    assert.strictEqual(context.subagent_type, "reviewer");
+    assert.ok(!Object.prototype.hasOwnProperty.call(context, "prompt"));
   });
 });
 
@@ -791,6 +811,24 @@ describe("plugin hook contract", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("keeps invalid session durations blocking in warn mode", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "warn",
+    });
+
+    const result = await beforeToolCall({
+      toolName: "sessions_spawn",
+      params: { prompt: "review this", duration_ms: 172800000 },
+    });
+    assert.strictEqual(result.block, true);
+    assert.match(result.blockReason, /oap\.invalid_session_duration/);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("allows unmapped tools in observe mode", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const beforeToolCall = await registerPlugin({
@@ -878,6 +916,51 @@ describe("plugin hook contract", () => {
       });
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("normalizes session tool params before API verification", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalUserId = process.env.APORT_USER_ID;
+    let seenUrl = "";
+    let seenBody = null;
+    process.env.APORT_USER_ID = "user-openclaw-test";
+    globalThis.fetch = async (url, opts) => {
+      seenUrl = String(url);
+      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      const decision = withContentHash({
+        allow: true,
+        decision_id: "dec-session-api",
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({ mode: "api", agentId: "ap_test" });
+      const result = await beforeToolCall(
+        { toolName: "sessions_spawn", params: { prompt: "review this", agent_type: "reviewer" } },
+        { toolCallId: "session-call-1", session_id: "parent-session" },
+      );
+
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(seenUrl, "https://api.aport.io/api/verify/policy/agent.session.create.v1");
+      assert.strictEqual(seenBody.context.agent_id, "ap_test");
+      assert.strictEqual(seenBody.context.user_id, "user-openclaw-test");
+      assert.strictEqual(seenBody.context.session_operation, "create");
+      assert.strictEqual(seenBody.context.session_type, "interactive");
+      assert.strictEqual(seenBody.context.description_length, "review this".length);
+      assert.strictEqual(seenBody.context.session_call_id, "session-call-1");
+      assert.ok(!Object.prototype.hasOwnProperty.call(seenBody.context, "prompt"));
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalUserId === undefined) delete process.env.APORT_USER_ID;
+      else process.env.APORT_USER_ID = originalUserId;
     }
   });
 

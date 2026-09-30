@@ -23,6 +23,14 @@ function firstNonEmpty(...values) {
   return "";
 }
 
+function cleanString(value, limit = 200) {
+  return String(value ?? "")
+    .replace(/[\x00-\x1f\x7f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
+}
+
 function readAction(params) {
   const src = params && typeof params === "object" ? params : {};
   return firstNonEmpty(
@@ -32,6 +40,70 @@ function readAction(params) {
     src.arguments && typeof src.arguments === "object" ? src.arguments.action : "",
     src.input && typeof src.input === "object" ? src.input.action : "",
   ).toLowerCase();
+}
+
+function sessionOperation(toolName) {
+  const name = String(toolName ?? "").toLowerCase().replace(/^functions\./, "");
+  if (name.includes("interrupt")) return "update";
+  if (name.includes("close") || name.includes("stop") || name.includes("delete")) return "close";
+  if (name.includes("list") || name.includes("status") || name.includes("history") || name.includes("wait")) return "list";
+  if (name.includes("resume")) return "resume";
+  if (name.includes("send") || name.includes("update") || name.includes("followup")) return "update";
+  if (
+    name === "agent" ||
+    name === "task" ||
+    name === "subagent" ||
+    name === "subagentstart" ||
+    name === "sessions_spawn" ||
+    name === "croncreate" ||
+    name.includes("spawn") ||
+    name.includes("create") ||
+    name.includes("start")
+  ) {
+    return "create";
+  }
+  return "other";
+}
+
+function sessionType(toolName, src) {
+  const explicit = cleanString(src.session_type ?? src.sessionType, 32).toLowerCase();
+  if (["interactive", "batch", "webhook", "scheduled", "ephemeral"].includes(explicit)) return explicit;
+  const name = String(toolName ?? "").toLowerCase();
+  if (name.includes("cron") || name.includes("schedulewakeup") || name.includes("schedule_wakeup")) return "scheduled";
+  if (name.includes("remote") || name.includes("webhook")) return "webhook";
+  if (name.includes("batch")) return "batch";
+  if (name.includes("ephemeral")) return "ephemeral";
+  return "interactive";
+}
+
+function requestedDuration(src) {
+  const secondValue =
+    src.requested_duration ??
+    src.requestedDuration ??
+    src.requested_duration_seconds ??
+    src.requestedDurationSeconds ??
+    src.session_duration_seconds ??
+    src.sessionDurationSeconds ??
+    src.duration_seconds ??
+    src.durationSeconds ??
+    src.ttl_seconds ??
+    src.ttlSeconds;
+  const millisecondValue =
+    src.requested_duration_ms ??
+    src.requestedDurationMs ??
+    src.session_duration_ms ??
+    src.sessionDurationMs ??
+    src.duration_ms ??
+    src.durationMs ??
+    src.timeout_ms ??
+    src.timeoutMs;
+  const raw = secondValue ?? millisecondValue;
+  if (raw == null || raw === "") return null;
+  const duration = Number(raw);
+  if (!Number.isFinite(duration) || duration <= 0) return "invalid";
+  const seconds = Math.floor(secondValue != null ? duration : duration / 1000);
+  if (seconds < 60 || seconds > 86400) return "invalid";
+  return seconds;
 }
 
 export function parseMcpToolName(toolName) {
@@ -307,6 +379,64 @@ export function normalizeMcpContext(toolName, params) {
   return out;
 }
 
+export function normalizeSessionContext(toolName, params, event = {}) {
+  const paramsObj = params && typeof params === "object" ? params : {};
+  const eventObj = event && typeof event === "object" ? event : {};
+  const src = { ...eventObj, ...paramsObj };
+  const args = src.args && typeof src.args === "object" && !Array.isArray(src.args) ? src.args : {};
+  const input = src.input && typeof src.input === "object" ? src.input : {};
+  const nested = { ...args, ...input, ...paramsObj };
+  const operation = sessionOperation(toolName);
+  const description = firstNonEmpty(
+    src.description,
+    src.task,
+    src.message,
+    src.prompt,
+    nested.description,
+    nested.task,
+    nested.message,
+    nested.prompt,
+  );
+  const userId = cleanString(src.user_id ?? src.userId);
+  const duration = requestedDuration(nested);
+  const activeSessionCount = Number.isFinite(Number(src.active_session_count ?? src.current_active_sessions))
+    ? Number(src.active_session_count ?? src.current_active_sessions)
+    : null;
+  const sessionId =
+    operation === "create"
+      ? ""
+      : firstNonEmpty(
+          nested.child_session_id,
+          nested.childSessionId,
+          src.subagent_id,
+          nested.subagent_id,
+          nested.agent_id,
+          nested.agentId,
+          nested.id,
+          nested.session_id,
+          nested.sessionId,
+          src.target_session_id,
+          src.targetSessionId,
+        );
+  const out = {
+    description_length: description.length,
+    session_operation: operation,
+    session_type: sessionType(toolName, nested),
+    session_tracking: "host_active_count",
+    hook_event: cleanString(src.hook_event_name ?? src.event, 80),
+    active_session_count: activeSessionCount,
+    current_active_sessions: activeSessionCount,
+    parent_session_id: cleanString(src.session_id ?? src.sessionId, 200),
+    session_call_id: cleanString(src.toolCallId ?? src.tool_call_id ?? src.id ?? src.callId ?? src.call_id, 200),
+    session_id: cleanString(sessionId, 200),
+    subagent_type: cleanString(src.subagent_type ?? nested.subagent_type ?? nested.agent_type, 80),
+  };
+  if (userId) out.user_id = userId;
+  if (duration === "invalid") out.invalid_session_duration = true;
+  else if (duration != null) out.requested_duration = duration;
+  return out;
+}
+
 export function normalizePolicyContext(policyName, toolName, params, event) {
   if (policyName === "system.command.execute.v1") {
     return normalizeExecContext(params, event);
@@ -319,6 +449,9 @@ export function normalizePolicyContext(policyName, toolName, params, event) {
   }
   if (policyName === "mcp.tool.execute.v1") {
     return normalizeMcpContext(toolName, params);
+  }
+  if (policyName === "agent.session.create.v1") {
+    return normalizeSessionContext(toolName, params, event);
   }
   return params || {};
 }
