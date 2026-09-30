@@ -11,6 +11,8 @@ export { loadConfig, writeConfig, findConfigPath } from './core/config.js';
 export type { Config } from './core/config.js';
 export { logDecision, resolveAuditLogPath, extractContextSummary } from './core/auditLogger.js';
 export type { AuditEntry } from './core/auditLogger.js';
+export { HARD_FAILURE_CODES, isHardFailureDecision, normalizeEnforcementMode, primaryReasonCode, shouldAllowDeniedDecision } from './core/enforcement.js';
+export type { EnforcementDecision, RuntimeEnforcementMode } from './core/enforcement.js';
 export { BaseAdapter } from './frameworks/base.js';
 export { OAPGuardrailProvider } from './providers/oap-guardrail-provider.js';
 export type { OAPGuardrailProviderConfig, GuardrailRequest, GuardrailReason, GuardrailDecision } from './providers/oap-guardrail-provider.js';

@@ -774,6 +774,24 @@ aport_hook_context_from_payload() {
         elif ($name | contains("ephemeral")) then "ephemeral"
         else "interactive"
         end;
+      def session_type_evidence($root; $ti; $raw):
+        ([
+          $root.session_type,
+          $root.sessionType,
+          $ti.session_type,
+          $ti.sessionType
+        ] | map(select(. != null)) | .[0] // null) as $explicit |
+        if $explicit == null then
+          {invalid: false, value: session_type($raw)}
+        elif (($explicit | type) != "string") then
+          {invalid: true}
+        else ($explicit | ascii_downcase) as $normalized |
+          if (["interactive", "batch", "webhook", "scheduled", "ephemeral"] | index($normalized)) then
+            {invalid: false, value: $normalized}
+          else
+            {invalid: true}
+          end
+        end;
       def session_duration_evidence($ti):
         (
           [
@@ -1038,12 +1056,13 @@ aport_hook_context_from_payload() {
           $ti.description // $ti.prompt // $ti.task // $ti.message // ""
         ) as $description |
         session_operation($default_tool) as $session_operation |
+        session_type_evidence(.; $ti; $default_tool) as $session_type |
         session_duration_evidence($ti) as $requested_duration |
         (.active_session_count // .current_active_sessions // null) as $active_session_count |
         ({
           description_length: (str($description) | length),
           session_operation: $session_operation,
-          session_type: session_type($default_tool),
+          session_type: ($session_type.value // session_type($default_tool)),
           session_tracking: (if $event_hint == "codex" then "persistent" else "host_active_count" end),
           hook_event: (.hook_event_name // .event // ""),
           active_session_count: $active_session_count,
@@ -1059,6 +1078,7 @@ aport_hook_context_from_payload() {
           ),
           subagent_type: (.subagent_type // $ti.subagent_type // $ti.agent_type // "")
         }
+        + (if $session_type.invalid == true then {invalid_session_type: true} else {} end)
         + (if $requested_duration.invalid == true then {invalid_session_duration: true}
            elif $requested_duration.value == null then {}
            else {requested_duration: $requested_duration.value}

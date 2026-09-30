@@ -9,6 +9,7 @@
     "api-client.js",
     "audit.js",
     "decision.js",
+    "enforcement.js",
     "local-evaluator.js",
     "tool-mapping.js",
     "openclaw.plugin.json",

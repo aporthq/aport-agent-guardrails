@@ -69,6 +69,7 @@
     "extensions/openclaw-aport/api-client.js",
     "extensions/openclaw-aport/audit.js",
     "extensions/openclaw-aport/decision.js",
+    "extensions/openclaw-aport/enforcement.js",
     "extensions/openclaw-aport/index.js",
     "extensions/openclaw-aport/local-evaluator.js",
     "extensions/openclaw-aport/openclaw-aport.js",

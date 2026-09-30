@@ -68,6 +68,21 @@ class TestToResult:
         assert result.allow is False
         assert result.metadata == {"enforcement_mode": "warn", "original_allow": False}
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "oap.context_not_serializable",
+            "oap.context_too_nested",
+            "oap.path_traversal_attempt",
+            "oap.path_resolution_error",
+        ],
+    )
+    def test_warn_mode_does_not_allow_validation_failures(self, code):
+        decision = {"allow": False, "reasons": [{"code": code, "message": "invalid"}]}
+        result = _to_result(decision, "test.v1", enforcement_mode="warn")
+        assert result.allow is False
+        assert result.metadata == {"enforcement_mode": "warn", "original_allow": False}
+
     def test_observe_mode_allows_api_errors(self):
         decision = {"allow": False, "reasons": [{"code": "oap.api_error", "message": "down"}]}
         result = _to_result(decision, "test.v1", enforcement_mode="observe")

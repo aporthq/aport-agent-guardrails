@@ -163,6 +163,7 @@ aport_hook_is_hard_failure_reason() {
             oap.invalid_json | \
             oap.invalid_tool_arguments | \
             oap.invalid_session_duration | \
+            oap.invalid_session_type | \
             oap.unrepresentable_tool | \
             oap.interactive_browser_unsupported | \
             oap.invalid_limit | \
@@ -401,11 +402,18 @@ aport_hook_context_has_invalid_session_duration() {
     printf '%s' "$context_json" | jq -e '.invalid_session_duration == true' > /dev/null 2>&1
 }
 
+aport_hook_context_has_invalid_session_type() {
+    local default_context='{}'
+    local context_json="${1:-$default_context}"
+    command -v jq > /dev/null 2>&1 || return 1
+    printf '%s' "$context_json" | jq -e '.invalid_session_type == true' > /dev/null 2>&1
+}
+
 aport_hook_strip_adapter_context_flags() {
     local default_context='{}'
     local context_json="${1:-$default_context}"
     if command -v jq > /dev/null 2>&1; then
-        printf '%s' "$context_json" | jq -c 'del(.invalid_session_duration)' 2> /dev/null || printf '%s' "$context_json"
+        printf '%s' "$context_json" | jq -c 'del(.invalid_session_duration, .invalid_session_type)' 2> /dev/null || printf '%s' "$context_json"
         return 0
     fi
     printf '%s' "$context_json"
@@ -422,14 +430,16 @@ aport_hook_record_synthetic_failure_decision() {
     local original_tool="${6:-unknown}"
     local guardrail_tool="${7:-$policy}"
     local context_json="${8:-$default_context}"
-    local decision_file decision_dir now expires decision_id safe_policy safe_code safe_message escaped_policy escaped_code escaped_message escaped_id escaped_now escaped_expires audit_ref audit_line audit_message
+    local decision_file decision_dir tmp_decision now expires decision_id safe_policy safe_code safe_message escaped_policy escaped_code escaped_message escaped_id escaped_now escaped_expires audit_ref audit_line audit_message
 
     decision_file="${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-${DECISION_FILE:-}}}"
     [ -n "$decision_file" ] || return 0
 
     decision_dir="$(dirname "$decision_file")"
     mkdir -p "$decision_dir" 2> /dev/null || return 0
-    [ ! -e "$decision_file" ] || [ -f "$decision_file" ] || return 0
+    [ ! -e "$decision_file" ] || return 0
+    [ ! -L "$decision_file" ] || return 0
+    tmp_decision="$(mktemp "${decision_dir}/synthetic-decision.XXXXXX" 2> /dev/null || mktemp)" || return 0
 
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     expires="$(date -u -v+1H +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || printf '%s' "$now")"
@@ -459,7 +469,16 @@ aport_hook_record_synthetic_failure_decision() {
         printf '"signature":"synthetic-unsigned",'
         printf '"kid":"oap:hook:synthetic"'
         printf '}\n'
-    } > "$decision_file" 2> /dev/null || return 0
+    } > "$tmp_decision" 2> /dev/null || {
+        rm -f "$tmp_decision" 2> /dev/null || true
+        return 0
+    }
+    chmod 600 "$tmp_decision" 2> /dev/null || true
+    if ! ln "$tmp_decision" "$decision_file" 2> /dev/null; then
+        rm -f "$tmp_decision" 2> /dev/null || true
+        return 0
+    fi
+    rm -f "$tmp_decision" 2> /dev/null || true
     chmod 600 "$decision_file" 2> /dev/null || true
 
     aport_append_local_session_decision "$decision_file" "$framework" "$hook_payload" "$original_tool" "$guardrail_tool" "$context_json" || true

@@ -8,6 +8,8 @@ import {
   Evaluator,
   findConfigPath,
   loadConfig,
+  normalizeEnforcementMode,
+  shouldAllowDeniedDecision,
   toolToPackId,
 } from "@aporthq/aport-agent-guardrails-core";
 
@@ -48,14 +50,7 @@ function getCrewaiEnforcementMode(): EnforcementMode {
     process.env.APORT_ENFORCEMENT_MODE ??
     process.env.APORT_ENFORCEMENT ??
     process.env.APORT_GUARDRAIL_ENFORCEMENT;
-  const normalized = String(raw || "enforce").toLowerCase().replace(/_/g, "-");
-  if (["warn", "report-only", "audit-only"].includes(normalized)) {
-    _crewaiEnforcementMode = "warn";
-  } else if (["observe", "observation"].includes(normalized)) {
-    _crewaiEnforcementMode = "observe";
-  } else {
-    _crewaiEnforcementMode = "enforce";
-  }
+  _crewaiEnforcementMode = normalizeEnforcementMode(raw);
   return _crewaiEnforcementMode;
 }
 
@@ -107,7 +102,7 @@ export function beforeToolCall(context: BeforeToolCallContext): false | null {
     const code = sanitizeDisplayText(decision.reasons?.[0]?.code ?? "oap.denied");
     const toolName = sanitizeDisplayText(context.tool_name);
     const enforcementMode = getCrewaiEnforcementMode();
-    if (enforcementMode !== "enforce") {
+    if (shouldAllowDeniedDecision(enforcementMode, decision)) {
       const label = enforcementMode === "observe" ? "observation" : "warning";
       console.warn(`[APort] ${label}: policy would have denied ${toolName}. Reason: ${code}.`);
       return null;
