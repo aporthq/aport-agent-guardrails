@@ -165,7 +165,7 @@ if [ -z "$INPUT" ]; then
 fi
 
 if ! command -v jq > /dev/null 2>&1; then
-    emit_response "deny" "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads"
+    emit_response "deny" "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "mandatory"
 fi
 
 if ! printf '%s' "$INPUT" | jq -e . > /dev/null 2>&1; then
@@ -648,16 +648,16 @@ map_codex_browser() {
 
 map_codex_computer_use() {
     if aport_hook_payload_has_malformed_browser_action_aliases "$INPUT"; then
-        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use action aliases must be strings"
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use action aliases must be strings" "mandatory"
     fi
     if aport_hook_payload_has_conflicting_web_target_aliases "$INPUT"; then
-        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting URL or domain aliases"
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting URL or domain aliases" "mandatory"
     fi
     if aport_hook_payload_has_conflicting_browser_action_aliases "$INPUT"; then
-        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting action aliases"
+        emit_response "deny" "web.browser" "oap.invalid_tool_arguments" "Computer-use tool supplied conflicting action aliases" "mandatory"
     fi
     if ! aport_hook_payload_has_browser_action_evidence "$INPUT"; then
-        emit_response "deny" "web.browser" "oap.missing_required_context" "Computer-use tool did not provide an explicit action that APort can evaluate"
+        emit_response "deny" "web.browser" "oap.missing_required_context" "Computer-use tool did not provide an explicit action that APort can evaluate" "mandatory"
     fi
     CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
     if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then

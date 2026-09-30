@@ -212,6 +212,48 @@ describe("normalizeSessionContext", () => {
     );
     assert.strictEqual(invalidContext.invalid_session_type, true);
   });
+
+  it("rejects coerced, overflowing, and conflicting session durations", () => {
+    for (const params of [
+      { prompt: "review this", duration_ms: [60000] },
+      { prompt: "review this", duration_ms: 86400999 },
+      { prompt: "review this", duration_seconds: 60, duration_ms: 172800000 },
+    ]) {
+      const context = normalizeSessionContext("sessions_spawn", params, { toolCallId: "tool-1" });
+      assert.strictEqual(context.invalid_session_duration, true, JSON.stringify(params));
+      assert.ok(!Object.prototype.hasOwnProperty.call(context, "requested_duration"), JSON.stringify(params));
+    }
+
+    const context = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "review this", duration_seconds: 60, duration_ms: 60000 },
+      { toolCallId: "tool-1" },
+    );
+    assert.strictEqual(context.requested_duration, 60);
+    assert.ok(!Object.prototype.hasOwnProperty.call(context, "invalid_session_duration"));
+  });
+
+  it("rejects malformed active-session count evidence instead of coercing it", () => {
+    for (const event of [
+      { active_session_count: "" },
+      { active_session_count: [] },
+      { active_session_count: -1 },
+      { active_session_count: 1.5 },
+    ]) {
+      const context = normalizeSessionContext("sessions_spawn", { prompt: "review this" }, event);
+      assert.strictEqual(context.invalid_session_count, true, JSON.stringify(event));
+      assert.strictEqual(context.active_session_count, null);
+      assert.strictEqual(context.current_active_sessions, null);
+    }
+
+    const context = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "review this" },
+      { active_session_count: "5" },
+    );
+    assert.strictEqual(context.active_session_count, 5);
+    assert.ok(!Object.prototype.hasOwnProperty.call(context, "invalid_session_count"));
+  });
 });
 
 describe("normalizeMessageContext", () => {
@@ -893,6 +935,60 @@ describe("plugin hook contract", () => {
 
       assert.strictEqual(result.block, true);
       assert.match(result.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps malformed session durations blocking before hosted verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      throw new Error("fetch should not be called");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", duration_seconds: 60, duration_ms: 172800000 },
+      });
+
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.invalid_session_duration/);
+      assert.strictEqual(fetchCalled, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps malformed active-session counts blocking before hosted verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      throw new Error("fetch should not be called");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall(
+        { toolName: "sessions_spawn", params: { prompt: "review this" } },
+        { active_session_count: "" },
+      );
+
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.invalid_session_count/);
       assert.strictEqual(fetchCalled, false);
     } finally {
       globalThis.fetch = originalFetch;

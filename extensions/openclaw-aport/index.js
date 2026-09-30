@@ -437,6 +437,14 @@ function sessionContextAdapterError(context) {
       failOpenMessage: "Allowing tool despite invalid session type because failClosed is disabled.",
     };
   }
+  if (context?.invalid_session_count === true) {
+    return {
+      code: "oap.invalid_session_count",
+      message: "Active session count is malformed; expected a non-negative integer from trusted host metadata.",
+      summary: "invalid active session count",
+      failOpenMessage: "Allowing tool despite invalid active session count because failClosed is disabled.",
+    };
+  }
   return null;
 }
 

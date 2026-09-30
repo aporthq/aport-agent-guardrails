@@ -173,6 +173,18 @@ run_hook "Codex hosted computer_use without an explicit action fails closed befo
     '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form"}}' \
     '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
 
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_ENFORCEMENT=observe
+EOF
+run_hook "Codex observe mode keeps computer_use missing action blocking" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_required_context"))'
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+EOF
+
 run_hook "Codex hosted computer_use rejects non-string action evidence before API evaluation" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"computer_use","tool_input":{"url":"https://example.com/form","action":{"kind":"type"}}}' \
@@ -2860,6 +2872,16 @@ run_hook "Codex session rejects invalid explicit session_type" \
 run_hook "Codex session rejects unrepresentable requested duration" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-child","prompt":"review this","duration_ms":172800000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+
+run_hook "Codex session rejects conflicting requested duration aliases" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-conflict-child","prompt":"review this","duration_seconds":60,"duration_ms":172800000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+
+run_hook "Codex session rejects millisecond duration overflow after rounding up" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-overflow-child","prompt":"review this","duration_ms":86400999}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
 
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'

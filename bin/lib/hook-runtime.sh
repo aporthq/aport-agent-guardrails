@@ -132,6 +132,7 @@ aport_hook_is_observe_mode() {
 
 aport_hook_should_allow_failure() {
     local failure_class="${1:-hard}"
+    [ "$failure_class" = "mandatory" ] && return 1
     if aport_hook_is_observe_mode; then
         return 0
     fi
@@ -162,6 +163,7 @@ aport_hook_is_hard_failure_reason() {
             oap.input_too_large | \
             oap.invalid_json | \
             oap.invalid_tool_arguments | \
+            oap.invalid_session_count | \
             oap.invalid_session_duration | \
             oap.invalid_session_type | \
             oap.unrepresentable_tool | \

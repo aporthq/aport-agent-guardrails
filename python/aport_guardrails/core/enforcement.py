@@ -25,6 +25,7 @@ HARD_FAILURE_CODES = {
     "oap.invalid_file_path",
     "oap.invalid_json",
     "oap.invalid_limit",
+    "oap.invalid_session_count",
     "oap.invalid_session_duration",
     "oap.invalid_passport_path",
     "oap.invalid_tool_arguments",

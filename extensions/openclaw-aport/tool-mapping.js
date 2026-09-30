@@ -16,6 +16,28 @@ const RELEASE_PUBLISH_ACTIONS = new Set([
   "upload",
 ]);
 const SESSION_TYPES = new Set(["interactive", "batch", "webhook", "scheduled", "ephemeral"]);
+const DURATION_SECOND_KEYS = [
+  "requested_duration",
+  "requestedDuration",
+  "requested_duration_seconds",
+  "requestedDurationSeconds",
+  "session_duration_seconds",
+  "sessionDurationSeconds",
+  "duration_seconds",
+  "durationSeconds",
+  "ttl_seconds",
+  "ttlSeconds",
+];
+const DURATION_MILLISECOND_KEYS = [
+  "requested_duration_ms",
+  "requestedDurationMs",
+  "session_duration_ms",
+  "sessionDurationMs",
+  "duration_ms",
+  "durationMs",
+  "timeout_ms",
+  "timeoutMs",
+];
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -83,34 +105,58 @@ function sessionTypeEvidence(toolName, src) {
   return { sessionType: "interactive", invalid: false };
 }
 
+function providedValues(src, keys) {
+  return keys
+    .filter((key) => Object.prototype.hasOwnProperty.call(src, key) && src[key] != null)
+    .map((key) => src[key]);
+}
+
+function parseDecimalScalar(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
 function requestedDuration(src) {
-  const secondValue =
-    src.requested_duration ??
-    src.requestedDuration ??
-    src.requested_duration_seconds ??
-    src.requestedDurationSeconds ??
-    src.session_duration_seconds ??
-    src.sessionDurationSeconds ??
-    src.duration_seconds ??
-    src.durationSeconds ??
-    src.ttl_seconds ??
-    src.ttlSeconds;
-  const millisecondValue =
-    src.requested_duration_ms ??
-    src.requestedDurationMs ??
-    src.session_duration_ms ??
-    src.sessionDurationMs ??
-    src.duration_ms ??
-    src.durationMs ??
-    src.timeout_ms ??
-    src.timeoutMs;
-  const raw = secondValue ?? millisecondValue;
-  if (raw == null || raw === "") return null;
-  const duration = Number(raw);
-  if (!Number.isFinite(duration) || duration <= 0) return "invalid";
-  const seconds = Math.floor(secondValue != null ? duration : duration / 1000);
+  const candidates = [
+    ...providedValues(src, DURATION_SECOND_KEYS).map((value) => ({ unit: "s", value })),
+    ...providedValues(src, DURATION_MILLISECOND_KEYS).map((value) => ({ unit: "ms", value })),
+  ];
+  if (candidates.length === 0) return null;
+
+  const normalized = [];
+  for (const candidate of candidates) {
+    const parsed = parseDecimalScalar(candidate.value);
+    if (parsed == null) return "invalid";
+    normalized.push(candidate.unit === "ms" ? Math.ceil(parsed / 1000) : Math.ceil(parsed));
+  }
+
+  const unique = new Set(normalized);
+  if (unique.size !== 1) return "invalid";
+  const seconds = normalized[0];
   if (seconds < 60 || seconds > 86400) return "invalid";
   return seconds;
+}
+
+function activeSessionCountEvidence(src) {
+  const hasActive = Object.prototype.hasOwnProperty.call(src, "active_session_count");
+  const hasCurrent = Object.prototype.hasOwnProperty.call(src, "current_active_sessions");
+  const raw = hasActive ? src.active_session_count : hasCurrent ? src.current_active_sessions : undefined;
+  if (raw === undefined || raw === null) return { present: false, invalid: false, value: null };
+  if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) {
+    return { present: true, invalid: false, value: raw };
+  }
+  if (typeof raw === "string" && /^(?:0|[1-9]\d*)$/.test(raw.trim())) {
+    return { present: true, invalid: false, value: Number(raw.trim()) };
+  }
+  return { present: true, invalid: true, value: null };
 }
 
 export function parseMcpToolName(toolName) {
@@ -402,9 +448,7 @@ export function normalizeSessionContext(toolName, params, event = {}) {
   );
   const userId = cleanString(eventObj.user_id ?? eventObj.userId);
   const duration = requestedDuration(nested);
-  const activeSessionCount = Number.isFinite(Number(eventObj.active_session_count ?? eventObj.current_active_sessions))
-    ? Number(eventObj.active_session_count ?? eventObj.current_active_sessions)
-    : null;
+  const activeSessionCount = activeSessionCountEvidence(eventObj);
   const sessionId =
     operation === "create"
       ? ""
@@ -427,8 +471,8 @@ export function normalizeSessionContext(toolName, params, event = {}) {
     session_type: typeEvidence.sessionType || "interactive",
     session_tracking: "host_active_count",
     hook_event: cleanString(eventObj.hook_event_name ?? eventObj.event, 80),
-    active_session_count: activeSessionCount,
-    current_active_sessions: activeSessionCount,
+    active_session_count: activeSessionCount.value,
+    current_active_sessions: activeSessionCount.value,
     parent_session_id: cleanString(eventObj.session_id ?? eventObj.sessionId, 200),
     session_call_id: cleanString(eventObj.toolCallId ?? eventObj.tool_call_id ?? eventObj.id ?? eventObj.callId ?? eventObj.call_id, 200),
     session_id: cleanString(sessionId, 200),
@@ -438,6 +482,7 @@ export function normalizeSessionContext(toolName, params, event = {}) {
   if (duration === "invalid") out.invalid_session_duration = true;
   else if (duration != null) out.requested_duration = duration;
   if (typeEvidence.invalid) out.invalid_session_type = true;
+  if (activeSessionCount.invalid) out.invalid_session_count = true;
   return out;
 }
 
