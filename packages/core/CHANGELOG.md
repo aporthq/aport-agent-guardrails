@@ -1,8 +1,8 @@
 # @aporthq/aport-agent-guardrails-core
 
-## 1.1.0
+## 1.0.35
 
-### Minor Changes
+### Patch Changes
 
 - Add observe enforcement mode for adoption-first guardrail rollout across shell hooks, framework adapters, and OpenClaw. Hosted verification now reports runtime enforcement metadata consistently, session tools send required hosted context, and local pre-push/tool-surface gates cover Codex provider drift without running the full CI suite.
 

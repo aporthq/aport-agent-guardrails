@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-09-30
+## [1.0.35] - 2026-09-30
 
 ### Added
 - **Observe enforcement mode:** `observe` is now available across setup/mode flows, Claude Code, Cursor, Codex, Gemini CLI, Goose, LangChain, CrewAI, and OpenClaw. It records and surfaces APort policy/runtime/API failures without blocking the tool call, giving teams an adoption-first rollout path before `warn` or `enforce`.

@@ -1,6 +1,10 @@
 # Changelog - APort OpenClaw Plugin
 
-## 1.1.0
+## 1.0.35
+
+### Patch Changes
+
+- Normalize hosted session metadata and preserve warn/observe hard-failure boundaries for OpenClaw.
 
 ## 1.0.34
 
