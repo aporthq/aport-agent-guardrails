@@ -121,20 +121,27 @@ Best for privacy-sensitive or offline environments.
 
 ### Enforcement mode
 
-Default enforcement is `enforce`: policy denials, unmapped tools, and evaluator failures block tool execution. To roll out in report-only mode, opt in explicitly:
+Default enforcement is `enforce`: policy denials, unmapped tools, and evaluator failures block tool execution. To roll out completed policy denials in report-only mode, opt in explicitly:
 
 ```bash
 npx @aporthq/aport-agent-guardrails openclaw --enforcement=warn
+```
+
+For adoption-first rollout where developers must not be blocked while mappings or hosted availability are still being tuned, use observe mode:
+
+```bash
+npx @aporthq/aport-agent-guardrails openclaw --enforcement=observe
 ```
 
 To change enforcement later without creating a new passport or reinstalling the plugin:
 
 ```bash
 npx @aporthq/aport-agent-guardrails mode openclaw --enforcement=warn
+npx @aporthq/aport-agent-guardrails mode openclaw --enforcement=observe
 npx @aporthq/aport-agent-guardrails mode openclaw --enforcement=enforce
 ```
 
-Warn mode records the original deny decision but lets OpenClaw continue. It is for rollout/audit only, not a secure enforcement mode.
+Warn mode records completed policy denials but lets OpenClaw continue; unmapped tools, decision-integrity failures, and evaluator errors still block when `failClosed` is true. Observe mode allows policy denials and APort mapping/runtime/API failures with warnings. Both are rollout/audit modes, not secure enforcement modes.
 
 ## Manual install for development
 

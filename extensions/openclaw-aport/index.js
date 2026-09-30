@@ -51,7 +51,7 @@ export default definePluginEntry({
     const err = (msg) => api.logger?.error?.(msg);
 
     log(
-      `[APort] Loaded: mode=${mode}, ${agentId ? `agentId=${agentId}` : `passportFile=${passportFile}`}, unmapped=${allowUnmappedTools ? "allow" : "block"}, mapExec=${mapExecToPolicy}`,
+      `[APort] Loaded: mode=${mode}, enforcement=${enforcement}, ${agentId ? `agentId=${agentId}` : `passportFile=${passportFile}`}, unmapped=${allowUnmappedTools ? "allow" : "block"}, mapExec=${mapExecToPolicy}`,
     );
 
     api.on("before_tool_call", async (event, hookContext = {}) => {
@@ -71,16 +71,17 @@ export default definePluginEntry({
             return {};
           }
           const notice = formatGuardrailNotice({
-            outcome: "deny",
+            outcome: failureOutcomeForEnforcement(enforcement),
             policy: "hook.tool.map",
             code: "oap.unknown_tool",
             message: `No policy mapping for ${toolName}`,
             agentId,
             passportFile,
           });
-          log(`[APort] ${failClosed ? "BLOCKED" : "ALLOW"}: ${toolName} - no policy mapping`);
-          if (!failClosed) {
-            warn(`[APort] Allowing unmapped tool because failClosed is disabled. ${notice}`);
+          const shouldAllowFailure = shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed);
+          log(`[APort] ${shouldAllowFailure ? "ALLOW" : "BLOCKED"}: ${toolName} - no policy mapping`);
+          if (shouldAllowFailure) {
+            warn(`[APort] ${failureAllowMessage(enforcement, "Allowing unmapped tool because failClosed is disabled.")} ${notice}`);
             return {};
           }
           return {
@@ -141,7 +142,7 @@ export default definePluginEntry({
 
         if (!verifyDecisionIntegrity(decision)) {
           const notice = formatGuardrailNotice({
-            outcome: "deny",
+            outcome: failureOutcomeForEnforcement(enforcement),
             policy: effectivePolicyName,
             code: "oap.decision_integrity_failed",
             message: "Decision integrity verification failed.",
@@ -149,8 +150,10 @@ export default definePluginEntry({
             passportFile,
           });
           err(`[APort] Decision integrity check failed for ${effectiveToolName} - content_hash mismatch`);
-          if (!failClosed) {
-            warn(`[APort] Allowing tool despite decision integrity failure because failClosed is disabled. ${notice}`);
+          if (shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed)) {
+            warn(
+              `[APort] ${failureAllowMessage(enforcement, "Allowing tool despite decision integrity failure because failClosed is disabled.")} ${notice}`,
+            );
             return {};
           }
           return {
@@ -174,16 +177,18 @@ export default definePluginEntry({
           const primaryReason = reasons[0] || {};
           const message = primaryMessage || "Policy denied.";
           const notice = formatGuardrailNotice({
-            outcome: enforcement === "warn" ? "warn" : "deny",
+            outcome: policyOutcomeForEnforcement(enforcement),
             policy: effectivePolicyName,
             code: primaryReason.code || "oap.denied",
             message,
             agentId,
             passportFile,
           });
-          log(`[APort] ${enforcement === "warn" ? "WARN" : "BLOCKED"}: ${effectiveToolName} - ${sanitizeDisplayText(message)}`);
+          const policyAllows = shouldAllowPolicyDecision(enforcement);
+          log(`[APort] ${policyAllows ? enforcement.toUpperCase() : "BLOCKED"}: ${effectiveToolName} - ${sanitizeDisplayText(message)}`);
 
-          if (enforcement === "warn") {
+          if (policyAllows) {
+            warn(`[APort] ${notice}`);
             return {};
           }
 
@@ -197,21 +202,22 @@ export default definePluginEntry({
         return {};
       } catch (error) {
         err(`[APort] Error evaluating policy: ${sanitizeDisplayText(error.message)}`);
-        if (failClosed) {
+        const notice = formatGuardrailNotice({
+          outcome: failureOutcomeForEnforcement(enforcement),
+          policy: "hook.runtime",
+          code: "oap.policy_error",
+          message: error.message,
+          agentId,
+          passportFile,
+        });
+        if (!shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed)) {
           return {
             block: true,
-            blockReason: formatGuardrailNotice({
-              outcome: "deny",
-              policy: "hook.runtime",
-              code: "oap.policy_error",
-              message: error.message,
-              agentId,
-              passportFile,
-            }),
+            blockReason: notice,
           };
         }
         warn(
-          `[APort] Allowing tool despite policy evaluation error because failClosed is disabled. ${policyReference({ agentId, passportFile })}`,
+          `[APort] ${failureAllowMessage(enforcement, "Allowing tool despite policy evaluation error because failClosed is disabled.")} ${notice}`,
         );
         return {};
       }
@@ -346,16 +352,40 @@ function splitSimpleShellWords(input) {
 
 function normalizeEnforcementMode(value) {
   const normalized = String(value || "enforce").toLowerCase().replace(/_/g, "-");
-  if (["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)) return "warn";
+  if (["observe", "observation"].includes(normalized)) return "observe";
+  if (["warn", "report-only", "audit-only"].includes(normalized)) return "warn";
   return "enforce";
 }
 
 function buildRuntimeMetadata(enforcement) {
   return {
-    enforcement_mode: enforcement === "warn" ? "warn" : "enforce",
+    enforcement_mode: enforcement === "observe" ? "observe" : enforcement === "warn" ? "warn" : "enforce",
     enforced_by: "@aporthq/openclaw-aport",
     harness: "openclaw",
   };
+}
+
+function shouldAllowPolicyDecision(enforcement) {
+  return enforcement === "warn" || enforcement === "observe";
+}
+
+function shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed) {
+  return enforcement === "observe" || !failClosed;
+}
+
+function policyOutcomeForEnforcement(enforcement) {
+  return enforcement === "observe" ? "observe" : enforcement === "warn" ? "warn" : "deny";
+}
+
+function failureOutcomeForEnforcement(enforcement) {
+  return enforcement === "observe" ? "observe" : "deny";
+}
+
+function failureAllowMessage(enforcement, failOpenMessage) {
+  if (enforcement === "observe") {
+    return "Observe mode allowed an action that APort did not authorize.";
+  }
+  return failOpenMessage;
 }
 
 function sanitizeDisplayText(value) {
@@ -380,7 +410,9 @@ function policyReference({ agentId, passportFile }) {
 
 function formatGuardrailNotice({ outcome, policy, code, message, agentId, passportFile }) {
   const prefix =
-    outcome === "warn"
+    outcome === "observe"
+      ? "APort observation: observe mode allowed a tool call that APort did not authorize."
+      : outcome === "warn"
       ? "APort warning: policy would have denied this tool call."
       : "APort denied this tool call.";
   const detail = sanitizeDisplayText(message || "");

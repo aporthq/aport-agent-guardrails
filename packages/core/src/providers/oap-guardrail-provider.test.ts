@@ -75,6 +75,19 @@ describe("OAPGuardrailProvider", () => {
     });
   });
 
+  it("allows framework execution in observe mode while preserving original deny metadata", () => {
+    const provider = new OAPGuardrailProvider({
+      framework: "nonexistent-framework",
+      enforcementMode: "observe",
+    });
+    const decision = provider.evaluateSync(makeRequest("bash", { command: "rm -rf /tmp/aport-test" }));
+    expect(decision.allow).toBe(true);
+    expect(decision.metadata).toMatchObject({
+      enforcementMode: "observe",
+      originalAllow: false,
+    });
+  });
+
   it("reports explicit warn mode to hosted runtime metadata", async () => {
     const originalFetch = globalThis.fetch;
     let capturedBody: Record<string, unknown> | null = null;
@@ -116,6 +129,54 @@ describe("OAPGuardrailProvider", () => {
       const body = capturedBody as { runtime?: unknown } | null;
       expect(body?.runtime).toMatchObject({
         enforcement_mode: "warn",
+        harness: "generic",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("reports explicit observe mode to hosted runtime metadata", async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedBody: Record<string, unknown> | null = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () =>
+          JSON.stringify({
+            decision: {
+              allow: false,
+              reasons: [{ code: "oap.denied", message: "blocked" }],
+            },
+          }),
+      } as Response;
+    }) as typeof fetch;
+
+    try {
+      const provider = new OAPGuardrailProvider({
+        framework: "generic",
+        enforcementMode: "observe",
+      });
+      (provider as any).evaluator.cachedConfig = {
+        mode: "api",
+        agent_id: "ap_1234567890abcdef1234567890abcdef",
+        enforcement_mode: "enforce",
+      };
+
+      const decision = await provider.evaluate(makeRequest("bash", { command: "sudo ls" }));
+
+      expect(decision.allow).toBe(true);
+      expect(decision.metadata).toMatchObject({
+        enforcementMode: "observe",
+        originalAllow: false,
+      });
+      const body = capturedBody as { runtime?: unknown } | null;
+      expect(body?.runtime).toMatchObject({
+        enforcement_mode: "observe",
         harness: "generic",
       });
     } finally {

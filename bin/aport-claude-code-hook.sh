@@ -61,12 +61,37 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
     fi
 fi
 
-emit_claude_input_too_large() {
-    local notice
-    notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-
-    aport_hook_build_response "deny" "$notice" "" "claude-code"
+# Deny helper: outputs hookSpecificOutput JSON and exits 0.
+deny() {
+    local reason="$1"
+    aport_hook_build_response "deny" "$reason" "" "claude-code"
     exit 0
+}
+
+warn_allow() {
+    local reason="$1"
+    local user_warning="${2:-}"
+    aport_hook_build_response "allow" "$reason" "$user_warning" "claude-code"
+    exit 0
+}
+
+deny_or_warn() {
+    local policy="$1"
+    local code="${2:-oap.denied}"
+    local message="${3:-}"
+    local failure_class="${4:-hard}"
+    local notice user_warning
+    if aport_hook_should_allow_failure "$failure_class"; then
+        notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "claude-code")"
+        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "claude-code")"
+        warn_allow "$notice" "$user_warning"
+    fi
+    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "claude-code")"
+    deny "$notice"
+}
+
+emit_claude_input_too_large() {
+    deny_or_warn "hook.input" "oap.input_too_large" "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes." "hard"
 }
 
 # Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
@@ -78,20 +103,12 @@ fi
 
 # No input means the host did not provide a tool-call payload. Fail closed.
 if [ -z "$INPUT" ]; then
-    if command -v jq > /dev/null 2>&1; then
-        jq -n --arg reason "🛡️ APort: empty hook input — fail-closed policy" \
-            --arg event "PreToolUse" \
-            '{hookSpecificOutput:{hookEventName:$event,permissionDecision:"deny",permissionDecisionReason:$reason}}'
-    else
-        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"APort: empty hook input - fail-closed policy"}}\n'
-    fi
-    exit 0
+    deny_or_warn "hook.input" "oap.empty_input" "Host did not provide a hook payload" "hard"
 fi
 
 # Parse tool_name and tool_input (requires jq)
 if ! command -v jq &> /dev/null; then
-    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"🛡️ APort: jq is required"}}'
-    exit 0
+    deny_or_warn "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "hard"
 fi
 
 # Parse with error handling: jq failure must deny, never undefined exit codes.
@@ -119,35 +136,6 @@ safe_jq() {
     result="$(echo "$input" | jq -c "$filter" 2> /dev/null)" || result='{}'
     [ -z "$result" ] && result='{}'
     echo "$result"
-}
-
-# Deny helper: outputs hookSpecificOutput JSON and exits 0.
-deny() {
-    local reason="$1"
-    aport_hook_build_response "deny" "$reason" "" "claude-code"
-    exit 0
-}
-
-warn_allow() {
-    local reason="$1"
-    local user_warning="${2:-}"
-    aport_hook_build_response "allow" "$reason" "$user_warning" "claude-code"
-    exit 0
-}
-
-deny_or_warn() {
-    local policy="$1"
-    local code="${2:-oap.denied}"
-    local message="${3:-}"
-    local failure_class="${4:-hard}"
-    local notice user_warning
-    if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "claude-code")"
-        user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "claude-code")"
-        warn_allow "$notice" "$user_warning"
-    fi
-    notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "claude-code")"
-    deny "$notice"
 }
 
 map_claude_mcp_context() {

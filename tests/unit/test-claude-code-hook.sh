@@ -399,6 +399,34 @@ grep -q 'fail-closed' "$OUT4" || {
 }
 echo "  ✅ Unknown tool: structured deny, fail-closed"
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=observe
+EOF
+echo "  Test: Unknown tool in observe mode -> allow with warning..."
+OUT4O="$TEST_DIR/claude-observe-unknown.txt"
+set +e
+echo '{"tool_name":"UnknownTool","tool_input":{}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4O" 2> /dev/null
+EXIT4O=$?
+set -e
+[[ "$EXIT4O" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with observe warning for unknown tool, got $EXIT4O" >&2
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("observe mode allowed"))
+  and (.systemMessage | contains("oap.unknown_tool"))
+' "$OUT4O" > /dev/null || {
+    echo "FAIL: observe mode should allow unknown tools with warning" >&2
+    cat "$OUT4O" >&2
+    exit 1
+}
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+EOF
+echo "  ✅ Unknown tool in observe mode: allow with warning"
+
 echo "  Test: TodoWrite tool -> allow (internal bookkeeping)..."
 OUT4B="$TEST_DIR/claude-allow-todowrite.txt"
 echo '{"tool_name":"TodoWrite","tool_input":{"todos":[{"content":"Review change","status":"in_progress","activeForm":"Reviewing change"}]}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4B" 2> /dev/null
@@ -741,6 +769,45 @@ if grep -q 'apk_claude_secret' "$OUT8W"; then
 fi
 echo "  ✅ API mode warn still denies evaluator failures"
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=observe
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+APORT_API_KEY=apk_claude_secret_should_redact
+EOF
+OUT8O="$TEST_DIR/claude-api-mode-observe.txt"
+echo "  Test: API mode observe with unreachable endpoint -> allow with warning..."
+set +e
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT8O" 2> /dev/null
+EXIT8O=$?
+set -e
+[[ "$EXIT8O" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 in observe mode, got $EXIT8O" >&2
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("observe mode allowed"))
+  and (.systemMessage | contains("oap.evaluation_error"))
+' "$OUT8O" > /dev/null || {
+    echo "FAIL: observe mode should allow unreachable API with warning" >&2
+    cat "$OUT8O" >&2
+    exit 1
+}
+if grep -q 'apk_claude_secret' "$OUT8O"; then
+    echo "FAIL: observe warning output must not leak API keys" >&2
+    cat "$OUT8O" >&2
+    exit 1
+fi
+echo "  ✅ API mode observe allows evaluator failures"
+
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=warn
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+EOF
 STALE_DECISION_BASE="$TEST_DIR/aport/stale-claude-decision.json"
 STALE_DECISION_OUT="$TEST_DIR/claude-stale-decision-out.json"
 STALE_DECISION_ERR="$TEST_DIR/claude-stale-decision-err.txt"

@@ -137,13 +137,15 @@ The provider and adapter read the standard APort config:
 - `agent_id` for hosted passports
 - `passport_path` for explicit local passport paths
 - `guardrail_script` to override the local evaluator script path
-- `enforcement_mode: enforce` to block by default, or `warn` for explicit report-only rollout
+- `enforcement_mode: enforce` to block by default, `warn` for explicit report-only rollout, or `observe` for adoption-only warnings without blocking
 - `audit_log` to enable or disable audit logging
 
-In compatibility mode, warn mode lets CrewAI continue and prints an APort warning
-with the tool, policy, reason code, reason detail, and the hosted passport or
-local passport file to review. In native provider mode, warn-mode decisions are
-returned as provider metadata for the host/runtime to surface.
+In compatibility mode, warn mode lets completed policy denials continue and
+prints an APort warning with the tool, policy, reason code, reason detail, and
+the hosted passport or local passport file to review. Observe mode is
+adoption-only: CrewAI continues while APort emits warnings during passport and
+mapping tuning. In native provider mode, warn/observe decisions are returned as
+provider metadata for the host/runtime to surface.
 
 With the default bootstrap, you usually do not need to set `guardrail_script`
 manually because the local runtime is installed under the framework config
