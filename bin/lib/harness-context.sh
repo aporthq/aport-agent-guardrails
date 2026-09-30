@@ -674,6 +674,15 @@ aport_hook_context_from_payload() {
         # which a policy comparing against max_execution_time would read as no bound at all.
         if $timeout_ms == null then null
         else (((($timeout_ms + 999) / 1000) | floor) | if . < 1 then 1 else . end) end;
+      def safe_session_duration_ms(v):
+        (
+          if (v | type) == "number" and v >= 0 and v == (v | floor) then v
+          elif (v | type) == "string" and (v | test("^[0-9]+$")) then (v | tonumber)
+          else null
+          end
+        ) as $duration_ms |
+        if $duration_ms == null then null
+        else (((($duration_ms + 999) / 1000) | floor) | if . < 1 then 1 else . end) end;
       def ceil_seconds:
         . as $n |
         ($n | floor) as $f |
@@ -829,7 +838,7 @@ aport_hook_context_from_payload() {
         else (
           $raw_values | map(
             if .unit == "ms" then
-              (safe_timeout_ms(.value)) as $duration |
+              (safe_session_duration_ms(.value)) as $duration |
               if $duration == null then {invalid: true} else {invalid: false, value: $duration} end
             else
               (safe_timeout(.value)) as $duration |
