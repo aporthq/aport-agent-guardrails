@@ -674,6 +674,19 @@ aport_hook_context_from_payload() {
         # which a policy comparing against max_execution_time would read as no bound at all.
         if $timeout_ms == null then null
         else (((($timeout_ms + 999) / 1000) | floor) | if . < 1 then 1 else . end) end;
+      def safe_session_duration_ms(v):
+        (
+          if (v | type) == "number" and v >= 0 and v == (v | floor) then v
+          elif (v | type) == "string" and (v | test("^[0-9]+$")) then (v | tonumber)
+          else null
+          end
+        ) as $duration_ms |
+        if $duration_ms == null then null
+        else (((($duration_ms + 999) / 1000) | floor) | if . < 1 then 1 else . end) end;
+      def ceil_seconds:
+        . as $n |
+        ($n | floor) as $f |
+        if $n == $f then $f else ($f + 1) end;
       def urlish(v): if (v | type) == "string" then (v | test("^https?://"; "i")) else false end;
       def url_host(v):
         str(v) as $s |
@@ -765,6 +778,82 @@ aport_hook_context_from_payload() {
           $name == "start_agent"
         ) then "create"
         else "other"
+        end;
+      def session_type($raw):
+        (strip_functions_prefix($raw) | ascii_downcase) as $name |
+        if ($name | contains("cron") or contains("schedulewakeup") or contains("schedule_wakeup")) then "scheduled"
+        elif ($name | contains("remote") or contains("webhook")) then "webhook"
+        elif ($name | contains("batch")) then "batch"
+        elif ($name | contains("ephemeral")) then "ephemeral"
+        else "interactive"
+        end;
+      def session_type_evidence($root; $ti; $raw):
+        ([
+          $root.session_type,
+          $root.sessionType,
+          $ti.session_type,
+          $ti.sessionType
+        ] | map(select(. != null)) | .[0] // null) as $explicit |
+        if $explicit == null then
+          {invalid: false, value: session_type($raw)}
+        elif (($explicit | type) != "string") then
+          {invalid: true}
+        else ($explicit | ascii_downcase) as $normalized |
+          if (["interactive", "batch", "webhook", "scheduled", "ephemeral"] | index($normalized)) then
+            {invalid: false, value: $normalized}
+          else
+            {invalid: true}
+          end
+        end;
+      def session_duration_evidence($ti):
+        [
+          $ti.requested_duration,
+          $ti.requestedDuration,
+          $ti.requested_duration_seconds,
+          $ti.requestedDurationSeconds,
+          $ti.session_duration_seconds,
+          $ti.sessionDurationSeconds,
+          $ti.duration_seconds,
+          $ti.durationSeconds,
+          $ti.ttl_seconds,
+          $ti.ttlSeconds
+        ] | map(select(. != null)) as $second_values |
+        [
+          $ti.requested_duration_ms,
+          $ti.requestedDurationMs,
+          $ti.session_duration_ms,
+          $ti.sessionDurationMs,
+          $ti.duration_ms,
+          $ti.durationMs,
+          $ti.timeout_ms,
+          $ti.timeoutMs
+        ] | map(select(. != null)) as $millisecond_values |
+        (
+          [
+            ($second_values[] | {unit: "s", value: .}),
+            ($millisecond_values[] | {unit: "ms", value: .})
+          ]
+        ) as $raw_values |
+        if ($raw_values | length) == 0 then {present: false, invalid: false}
+        else (
+          $raw_values | map(
+            if .unit == "ms" then
+              (safe_session_duration_ms(.value)) as $duration |
+              if $duration == null then {invalid: true} else {invalid: false, value: $duration} end
+            else
+              (safe_timeout(.value)) as $duration |
+              if $duration == null then {invalid: true} else {invalid: false, value: ($duration | ceil_seconds)} end
+            end
+          )
+        ) as $durations |
+          if (($durations | map(select(.invalid == true)) | length) > 0) then {present: true, invalid: true}
+          elif (($durations | map(.value) | unique | length) != 1) then {present: true, invalid: true}
+          else ($durations[0].value) as $seconds |
+            if $seconds >= 60 and $seconds <= 86400 then
+              {present: true, invalid: false, value: $seconds}
+            else {present: true, invalid: true}
+            end
+          end
         end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
       ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
@@ -989,12 +1078,17 @@ aport_hook_context_from_payload() {
           $ti.description // $ti.prompt // $ti.task // $ti.message // ""
         ) as $description |
         session_operation($default_tool) as $session_operation |
-        {
+        session_type_evidence(.; $ti; $default_tool) as $session_type |
+        session_duration_evidence($ti) as $requested_duration |
+        (.active_session_count // .current_active_sessions // null) as $active_session_count |
+        ({
           description_length: (str($description) | length),
           session_operation: $session_operation,
+          session_type: ($session_type.value // session_type($default_tool)),
           session_tracking: (if $event_hint == "codex" then "persistent" else "host_active_count" end),
           hook_event: (.hook_event_name // .event // ""),
-          active_session_count: (.active_session_count // .current_active_sessions // null),
+          active_session_count: $active_session_count,
+          current_active_sessions: $active_session_count,
           parent_session_id: (.session_id // .sessionId // ""),
           session_call_id: (.tool_call_id // .toolCallId // .tool_use_id // .toolUseId // .request_id // ""),
           session_id: (
@@ -1006,6 +1100,11 @@ aport_hook_context_from_payload() {
           ),
           subagent_type: (.subagent_type // $ti.subagent_type // $ti.agent_type // "")
         }
+        + (if $session_type.invalid == true then {invalid_session_type: true} else {} end)
+        + (if $requested_duration.invalid == true then {invalid_session_duration: true}
+           elif $requested_duration.value == null then {}
+           else {requested_duration: $requested_duration.value}
+           end))
       else
         {}
       end

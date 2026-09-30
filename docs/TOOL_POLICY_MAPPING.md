@@ -31,7 +31,7 @@ plugin has its own host-specific mapping in
 
 **Unknown tool:** In the **bash/API guardrail script**, an unknown tool name results in deny (exit 1). In the **OpenClaw plugin**, unmapped tools are **blocked** by default. Set `allowUnmappedTools: true` only when explicitly rolling out trusted custom skills and accepting that unmapped tools bypass policy checks.
 
-Unknown effectful tools intentionally do **not** become warnings in strict/enforce mode. During an experimental rollout, use `--enforcement=warn` to keep completed policy denials report-only while tuning passports and mappings; leave unknown tools fail-closed until they are mapped or explicitly accepted as trusted custom tools. This avoids converting host schema drift into a silent bypass.
+Unknown effectful tools intentionally do **not** become warnings in strict/enforce mode. During a conservative rollout, use `--enforcement=warn` to keep completed policy denials report-only while tuning passports and mappings; unknown tools and adapter/runtime failures still fail closed. During an adoption-first rollout, use `--enforcement=observe`; observe mode returns allow-with-warning for unknown tools and APort verifier/runtime failures so developers are not blocked while you collect evidence. Treat observe as visibility, not security enforcement.
 
 ## How runtime hooks use it
 

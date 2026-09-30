@@ -39,7 +39,7 @@ export interface Decision {
   reasons?: Array<{ code?: string; message?: string }>;
 }
 
-type RuntimeEnforcementMode = 'enforce' | 'warn';
+type RuntimeEnforcementMode = 'enforce' | 'warn' | 'observe';
 
 interface RuntimeMetadata {
   enforcement_mode: RuntimeEnforcementMode;
@@ -199,9 +199,9 @@ function resolveRuntimeEnforcementMode(
     .toLowerCase()
     .replace(/_/g, '-');
 
-  return ['warn', 'report-only', 'audit-only', 'observe', 'observation'].includes(raw)
-    ? 'warn'
-    : 'enforce';
+  if (['warn', 'report-only', 'audit-only'].includes(raw)) return 'warn';
+  if (['observe', 'observation'].includes(raw)) return 'observe';
+  return 'enforce';
 }
 
 function buildRuntimeMetadata(

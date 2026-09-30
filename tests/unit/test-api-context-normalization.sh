@@ -40,6 +40,77 @@ out="$(normalize_api_context "$CMD" '{"command":"ls"}')"
 out="$(normalize_api_context data.file.write.v1 '{"file_path":"/tmp/x","shell":""}')"
 [ "$out" = '{"file_path":"/tmp/x","shell":""}' ] || fail "other policies are left alone: $out"
 
+APORT_USER_ID="user-from-env"
+out="$(normalize_api_context agent.session.create.v1 '{"description_length":12,"session_operation":"create","session_type":"interactive"}')"
+printf '%s' "$out" | jq -e '.user_id == "user-from-env" and .session_type == "interactive"' > /dev/null \
+    || fail "session API context must add user_id and keep valid session_type: $out"
+unset APORT_USER_ID
+
+APORT_AGENT_ID="ap_hosted_session_test"
+out="$(normalize_api_context agent.session.create.v1 '{"description_length":12,"session_operation":"create"}')"
+printf '%s' "$out" | jq -e '.user_id == "ap_hosted_session_test" and .session_type == "interactive"' > /dev/null \
+    || fail "session API context must derive hosted user_id and default session_type: $out"
+unset APORT_AGENT_ID
+
+APORT_USER_ID="user-from-env"
+out="$(normalize_api_context agent.session.create.v1 '{"user_id":"payload-user","session_type":"experimental"}')"
+printf '%s' "$out" | jq -e '.user_id == "payload-user" and .session_type == "experimental"' > /dev/null \
+    || fail "session API context must not hide explicit invalid session_type values: $out"
+unset APORT_USER_ID
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"explore repo","prompt":"secret_prompt_should_not_persist","subagent_type":"reviewer","duration_ms":3600000}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "interactive" and .description_length > 0 and .subagent_type == "reviewer" and .current_active_sessions == 0 and .requested_duration == 3600' > /dev/null \
+    || fail "Claude Agent(Explore) session context should include hosted session_type and bounded metadata without raw prompt: $out"
+printf '%s' "$out" | grep -q 'secret_prompt_should_not_persist' && fail "session context must not include raw prompt"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"batch work","session_type":"batch"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "batch" and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "session context must preserve explicit valid session_type: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"bad type","session_type":"root"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
+    || fail "session context must flag invalid explicit session_type: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"explore repo","duration_ms":30000}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e 'has("requested_duration") | not' > /dev/null \
+    || fail "session context must not emit schema-invalid requested_duration values: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting duration","duration_seconds":60,"duration_ms":172800000}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
+    || fail "session context must flag conflicting duration aliases: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"fractional overflow","duration_ms":86400999}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
+    || fail "session context must reject millisecond durations that round over the max: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"fractional ms","duration_ms":60000.1}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
+    || fail "session context must reject fractional millisecond durations: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"CronCreate","active_session_count":0,"tool_input":{"description":"daily check"}}' session 'CronCreate' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "scheduled"' > /dev/null \
+    || fail "CronCreate session context should be scheduled: $out"
+
+FAKE_NODE_DIR="$TEST_DIR/fake-node"
+mkdir -p "$FAKE_NODE_DIR"
+cat > "$FAKE_NODE_DIR/node" << 'EOF'
+#!/bin/bash
+set -e
+printf '%s' "$2" > "$APORT_TEST_POLICY_FILE"
+printf '%s' "$3" > "$APORT_TEST_CONTEXT_FILE"
+EOF
+chmod +x "$FAKE_NODE_DIR/node"
+APORT_TEST_POLICY_FILE="$TEST_DIR/api-policy.txt" \
+    APORT_TEST_CONTEXT_FILE="$TEST_DIR/api-session-context.json" \
+    APORT_AGENT_ID="ap_hosted_wrapper_session_test" \
+    APORT_USER_ID="hosted-wrapper-user" \
+    OPENCLAW_CONFIG_DIR="$TEST_DIR" \
+    PATH="$FAKE_NODE_DIR:$PATH" \
+    "$REPO_ROOT/bin/aport-guardrail-api.sh" session.create '{"description_length":12,"session_operation":"create","session_type":"interactive"}'
+grep -q '^agent.session.create.v1$' "$TEST_DIR/api-policy.txt" || fail "API wrapper should resolve session.create policy"
+jq -e '.user_id == "hosted-wrapper-user" and .session_type == "interactive"' "$TEST_DIR/api-session-context.json" > /dev/null \
+    || fail "API wrapper must send hosted-required session fields: $(cat "$TEST_DIR/api-session-context.json")"
+
 # Every tool that resolves to the command policy gets the same shaping, not only the ones a list named.
 for tool in terminal run_terminal_cmd execute_command; do
     policy="$(resolve_policy_id_from_tool_name "$tool" || true)"

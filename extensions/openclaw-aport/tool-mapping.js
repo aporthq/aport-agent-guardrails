@@ -15,12 +15,43 @@ const RELEASE_PUBLISH_ACTIONS = new Set([
   "release",
   "upload",
 ]);
+const SESSION_TYPES = new Set(["interactive", "batch", "webhook", "scheduled", "ephemeral"]);
+const DURATION_SECOND_KEYS = [
+  "requested_duration",
+  "requestedDuration",
+  "requested_duration_seconds",
+  "requestedDurationSeconds",
+  "session_duration_seconds",
+  "sessionDurationSeconds",
+  "duration_seconds",
+  "durationSeconds",
+  "ttl_seconds",
+  "ttlSeconds",
+];
+const DURATION_MILLISECOND_KEYS = [
+  "requested_duration_ms",
+  "requestedDurationMs",
+  "session_duration_ms",
+  "sessionDurationMs",
+  "duration_ms",
+  "durationMs",
+  "timeout_ms",
+  "timeoutMs",
+];
 
 function firstNonEmpty(...values) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return "";
+}
+
+function cleanString(value, limit = 200) {
+  return String(value ?? "")
+    .replace(/[\x00-\x1f\x7f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 function readAction(params) {
@@ -32,6 +63,100 @@ function readAction(params) {
     src.arguments && typeof src.arguments === "object" ? src.arguments.action : "",
     src.input && typeof src.input === "object" ? src.input.action : "",
   ).toLowerCase();
+}
+
+function sessionOperation(toolName) {
+  const name = String(toolName ?? "").toLowerCase().replace(/^functions\./, "");
+  if (name.includes("interrupt")) return "update";
+  if (name.includes("close") || name.includes("stop") || name.includes("delete")) return "close";
+  if (name.includes("list") || name.includes("status") || name.includes("history") || name.includes("wait")) return "list";
+  if (name.includes("resume")) return "resume";
+  if (name.includes("send") || name.includes("update") || name.includes("followup")) return "update";
+  if (
+    name === "agent" ||
+    name === "task" ||
+    name === "subagent" ||
+    name === "subagentstart" ||
+    name === "sessions_spawn" ||
+    name === "croncreate" ||
+    name.includes("spawn") ||
+    name.includes("create") ||
+    name.includes("start")
+  ) {
+    return "create";
+  }
+  return "other";
+}
+
+function sessionTypeEvidence(toolName, src) {
+  const rawExplicit = src.session_type ?? src.sessionType;
+  if (rawExplicit != null && String(rawExplicit).trim() !== "") {
+    const explicit = cleanString(rawExplicit, 32).toLowerCase();
+    if (SESSION_TYPES.has(explicit)) return { sessionType: explicit, invalid: false };
+    return { sessionType: "", invalid: true };
+  }
+  const name = String(toolName ?? "").toLowerCase();
+  if (name.includes("cron") || name.includes("schedulewakeup") || name.includes("schedule_wakeup")) {
+    return { sessionType: "scheduled", invalid: false };
+  }
+  if (name.includes("remote") || name.includes("webhook")) return { sessionType: "webhook", invalid: false };
+  if (name.includes("batch")) return { sessionType: "batch", invalid: false };
+  if (name.includes("ephemeral")) return { sessionType: "ephemeral", invalid: false };
+  return { sessionType: "interactive", invalid: false };
+}
+
+function providedValues(src, keys) {
+  return keys
+    .filter((key) => Object.prototype.hasOwnProperty.call(src, key) && src[key] != null)
+    .map((key) => src[key]);
+}
+
+function parseDecimalScalar(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function requestedDuration(src) {
+  const candidates = [
+    ...providedValues(src, DURATION_SECOND_KEYS).map((value) => ({ unit: "s", value })),
+    ...providedValues(src, DURATION_MILLISECOND_KEYS).map((value) => ({ unit: "ms", value })),
+  ];
+  if (candidates.length === 0) return null;
+
+  const normalized = [];
+  for (const candidate of candidates) {
+    const parsed = parseDecimalScalar(candidate.value);
+    if (parsed == null) return "invalid";
+    normalized.push(candidate.unit === "ms" ? Math.ceil(parsed / 1000) : Math.ceil(parsed));
+  }
+
+  const unique = new Set(normalized);
+  if (unique.size !== 1) return "invalid";
+  const seconds = normalized[0];
+  if (seconds < 60 || seconds > 86400) return "invalid";
+  return seconds;
+}
+
+function activeSessionCountEvidence(src) {
+  const hasActive = Object.prototype.hasOwnProperty.call(src, "active_session_count");
+  const hasCurrent = Object.prototype.hasOwnProperty.call(src, "current_active_sessions");
+  const raw = hasActive ? src.active_session_count : hasCurrent ? src.current_active_sessions : undefined;
+  if (raw === undefined || raw === null) return { present: false, invalid: false, value: null };
+  if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) {
+    return { present: true, invalid: false, value: raw };
+  }
+  if (typeof raw === "string" && /^(?:0|[1-9]\d*)$/.test(raw.trim())) {
+    return { present: true, invalid: false, value: Number(raw.trim()) };
+  }
+  return { present: true, invalid: true, value: null };
 }
 
 export function parseMcpToolName(toolName) {
@@ -307,6 +432,60 @@ export function normalizeMcpContext(toolName, params) {
   return out;
 }
 
+export function normalizeSessionContext(toolName, params, event = {}) {
+  const paramsObj = params && typeof params === "object" ? params : {};
+  const eventObj = event && typeof event === "object" ? event : {};
+  const args = paramsObj.args && typeof paramsObj.args === "object" && !Array.isArray(paramsObj.args) ? paramsObj.args : {};
+  const input = paramsObj.input && typeof paramsObj.input === "object" ? paramsObj.input : {};
+  const nested = { ...args, ...input, ...paramsObj };
+  const operation = sessionOperation(toolName);
+  const typeEvidence = sessionTypeEvidence(toolName, nested);
+  const description = firstNonEmpty(
+    nested.description,
+    nested.task,
+    nested.message,
+    nested.prompt,
+  );
+  const userId = cleanString(eventObj.user_id ?? eventObj.userId);
+  const duration = requestedDuration(nested);
+  const activeSessionCount = activeSessionCountEvidence(eventObj);
+  const sessionId =
+    operation === "create"
+      ? ""
+      : firstNonEmpty(
+          nested.child_session_id,
+          nested.childSessionId,
+          eventObj.subagent_id,
+          nested.subagent_id,
+          nested.agent_id,
+          nested.agentId,
+          nested.id,
+          nested.session_id,
+          nested.sessionId,
+          eventObj.target_session_id,
+          eventObj.targetSessionId,
+        );
+  const out = {
+    description_length: description.length,
+    session_operation: operation,
+    session_type: typeEvidence.sessionType || "interactive",
+    session_tracking: "host_active_count",
+    hook_event: cleanString(eventObj.hook_event_name ?? eventObj.event, 80),
+    active_session_count: activeSessionCount.value,
+    current_active_sessions: activeSessionCount.value,
+    parent_session_id: cleanString(eventObj.session_id ?? eventObj.sessionId, 200),
+    session_call_id: cleanString(eventObj.toolCallId ?? eventObj.tool_call_id ?? eventObj.id ?? eventObj.callId ?? eventObj.call_id, 200),
+    session_id: cleanString(sessionId, 200),
+    subagent_type: cleanString(eventObj.subagent_type ?? nested.subagent_type ?? nested.agent_type, 80),
+  };
+  if (userId) out.user_id = userId;
+  if (duration === "invalid") out.invalid_session_duration = true;
+  else if (duration != null) out.requested_duration = duration;
+  if (typeEvidence.invalid) out.invalid_session_type = true;
+  if (activeSessionCount.invalid) out.invalid_session_count = true;
+  return out;
+}
+
 export function normalizePolicyContext(policyName, toolName, params, event) {
   if (policyName === "system.command.execute.v1") {
     return normalizeExecContext(params, event);
@@ -319,6 +498,9 @@ export function normalizePolicyContext(policyName, toolName, params, event) {
   }
   if (policyName === "mcp.tool.execute.v1") {
     return normalizeMcpContext(toolName, params);
+  }
+  if (policyName === "agent.session.create.v1") {
+    return normalizeSessionContext(toolName, params, event);
   }
   return params || {};
 }

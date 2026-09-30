@@ -44,9 +44,10 @@ Per the **Open Agent Passport (OAP) spec**, the passport has a **limits** object
   - `limits.data.file.write.blocked_paths` - Array of system directories to block (e.g. `["/etc/**", "/bin/**"]`)
 - Other tools like **ask_user_question**, **enter_plan_mode**, **exit_plan_mode**,
   **nodes**, and **image** remain **unmapped** and are blocked by default unless
-  `allowUnmappedTools: true` is explicitly configured. Tools such as **edit**, **browser**,
-  **web_search**, **web_fetch**, **gateway**, **process**, **sessions_***, and
-  **cron*** are mapped by the current plugin.
+  `allowUnmappedTools: true` is explicitly configured. `enforcementMode: observe`
+  also allows unmapped tools with warnings for adoption-only rollout. Tools such as
+  **edit**, **browser**, **web_search**, **web_fetch**, **gateway**, **process**,
+  **sessions_***, and **cron*** are mapped by the current plugin.
 
 ---
 

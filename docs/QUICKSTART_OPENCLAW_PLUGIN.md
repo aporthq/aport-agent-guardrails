@@ -81,6 +81,8 @@ plugins:
 
 Current plugin versions use a built-in JavaScript evaluator in local mode. The setup command still installs `aport-guardrail-bash.sh` for manual smoke tests and shell tooling, but the plugin does not depend on `child_process` or the bash script for local-mode enforcement.
 
+Use `enforcementMode: warn` for conservative report-only rollout: completed policy denials are recorded but OpenClaw continues, while unmapped tools, decision-integrity failures, and evaluator errors still block when `failClosed` is true. Use `enforcementMode: observe` only for adoption-first rollout where APort should warn but not block on policy denials or APort mapping/runtime/API failures.
+
 ## Development install
 
 If you are developing from a local checkout:

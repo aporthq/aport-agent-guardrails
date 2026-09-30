@@ -2,7 +2,7 @@
   "id": "openclaw-aport",
   "name": "APort Guardrails",
   "description": "Deterministic pre-action authorization via APort policy enforcement. Registers before_tool_call to block disallowed tools.",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "activation": {
     "onStartup": true,
     "onCapabilities": [
@@ -49,10 +49,11 @@
         "type": "string",
         "enum": [
           "enforce",
-          "warn"
+          "warn",
+          "observe"
         ],
         "default": "enforce",
-        "description": "enforce blocks denied actions; warn records policy decisions but allows execution."
+        "description": "enforce blocks denied actions; warn records completed policy denials but allows execution; observe allows policy denials plus APort mapping/runtime/API failures with warnings for adoption-only rollout."
       },
       "allowUnmappedTools": {
         "type": "boolean",
