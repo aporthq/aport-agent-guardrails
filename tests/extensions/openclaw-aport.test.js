@@ -169,6 +169,49 @@ describe("normalizeSessionContext", () => {
     assert.strictEqual(context.subagent_type, "reviewer");
     assert.ok(!Object.prototype.hasOwnProperty.call(context, "prompt"));
   });
+
+  it("keeps host session attribution authoritative over tool params", () => {
+    const context = normalizeSessionContext(
+      "sessions_spawn",
+      {
+        prompt: "review this diff",
+        user_id: "attacker",
+        active_session_count: 0,
+        toolCallId: "attacker-call",
+        session_id: "attacker-parent",
+      },
+      {
+        user_id: "host-user",
+        active_session_count: 5,
+        toolCallId: "host-call",
+        session_id: "host-parent",
+      },
+    );
+
+    assert.strictEqual(context.user_id, "host-user");
+    assert.strictEqual(context.active_session_count, 5);
+    assert.strictEqual(context.current_active_sessions, 5);
+    assert.strictEqual(context.session_call_id, "host-call");
+    assert.strictEqual(context.parent_session_id, "host-parent");
+    assert.strictEqual(context.description_length, "review this diff".length);
+  });
+
+  it("preserves valid explicit session types and flags malformed explicit values", () => {
+    const validContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "batch" },
+      { toolCallId: "tool-1" },
+    );
+    assert.strictEqual(validContext.session_type, "batch");
+    assert.ok(!Object.prototype.hasOwnProperty.call(validContext, "invalid_session_type"));
+
+    const invalidContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "root" },
+      { toolCallId: "tool-2" },
+    );
+    assert.strictEqual(invalidContext.invalid_session_type, true);
+  });
 });
 
 describe("normalizeMessageContext", () => {
@@ -829,6 +872,68 @@ describe("plugin hook contract", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("keeps invalid explicit session types blocking before hosted verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      throw new Error("fetch should not be called");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", session_type: "root" },
+      });
+
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps missing local passports blocking in warn mode", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "aport-openclaw-missing-passport-"));
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: path.join(tempDir, "aport", "missing-passport.json"),
+      enforcementMode: "warn",
+    });
+
+    const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+    assert.strictEqual(result.block, true);
+    assert.match(result.blockReason, /APort denied this tool call/);
+    assert.match(result.blockReason, /oap\.passport_not_found/);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("keeps suspended local passports blocking in warn mode", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const passport = JSON.parse(await readFile(passportPath, "utf8"));
+    passport.status = "suspended";
+    await writeFile(passportPath, JSON.stringify(passport, null, 2), "utf8");
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "warn",
+    });
+
+    const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+    assert.strictEqual(result.block, true);
+    assert.match(result.blockReason, /APort denied this tool call/);
+    assert.match(result.blockReason, /oap\.passport_suspended/);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("allows unmapped tools in observe mode", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const beforeToolCall = await registerPlugin({
@@ -1150,6 +1255,37 @@ describe("plugin hook contract", () => {
       const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
       assert.strictEqual(result.block, true);
       assert.match(result.blockReason, /oap\.policy_error/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps hosted hard denials blocking in warn mode", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      const decision = withContentHash({
+        allow: false,
+        decision_id: "dec-missing-context",
+        reasons: [{ code: "oap.missing_required_context", message: "repository is required" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({ toolName: "git.merge", params: { action: "merge" } });
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /APort denied this tool call/);
+      assert.match(result.blockReason, /oap\.missing_required_context/);
     } finally {
       globalThis.fetch = originalFetch;
     }

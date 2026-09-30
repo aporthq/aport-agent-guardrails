@@ -13,6 +13,7 @@ import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { logAuditEntry } from "./audit.js";
 import { canonicalize, formatReasons, verifyDecisionIntegrity } from "./decision.js";
+import { normalizeEnforcementMode, shouldAllowDeniedDecision } from "./enforcement.js";
 import { evaluateLocalDecision } from "./local-evaluator.js";
 import { mapToolToPolicy, normalizePolicyContext } from "./tool-mapping.js";
 import { verifyViaApi } from "./api-client.js";
@@ -124,19 +125,21 @@ export default definePluginEntry({
           }
         }
 
-        if (effectivePolicyName === "agent.session.create.v1" && context?.invalid_session_duration === true) {
+        const sessionAdapterError =
+          effectivePolicyName === "agent.session.create.v1" ? sessionContextAdapterError(context) : null;
+        if (sessionAdapterError) {
           const notice = formatGuardrailNotice({
             outcome: failureOutcomeForEnforcement(enforcement),
             policy: effectivePolicyName,
-            code: "oap.invalid_session_duration",
-            message: "Session duration is malformed or outside the supported 60-86400 second range.",
+            code: sessionAdapterError.code,
+            message: sessionAdapterError.message,
             agentId,
             passportFile,
           });
           const shouldAllowFailure = shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed);
-          log(`[APort] ${shouldAllowFailure ? "ALLOW" : "BLOCKED"}: ${effectiveToolName} - invalid session duration`);
+          log(`[APort] ${shouldAllowFailure ? "ALLOW" : "BLOCKED"}: ${effectiveToolName} - ${sessionAdapterError.summary}`);
           if (shouldAllowFailure) {
-            warn(`[APort] ${failureAllowMessage(enforcement, "Allowing tool despite invalid session duration because failClosed is disabled.")} ${notice}`);
+            warn(`[APort] ${failureAllowMessage(enforcement, sessionAdapterError.failOpenMessage)} ${notice}`);
             return {};
           }
           return {
@@ -203,14 +206,14 @@ export default definePluginEntry({
           const primaryReason = reasons[0] || {};
           const message = primaryMessage || "Policy denied.";
           const notice = formatGuardrailNotice({
-            outcome: policyOutcomeForEnforcement(enforcement),
+            outcome: policyOutcomeForEnforcement(enforcement, decision),
             policy: effectivePolicyName,
             code: primaryReason.code || "oap.denied",
             message,
             agentId,
             passportFile,
           });
-          const policyAllows = shouldAllowPolicyDecision(enforcement);
+          const policyAllows = shouldAllowPolicyDecision(enforcement, decision);
           log(`[APort] ${policyAllows ? enforcement.toUpperCase() : "BLOCKED"}: ${effectiveToolName} - ${sanitizeDisplayText(message)}`);
 
           if (policyAllows) {
@@ -409,13 +412,6 @@ function splitSimpleShellWords(input) {
   return words;
 }
 
-function normalizeEnforcementMode(value) {
-  const normalized = String(value || "enforce").toLowerCase().replace(/_/g, "-");
-  if (["observe", "observation"].includes(normalized)) return "observe";
-  if (["warn", "report-only", "audit-only"].includes(normalized)) return "warn";
-  return "enforce";
-}
-
 function buildRuntimeMetadata(enforcement) {
   return {
     enforcement_mode: enforcement === "observe" ? "observe" : enforcement === "warn" ? "warn" : "enforce",
@@ -424,16 +420,37 @@ function buildRuntimeMetadata(enforcement) {
   };
 }
 
-function shouldAllowPolicyDecision(enforcement) {
-  return enforcement === "warn" || enforcement === "observe";
+function sessionContextAdapterError(context) {
+  if (context?.invalid_session_duration === true) {
+    return {
+      code: "oap.invalid_session_duration",
+      message: "Session duration is malformed or outside the supported 60-86400 second range.",
+      summary: "invalid session duration",
+      failOpenMessage: "Allowing tool despite invalid session duration because failClosed is disabled.",
+    };
+  }
+  if (context?.invalid_session_type === true) {
+    return {
+      code: "oap.invalid_session_type",
+      message: "Session type is malformed or outside the supported interactive, batch, webhook, scheduled, or ephemeral values.",
+      summary: "invalid session type",
+      failOpenMessage: "Allowing tool despite invalid session type because failClosed is disabled.",
+    };
+  }
+  return null;
+}
+
+function shouldAllowPolicyDecision(enforcement, decision) {
+  return shouldAllowDeniedDecision(enforcement, decision);
 }
 
 function shouldAllowAdapterOrRuntimeFailure(enforcement, failClosed) {
   return enforcement === "observe" || !failClosed;
 }
 
-function policyOutcomeForEnforcement(enforcement) {
-  return enforcement === "observe" ? "observe" : enforcement === "warn" ? "warn" : "deny";
+function policyOutcomeForEnforcement(enforcement, decision) {
+  if (!shouldAllowDeniedDecision(enforcement, decision)) return "deny";
+  return enforcement === "observe" ? "observe" : "warn";
 }
 
 function failureOutcomeForEnforcement(enforcement) {

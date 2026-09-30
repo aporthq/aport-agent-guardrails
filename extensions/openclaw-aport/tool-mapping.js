@@ -15,6 +15,7 @@ const RELEASE_PUBLISH_ACTIONS = new Set([
   "release",
   "upload",
 ]);
+const SESSION_TYPES = new Set(["interactive", "batch", "webhook", "scheduled", "ephemeral"]);
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -65,15 +66,21 @@ function sessionOperation(toolName) {
   return "other";
 }
 
-function sessionType(toolName, src) {
-  const explicit = cleanString(src.session_type ?? src.sessionType, 32).toLowerCase();
-  if (["interactive", "batch", "webhook", "scheduled", "ephemeral"].includes(explicit)) return explicit;
+function sessionTypeEvidence(toolName, src) {
+  const rawExplicit = src.session_type ?? src.sessionType;
+  if (rawExplicit != null && String(rawExplicit).trim() !== "") {
+    const explicit = cleanString(rawExplicit, 32).toLowerCase();
+    if (SESSION_TYPES.has(explicit)) return { sessionType: explicit, invalid: false };
+    return { sessionType: "", invalid: true };
+  }
   const name = String(toolName ?? "").toLowerCase();
-  if (name.includes("cron") || name.includes("schedulewakeup") || name.includes("schedule_wakeup")) return "scheduled";
-  if (name.includes("remote") || name.includes("webhook")) return "webhook";
-  if (name.includes("batch")) return "batch";
-  if (name.includes("ephemeral")) return "ephemeral";
-  return "interactive";
+  if (name.includes("cron") || name.includes("schedulewakeup") || name.includes("schedule_wakeup")) {
+    return { sessionType: "scheduled", invalid: false };
+  }
+  if (name.includes("remote") || name.includes("webhook")) return { sessionType: "webhook", invalid: false };
+  if (name.includes("batch")) return { sessionType: "batch", invalid: false };
+  if (name.includes("ephemeral")) return { sessionType: "ephemeral", invalid: false };
+  return { sessionType: "interactive", invalid: false };
 }
 
 function requestedDuration(src) {
@@ -382,25 +389,21 @@ export function normalizeMcpContext(toolName, params) {
 export function normalizeSessionContext(toolName, params, event = {}) {
   const paramsObj = params && typeof params === "object" ? params : {};
   const eventObj = event && typeof event === "object" ? event : {};
-  const src = { ...eventObj, ...paramsObj };
-  const args = src.args && typeof src.args === "object" && !Array.isArray(src.args) ? src.args : {};
-  const input = src.input && typeof src.input === "object" ? src.input : {};
+  const args = paramsObj.args && typeof paramsObj.args === "object" && !Array.isArray(paramsObj.args) ? paramsObj.args : {};
+  const input = paramsObj.input && typeof paramsObj.input === "object" ? paramsObj.input : {};
   const nested = { ...args, ...input, ...paramsObj };
   const operation = sessionOperation(toolName);
+  const typeEvidence = sessionTypeEvidence(toolName, nested);
   const description = firstNonEmpty(
-    src.description,
-    src.task,
-    src.message,
-    src.prompt,
     nested.description,
     nested.task,
     nested.message,
     nested.prompt,
   );
-  const userId = cleanString(src.user_id ?? src.userId);
+  const userId = cleanString(eventObj.user_id ?? eventObj.userId);
   const duration = requestedDuration(nested);
-  const activeSessionCount = Number.isFinite(Number(src.active_session_count ?? src.current_active_sessions))
-    ? Number(src.active_session_count ?? src.current_active_sessions)
+  const activeSessionCount = Number.isFinite(Number(eventObj.active_session_count ?? eventObj.current_active_sessions))
+    ? Number(eventObj.active_session_count ?? eventObj.current_active_sessions)
     : null;
   const sessionId =
     operation === "create"
@@ -408,32 +411,33 @@ export function normalizeSessionContext(toolName, params, event = {}) {
       : firstNonEmpty(
           nested.child_session_id,
           nested.childSessionId,
-          src.subagent_id,
+          eventObj.subagent_id,
           nested.subagent_id,
           nested.agent_id,
           nested.agentId,
           nested.id,
           nested.session_id,
           nested.sessionId,
-          src.target_session_id,
-          src.targetSessionId,
+          eventObj.target_session_id,
+          eventObj.targetSessionId,
         );
   const out = {
     description_length: description.length,
     session_operation: operation,
-    session_type: sessionType(toolName, nested),
+    session_type: typeEvidence.sessionType || "interactive",
     session_tracking: "host_active_count",
-    hook_event: cleanString(src.hook_event_name ?? src.event, 80),
+    hook_event: cleanString(eventObj.hook_event_name ?? eventObj.event, 80),
     active_session_count: activeSessionCount,
     current_active_sessions: activeSessionCount,
-    parent_session_id: cleanString(src.session_id ?? src.sessionId, 200),
-    session_call_id: cleanString(src.toolCallId ?? src.tool_call_id ?? src.id ?? src.callId ?? src.call_id, 200),
+    parent_session_id: cleanString(eventObj.session_id ?? eventObj.sessionId, 200),
+    session_call_id: cleanString(eventObj.toolCallId ?? eventObj.tool_call_id ?? eventObj.id ?? eventObj.callId ?? eventObj.call_id, 200),
     session_id: cleanString(sessionId, 200),
-    subagent_type: cleanString(src.subagent_type ?? nested.subagent_type ?? nested.agent_type, 80),
+    subagent_type: cleanString(eventObj.subagent_type ?? nested.subagent_type ?? nested.agent_type, 80),
   };
   if (userId) out.user_id = userId;
   if (duration === "invalid") out.invalid_session_duration = true;
   else if (duration != null) out.requested_duration = duration;
+  if (typeEvidence.invalid) out.invalid_session_type = true;
   return out;
 }
 

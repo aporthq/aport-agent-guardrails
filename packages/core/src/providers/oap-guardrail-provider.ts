@@ -24,6 +24,7 @@
 
 import { Evaluator, toolToPackId } from "../core/evaluator.js";
 import { findConfigPath, loadConfig } from "../core/config.js";
+import { normalizeEnforcementMode, shouldAllowDeniedDecision } from "../core/enforcement.js";
 
 export interface OAPGuardrailProviderConfig {
   framework?: string;
@@ -129,7 +130,7 @@ function toDecision(
     reasons.push({ code: raw.allow ? "allowed" : "oap.denied" });
   }
   const originalAllow = raw.allow;
-  const effectiveAllow = enforcementMode === "enforce" ? originalAllow : true;
+  const effectiveAllow = originalAllow || shouldAllowDeniedDecision(enforcementMode, raw);
   const metadata =
     enforcementMode !== "enforce" || effectiveAllow !== originalAllow
       ? { enforcementMode, originalAllow }
@@ -143,16 +144,10 @@ function toDecision(
 }
 
 function resolveEnforcementMode(value: unknown): "enforce" | "warn" | "observe" {
-  const raw = String(
+  return normalizeEnforcementMode(
     value ??
       process.env.APORT_ENFORCEMENT_MODE ??
       process.env.APORT_ENFORCEMENT ??
-      process.env.APORT_GUARDRAIL_ENFORCEMENT ??
-      "",
-  )
-    .trim()
-    .toLowerCase();
-  if (["warn", "report-only", "report_only", "audit-only", "audit_only"].includes(raw)) return "warn";
-  if (["observe", "observation"].includes(raw)) return "observe";
-  return "enforce";
+      process.env.APORT_GUARDRAIL_ENFORCEMENT,
+  );
 }

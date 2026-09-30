@@ -5,7 +5,7 @@
 
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import type { Serialized } from "@langchain/core/load/serializable";
-import { Evaluator, findConfigPath, loadConfig, toolToPackId } from "@aporthq/aport-agent-guardrails-core";
+import { Evaluator, findConfigPath, loadConfig, normalizeEnforcementMode, shouldAllowDeniedDecision, toolToPackId } from "@aporthq/aport-agent-guardrails-core";
 
 type EnforcementMode = "enforce" | "warn" | "observe";
 
@@ -102,7 +102,7 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
       const safeMessage = sanitizeDisplayText(msg);
       const safeCode = sanitizeDisplayText(code);
       const safeToolName = sanitizeDisplayText(toolName);
-      if (this.enforcementMode !== "enforce") {
+      if (shouldAllowDeniedDecision(this.enforcementMode, decision)) {
         const label = this.enforcementMode === "observe" ? "observation" : "warning";
         console.warn(`[APort] ${label}: policy would have denied ${safeToolName}. Reason: ${safeCode}.`);
         return;
@@ -127,10 +127,7 @@ function resolveEnforcementMode(
     process.env.APORT_ENFORCEMENT_MODE ??
     process.env.APORT_ENFORCEMENT ??
     process.env.APORT_GUARDRAIL_ENFORCEMENT;
-  const normalized = String(raw || "enforce").toLowerCase().replace(/_/g, "-");
-  if (["warn", "report-only", "audit-only"].includes(normalized)) return "warn";
-  if (["observe", "observation"].includes(normalized)) return "observe";
-  return "enforce";
+  return normalizeEnforcementMode(raw);
 }
 
 function sanitizeDisplayText(value: unknown): string {

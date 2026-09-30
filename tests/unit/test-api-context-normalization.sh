@@ -63,6 +63,14 @@ printf '%s' "$out" | jq -e '.session_type == "interactive" and .description_leng
     || fail "Claude Agent(Explore) session context should include hosted session_type and bounded metadata without raw prompt: $out"
 printf '%s' "$out" | grep -q 'secret_prompt_should_not_persist' && fail "session context must not include raw prompt"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"batch work","session_type":"batch"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "batch" and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "session context must preserve explicit valid session_type: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"bad type","session_type":"root"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
+    || fail "session context must flag invalid explicit session_type: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"explore repo","duration_ms":30000}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e 'has("requested_duration") | not' > /dev/null \
     || fail "session context must not emit schema-invalid requested_duration values: $out"

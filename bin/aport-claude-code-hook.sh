@@ -104,6 +104,10 @@ map_session_context() {
         deny_or_warn "agent.session.create.v1" "oap.invalid_session_duration" \
             "Session duration is malformed or outside the supported 60-86400 second range" "hard"
     fi
+    if aport_hook_context_has_invalid_session_type "$CONTEXT_JSON"; then
+        deny_or_warn "agent.session.create.v1" "oap.invalid_session_type" \
+            "Session type is malformed or outside the supported interactive, batch, webhook, scheduled, or ephemeral values" "hard"
+    fi
     CONTEXT_JSON="$(aport_hook_strip_adapter_context_flags "$CONTEXT_JSON")"
 }
 
