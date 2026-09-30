@@ -62,33 +62,6 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
     fi
 fi
 
-emit_cursor_input_too_large() {
-    local notice
-    notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-    aport_hook_build_response "deny" "$notice" "" "cursor"
-    exit 2
-}
-
-# Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
-INPUT="$(aport_read_stdin_with_timeout)"
-
-if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
-    emit_cursor_input_too_large
-fi
-
-# Empty input means the host did not provide a tool-call payload. Fail closed.
-if [ -z "$INPUT" ]; then
-    echo '{"permission":"deny","allowed":false,"agentMessage":"🛡️ APort: empty hook input — fail-closed policy","agent_message":"🛡️ APort: empty hook input — fail-closed policy","user_message":"🛡️ APort: empty hook input — fail-closed policy","reason":"🛡️ APort: empty hook input — fail-closed policy"}'
-    exit 2
-fi
-
-# Require jq for JSON parsing
-if ! command -v jq &> /dev/null; then
-    echo '{"permission":"deny","allowed":false,"agentMessage":"APort: jq is required","agent_message":"APort: jq is required","user_message":"APort: jq is required","reason":"APort: jq is required"}'
-    exit 2
-fi
-
-# Deny helper: outputs hook response JSON and exits 2
 deny() {
     local reason="$1"
     aport_hook_build_response "deny" "$reason" "" "cursor"
@@ -108,14 +81,35 @@ deny_or_warn() {
     local message="${3:-}"
     local failure_class="${4:-hard}"
     local notice user_warning
-    if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "cursor")"
+    if aport_hook_should_allow_failure "$failure_class"; then
+        notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "cursor")"
         user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "cursor")"
         warn_allow "$notice" "$user_warning"
     fi
     notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "cursor")"
     deny "$notice"
 }
+
+emit_cursor_input_too_large() {
+    deny_or_warn "hook.input" "oap.input_too_large" "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes." "hard"
+}
+
+# Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
+INPUT="$(aport_read_stdin_with_timeout)"
+
+if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
+    emit_cursor_input_too_large
+fi
+
+# Empty input means the host did not provide a tool-call payload. Fail closed.
+if [ -z "$INPUT" ]; then
+    deny_or_warn "hook.input" "oap.empty_input" "Host did not provide a hook payload" "hard"
+fi
+
+# Require jq for JSON parsing
+if ! command -v jq &> /dev/null; then
+    deny_or_warn "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "hard"
+fi
 
 if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then
     deny_or_warn "hook.input" "oap.invalid_tool_arguments" "Hook tool arguments must be a JSON object"

@@ -28,7 +28,7 @@ unset _fw
 usage() {
     cat << 'EOF'
 Usage:
-  aport-agent-guardrails mode <framework> [--mode=local|api] [--enforcement=enforce|warn]
+  aport-agent-guardrails mode <framework> [--mode=local|api] [--enforcement=enforce|warn|observe]
 
 Examples:
   aport-agent-guardrails mode claude-code --enforcement=warn
@@ -455,7 +455,7 @@ selected_api_url="${APORT_GUARDRAIL_API_URL_CLI:-${APORT_API_URL:-${existing_con
 selected_api_key="${APORT_API_KEY:-$existing_config_api_key}"
 selected_enforcement_input="${APORT_ENFORCEMENT_CLI:-${APORT_ENFORCEMENT_MODE:-${APORT_ENFORCEMENT:-${APORT_GUARDRAIL_ENFORCEMENT:-${existing_config_enforcement:-enforce}}}}}"
 if ! selected_enforcement="$(normalize_aport_enforcement "$selected_enforcement_input")"; then
-    log_error "Unsupported --enforcement value: $selected_enforcement_input (expected enforce|warn)"
+    log_error "Unsupported --enforcement value: $selected_enforcement_input (expected enforce|warn|observe)"
     exit 1
 fi
 

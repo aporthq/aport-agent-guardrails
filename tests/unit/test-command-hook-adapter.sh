@@ -861,6 +861,41 @@ echo "  ✅ Stale decision files are cleared before evaluator execution"
 
 cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
 APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=observe
+EOF
+run_hook "Codex observe mode allows unknown tools with warning" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))
+      and (.systemMessage | contains("mode codex --enforcement=enforce"))'
+
+run_hook "Codex observe mode allows hard parser failures with warning" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status; unauthorized-command"}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.command_chain_unsupported"))'
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_AGENT_ID=ap_observe_unreachable_test
+APORT_ENFORCEMENT=observe
+EOF
+run_hook "Codex observe mode allows hosted evaluator failures with warning" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and ((.systemMessage | contains("oap.evaluation_error")) or (.systemMessage | contains("oap.evaluator_failed")))'
+
+cat > "$TEST_DIR/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
 EOF
 
 cat > "$TEST_DIR/aport/passport.json" << 'EOF'

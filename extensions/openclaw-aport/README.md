@@ -132,7 +132,7 @@ The plugin keeps the existing OpenClaw-specific tool mappings. Common examples:
 
 Unmapped tools are blocked by default. Set `allowUnmappedTools: true` only when you intentionally want the previous compatibility behavior for trusted custom skills and unmapped tools.
 
-`enforcementMode: warn` is available for report-only rollout. It records the original deny decision but lets OpenClaw continue; default `enforce` blocks denied actions.
+`enforcementMode: warn` is available for conservative report-only rollout. It records completed policy denials but lets OpenClaw continue; unmapped tools, decision-integrity failures, and evaluator errors still block when `failClosed` is true. Use `enforcementMode: observe` only for adoption-first rollout: it allows policy denials and APort mapping/runtime/API failures with warnings while you tune passports and mappings. Default `enforce` blocks denied actions.
 
 ## Exec behavior
 

@@ -741,7 +741,37 @@ if grep -q "apk_cursor_secret" "$WARN_OUT"; then
     cat "$WARN_OUT" >&2
     exit 1
 fi
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=observe
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+APORT_API_KEY=apk_cursor_secret_should_redact
+EOF
+run_hook "Mode=api observe with unreachable API: allow with warning" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 0 '"permission":"allow"'
+OBSERVE_OUT="$LAST_HOOK_OUTPUT"
+jq -e '
+  .permission == "allow"
+  and (.user_message | contains("observe mode allowed"))
+  and (.user_message | contains("oap.evaluation_error"))
+' "$OBSERVE_OUT" > /dev/null || {
+    echo "FAIL: observe mode should allow unreachable API with warning" >&2
+    cat "$OBSERVE_OUT" >&2
+    exit 1
+}
+if grep -q "apk_cursor_secret" "$OBSERVE_OUT"; then
+    echo "FAIL: observe warning output must not leak API keys" >&2
+    cat "$OBSERVE_OUT" >&2
+    exit 1
+fi
 
+cat > "$MODE_FILE" << 'EOF'
+APORT_GUARDRAIL_MODE=api
+APORT_API_URL=http://127.0.0.1:9
+APORT_ENFORCEMENT=warn
+APORT_AGENT_ID=ap_1234567890abcdef1234567890abcdef
+EOF
 STALE_DECISION_BASE="$TEST_DIR/aport/stale-cursor-decision.json"
 STALE_DECISION_OUT="$TEST_DIR/cursor-stale-decision-out.json"
 STALE_DECISION_ERR="$TEST_DIR/cursor-stale-decision-err.txt"

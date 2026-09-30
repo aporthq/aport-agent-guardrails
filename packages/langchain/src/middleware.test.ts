@@ -117,6 +117,32 @@ describe('APortGuardrailCallback', () => {
     });
   });
 
+  it('does not throw on deny when explicit observe mode is configured', async () => {
+    (Evaluator as jest.Mock).mockImplementation(() => ({
+      verify: jest.fn().mockResolvedValue({
+        allow: false,
+        reasons: [{ code: 'oap.command_not_allowed', message: 'Tool not allowed by policy' }],
+      }),
+    }));
+    const callback = new APortGuardrailCallback({ enforcementMode: 'observe' });
+    await expect(
+      callback.handleToolStart(
+        mockTool as any,
+        '{"command":"rm -rf /"}',
+        'run-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'tool-call-1'
+      )
+    ).resolves.toBeUndefined();
+    expect(Evaluator).toHaveBeenCalledWith(null, 'langchain', {
+      enforcementMode: 'observe',
+      harness: 'langchain',
+    });
+  });
+
   it('uses APORT_GUARDRAIL_ENFORCEMENT for warn mode when no direct override is set', async () => {
     const originalEnforcementMode = process.env.APORT_ENFORCEMENT_MODE;
     const originalEnforcement = process.env.APORT_ENFORCEMENT;

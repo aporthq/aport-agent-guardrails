@@ -726,6 +726,20 @@ describe("plugin hook contract", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("allows denied tools when observe mode is configured", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "observe",
+    });
+
+    const result = await beforeToolCall({ toolName: "exec.run", params: { command: "sudo ls" } });
+    assert.deepStrictEqual(result, {});
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("blocks unmapped tools by default and allows only with explicit allowUnmappedTools", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const strictBeforeToolCall = await registerPlugin({ mode: "local", passportFile: passportPath });
@@ -773,6 +787,20 @@ describe("plugin hook contract", () => {
     const result = await beforeToolCall({ toolName: "new_host_tool", params: {} });
     assert.strictEqual(result.block, true);
     assert.match(result.blockReason, /oap\.unknown_tool/);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("allows unmapped tools in observe mode", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "observe",
+    });
+
+    const result = await beforeToolCall({ toolName: "new_host_tool", params: {} });
+    assert.deepStrictEqual(result, {});
 
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -848,6 +876,38 @@ describe("plugin hook contract", () => {
         enforced_by: "@aporthq/openclaw-aport",
         harness: "openclaw",
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("sends observe enforcement metadata during API verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let seenBody = null;
+    globalThis.fetch = async (_url, opts) => {
+      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      const decision = withContentHash({
+        allow: true,
+        decision_id: "dec-observe-runtime",
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "observe",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(seenBody.runtime.enforcement_mode, "observe");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -963,6 +1023,35 @@ describe("plugin hook contract", () => {
     }
   });
 
+  it("allows API decision integrity failures in observe mode", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      async json() {
+        return {
+          decision: {
+            allow: true,
+            decision_id: "dec-bad-integrity-observe",
+            reasons: [{ code: "oap.allowed", message: "ok" }],
+            content_hash: "sha256:bad",
+          },
+        };
+      },
+    });
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "observe",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.deepStrictEqual(result, {});
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("keeps API evaluator errors blocking in warn mode", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => {
@@ -978,6 +1067,25 @@ describe("plugin hook contract", () => {
       const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
       assert.strictEqual(result.block, true);
       assert.match(result.blockReason, /oap\.policy_error/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("allows API evaluator errors in observe mode", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("network down");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "observe",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.deepStrictEqual(result, {});
     } finally {
       globalThis.fetch = originalFetch;
     }

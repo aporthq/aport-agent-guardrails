@@ -49,10 +49,11 @@
         "type": "string",
         "enum": [
           "enforce",
-          "warn"
+          "warn",
+          "observe"
         ],
         "default": "enforce",
-        "description": "enforce blocks denied actions; warn records policy decisions but allows execution."
+        "description": "enforce blocks denied actions; warn records completed policy denials but allows execution; observe allows policy denials plus APort mapping/runtime/API failures with warnings for adoption-only rollout."
       },
       "allowUnmappedTools": {
         "type": "boolean",

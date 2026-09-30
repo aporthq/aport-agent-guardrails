@@ -110,8 +110,11 @@ aport_hook_enforcement_mode() {
     local mode="${APORT_ENFORCEMENT_MODE:-${APORT_ENFORCEMENT:-${APORT_GUARDRAIL_ENFORCEMENT:-enforce}}}"
     mode="$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]' | tr '_' '-')"
     case "$mode" in
-        warn | report-only | audit-only | observe | observation)
+        warn | report-only | audit-only)
             printf 'warn'
+            ;;
+        observe | observation)
+            printf 'observe'
             ;;
         *)
             printf 'enforce'
@@ -121,6 +124,18 @@ aport_hook_enforcement_mode() {
 
 aport_hook_is_warn_mode() {
     [ "$(aport_hook_enforcement_mode)" = "warn" ]
+}
+
+aport_hook_is_observe_mode() {
+    [ "$(aport_hook_enforcement_mode)" = "observe" ]
+}
+
+aport_hook_should_allow_failure() {
+    local failure_class="${1:-hard}"
+    if aport_hook_is_observe_mode; then
+        return 0
+    fi
+    [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode
 }
 
 aport_hook_is_hard_failure_reason() {
@@ -392,7 +407,13 @@ aport_format_guardrail_notice() {
     reason_message="$(aport_sanitize_display_text "$reason_message")"
     reference="$(aport_sanitize_display_text "$reference")"
 
-    if [ "$outcome" = "warn" ]; then
+    if [ "$outcome" = "observe" ]; then
+        if [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
+            printf 'APort observation: observe mode allowed a tool call that APort did not authorize. Policy: %s. Reason: %s. Detail: %s. %s' "$policy" "$reason_code" "$reason_message" "$warn_refs"
+        else
+            printf 'APort observation: observe mode allowed a tool call that APort did not authorize. Policy: %s. Reason: %s. %s' "$policy" "$reason_code" "$warn_refs"
+        fi
+    elif [ "$outcome" = "warn" ]; then
         if [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
             printf 'APort warning: report-only mode allowed a tool call that policy would have denied. Policy: %s. Reason: %s. Detail: %s. %s' "$policy" "$reason_code" "$reason_message" "$warn_refs"
         else
@@ -483,7 +504,13 @@ aport_hook_format_user_warning() {
     reason_message="$(aport_sanitize_display_text "$reason_message")"
     warn_refs="$(aport_hook_warn_reference_text "$framework" $'\n')"
 
-    if [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
+    if aport_hook_is_observe_mode; then
+        if [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
+            printf '⚠️  APort Observation: observe mode allowed an action that APort did not authorize.\nPolicy: %s | Reason: %s\nDetail: %s\n%s' "$policy" "$reason_code" "$reason_message" "$warn_refs"
+        else
+            printf '⚠️  APort Observation: observe mode allowed an action that APort did not authorize.\nPolicy: %s | Reason: %s\n%s' "$policy" "$reason_code" "$warn_refs"
+        fi
+    elif [ -n "$reason_message" ] && [ "$reason_message" != "$reason_code" ]; then
         printf '⚠️  APort Warning: report-only mode allowed an action that policy would normally block.\nPolicy: %s | Reason: %s\nDetail: %s\n%s' "$policy" "$reason_code" "$reason_message" "$warn_refs"
     else
         printf '⚠️  APort Warning: report-only mode allowed an action that policy would normally block.\nPolicy: %s | Reason: %s\n%s' "$policy" "$reason_code" "$warn_refs"

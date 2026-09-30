@@ -115,8 +115,8 @@ emit_response() {
         exit 0
     fi
 
-    if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "$FRAMEWORK")"
+    if aport_hook_should_allow_failure "$failure_class"; then
+        notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "$FRAMEWORK")"
         user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "$FRAMEWORK")"
         # Some hosts do not surface allow-response warnings consistently. Keep
         # stderr human-readable and sanitized while returning allow semantics.
