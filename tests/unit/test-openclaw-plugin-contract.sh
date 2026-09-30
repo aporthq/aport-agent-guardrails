@@ -32,6 +32,7 @@ for (const file of [
   "api-client.js",
   "audit.js",
   "decision.js",
+  "enforcement.js",
   "index.js",
   "local-evaluator.js",
   "package.json",
