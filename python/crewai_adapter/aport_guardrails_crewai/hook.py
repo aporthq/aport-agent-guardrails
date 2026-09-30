@@ -3,7 +3,13 @@
 import os
 from typing import Any
 
-from aport_guardrails.core import Evaluator, build_tool_context, tool_to_pack_id
+from aport_guardrails.core import (
+    Evaluator,
+    build_tool_context,
+    normalize_enforcement_mode,
+    should_allow_denied_decision,
+    tool_to_pack_id,
+)
 from aport_guardrails.core.config import find_config_path, load_config
 from aport_guardrails.core.display import format_policy_warning
 
@@ -24,8 +30,7 @@ def _get_crewai_evaluator() -> Evaluator:
 
 
 def _normalize_enforcement_mode(value: Any) -> str:
-    normalized = str(value or "enforce").lower().replace("_", "-")
-    return "warn" if normalized in {"warn", "report-only", "audit-only", "observe", "observation"} else "enforce"
+    return normalize_enforcement_mode(value)
 
 
 def _get_enforcement_mode() -> str:
@@ -59,7 +64,8 @@ def aport_guardrail_before_tool_call(context: Any) -> bool | None:
         tool_ctx,
     )
     if not decision.get("allow", False):
-        if _get_enforcement_mode() == "warn":
+        enforcement_mode = _get_enforcement_mode()
+        if should_allow_denied_decision(enforcement_mode, decision):
             reasons = decision.get("reasons") or [{}]
             reason = reasons[0] if reasons else {}
             print(
@@ -69,6 +75,7 @@ def aport_guardrail_before_tool_call(context: Any) -> bool | None:
                     reason_message=reason.get("message", ""),
                     tool_name=context.tool_name,
                     framework="crewai",
+                    enforcement_mode=enforcement_mode,
                 )
             )
             return None

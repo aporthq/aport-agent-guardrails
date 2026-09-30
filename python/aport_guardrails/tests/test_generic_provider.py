@@ -56,6 +56,24 @@ class TestToResult:
         result = _to_result(decision, "test.v1")
         assert result.allow is False
 
+    def test_warn_mode_does_not_allow_api_errors(self):
+        decision = {"allow": False, "reasons": [{"code": "oap.api_error", "message": "down"}]}
+        result = _to_result(decision, "test.v1", enforcement_mode="warn")
+        assert result.allow is False
+        assert result.metadata == {"enforcement_mode": "warn", "original_allow": False}
+
+    def test_warn_mode_does_not_allow_invalid_session_duration(self):
+        decision = {"allow": False, "reasons": [{"code": "oap.invalid_session_duration", "message": "too long"}]}
+        result = _to_result(decision, "agent.session.create.v1", enforcement_mode="warn")
+        assert result.allow is False
+        assert result.metadata == {"enforcement_mode": "warn", "original_allow": False}
+
+    def test_observe_mode_allows_api_errors(self):
+        decision = {"allow": False, "reasons": [{"code": "oap.api_error", "message": "down"}]}
+        result = _to_result(decision, "test.v1", enforcement_mode="observe")
+        assert result.allow is True
+        assert result.metadata == {"enforcement_mode": "observe", "original_allow": False}
+
 
 class TestOAPGuardrailProvider:
     @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)

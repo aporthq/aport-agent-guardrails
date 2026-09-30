@@ -405,6 +405,7 @@ APORT_ENFORCEMENT=observe
 EOF
 echo "  Test: Unknown tool in observe mode -> allow with warning..."
 OUT4O="$TEST_DIR/claude-observe-unknown.txt"
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 set +e
 echo '{"tool_name":"UnknownTool","tool_input":{}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4O" 2> /dev/null
 EXIT4O=$?
@@ -420,6 +421,11 @@ jq -e '
 ' "$OUT4O" > /dev/null || {
     echo "FAIL: observe mode should allow unknown tools with warning" >&2
     cat "$OUT4O" >&2
+    exit 1
+}
+jq -e '.guardrail_tool == "hook.tool.map" and .decision.allow == false and .decision.reasons[0].code == "oap.unknown_tool"' "$TEST_DIR/aport/session-decisions.jsonl" > /dev/null || {
+    echo "FAIL: Claude observe-mode adapter failures should be recorded in session-decisions.jsonl" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2 || true
     exit 1
 }
 cat > "$MODE_FILE" << 'EOF'

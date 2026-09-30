@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-30
+
+### Added
+- **Observe enforcement mode:** `observe` is now available across setup/mode flows, Claude Code, Cursor, Codex, Gemini CLI, Goose, LangChain, CrewAI, and OpenClaw. It records and surfaces APort policy/runtime/API failures without blocking the tool call, giving teams an adoption-first rollout path before `warn` or `enforce`.
+- **Codex provider tool-surface drift gate:** the Codex tool check now keeps an upstream provider cache and runs from the local pre-push gate so newly exposed provider tools fail deterministically before a PR merges.
+
+### Changed
+- **Hosted verification metadata:** hosted requests consistently include sanitized runtime metadata (`enforcement_mode`, `enforced_by`, `harness`) so APort can distinguish the signed policy decision from the harness runtime disposition.
+- **Pre-push scope:** the local pre-push check now focuses on guardrail drift and targeted safety tests instead of duplicating the full CI suite, keeping developer pushes fast while preserving the release-blocking checks.
+
+### Fixed
+- **Hosted session tools:** session-create style tool calls now send the required hosted verifier context instead of failing with schema errors such as missing `user_id` or `session_type`.
+- **Framework parity:** Python adapters and OpenClaw now preserve warn/observe enforcement semantics without downgrading hard guardrail failures such as API/runtime errors or invalid session durations.
+- **Passport/config reuse:** setup, mode, and reset flows share the same passport reuse and config-location helpers, preserving hosted passport IDs/API keys and avoiding divergent framework behavior.
+
 ## [1.0.34] - 2026-09-24
 
 ### Added

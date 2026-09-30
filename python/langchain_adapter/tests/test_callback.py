@@ -84,6 +84,42 @@ class TestAPortCallback:
         assert context["params"] == {"command": "rm -rf /"}
 
     @pytest.mark.asyncio
+    async def test_warn_mode_keeps_api_errors_blocking(self):
+        """Warn mode must not fail open on evaluator/API failures."""
+        callback = APortCallback(config_path="/nonexistent", enforcement_mode="warn")
+        callback.evaluator = AsyncMock()
+        callback.evaluator.verify = AsyncMock(
+            return_value={
+                "allow": False,
+                "reasons": [{"code": "oap.api_error", "message": "API unavailable"}],
+            }
+        )
+
+        with pytest.raises(GuardrailViolation) as exc_info:
+            await callback.on_tool_start({"name": "run_command"}, None, inputs={"command": "ls"})
+
+        assert exc_info.value.code == "oap.api_error"
+
+    @pytest.mark.asyncio
+    async def test_observe_mode_allows_api_errors(self, capsys):
+        """Observe mode allows runtime/API failures but reports observation metadata."""
+        callback = APortCallback(config_path="/nonexistent", enforcement_mode="observe")
+        assert callback.evaluator._runtime_enforcement_mode == "observe"
+        callback.evaluator = AsyncMock()
+        callback.evaluator.verify = AsyncMock(
+            return_value={
+                "allow": False,
+                "reasons": [{"code": "oap.api_error", "message": "API unavailable"}],
+            }
+        )
+
+        await callback.on_tool_start({"name": "run_command"}, None, inputs={"command": "ls"})
+
+        captured = capsys.readouterr()
+        assert "[APort] observation:" in captured.out
+        assert "oap.api_error" in captured.out
+
+    @pytest.mark.asyncio
     async def test_guardrail_enforcement_env_sets_warn_runtime_metadata(self, monkeypatch):
         """APORT_GUARDRAIL_ENFORCEMENT should drive both LangChain behavior and hosted metadata."""
         monkeypatch.delenv("APORT_ENFORCEMENT", raising=False)
