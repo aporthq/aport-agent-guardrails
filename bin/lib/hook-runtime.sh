@@ -411,11 +411,18 @@ aport_hook_context_has_invalid_session_type() {
     printf '%s' "$context_json" | jq -e '.invalid_session_type == true' > /dev/null 2>&1
 }
 
+aport_hook_context_has_invalid_session_count() {
+    local default_context='{}'
+    local context_json="${1:-$default_context}"
+    command -v jq > /dev/null 2>&1 || return 1
+    printf '%s' "$context_json" | jq -e '.invalid_session_count == true' > /dev/null 2>&1
+}
+
 aport_hook_strip_adapter_context_flags() {
     local default_context='{}'
     local context_json="${1:-$default_context}"
     if command -v jq > /dev/null 2>&1; then
-        printf '%s' "$context_json" | jq -c 'del(.invalid_session_duration, .invalid_session_type)' 2> /dev/null || printf '%s' "$context_json"
+        printf '%s' "$context_json" | jq -c 'del(.invalid_session_duration, .invalid_session_type, .invalid_session_count)' 2> /dev/null || printf '%s' "$context_json"
         return 0
     fi
     printf '%s' "$context_json"
@@ -439,7 +446,6 @@ aport_hook_record_synthetic_failure_decision() {
 
     decision_dir="$(dirname "$decision_file")"
     mkdir -p "$decision_dir" 2> /dev/null || return 0
-    [ ! -e "$decision_file" ] || return 0
     [ ! -L "$decision_file" ] || return 0
     tmp_decision="$(mktemp "${decision_dir}/synthetic-decision.XXXXXX" 2> /dev/null || mktemp)" || return 0
 
@@ -476,14 +482,7 @@ aport_hook_record_synthetic_failure_decision() {
         return 0
     }
     chmod 600 "$tmp_decision" 2> /dev/null || true
-    if ! ln "$tmp_decision" "$decision_file" 2> /dev/null; then
-        rm -f "$tmp_decision" 2> /dev/null || true
-        return 0
-    fi
-    rm -f "$tmp_decision" 2> /dev/null || true
-    chmod 600 "$decision_file" 2> /dev/null || true
-
-    aport_append_local_session_decision "$decision_file" "$framework" "$hook_payload" "$original_tool" "$guardrail_tool" "$context_json" || true
+    aport_append_local_session_decision "$tmp_decision" "$framework" "$hook_payload" "$original_tool" "$guardrail_tool" "$context_json" || true
 
     audit_ref="${AUDIT_LOG:-${APORT_AUDIT_LOG:-}}"
     if [ -n "$audit_ref" ]; then
@@ -494,6 +493,7 @@ aport_hook_record_synthetic_failure_decision() {
         printf '%s\n' "$audit_line" >> "$audit_ref" 2> /dev/null || true
         chmod 600 "$audit_ref" 2> /dev/null || true
     fi
+    rm -f "$tmp_decision" 2> /dev/null || true
 }
 
 aport_format_guardrail_notice() {

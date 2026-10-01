@@ -97,7 +97,7 @@ export default definePluginEntry({
           policyName,
           toolName,
           params,
-          buildPolicyContextHints(policyName, event, hookContext),
+          buildPolicyContextHints(policyName, event, hookContext, agentId),
         );
 
         const delegated = parseGuardrailInvocation(
@@ -112,7 +112,7 @@ export default definePluginEntry({
               innerPolicy,
               delegated.innerToolName,
               delegated.innerContext,
-              buildPolicyContextHints(innerPolicy, { params: delegated.innerContext }, hookContext),
+              buildPolicyContextHints(innerPolicy, { params: delegated.innerContext }, hookContext, agentId),
             );
           }
         }
@@ -286,16 +286,21 @@ function ensureIdempotencyKey(context, event = {}, hookContext = {}) {
   };
 }
 
-function buildPolicyContextHints(policyName, event = {}, hookContext = {}) {
+function buildPolicyContextHints(policyName, event = {}, hookContext = {}, configuredAgentId = "") {
   if (policyName !== "agent.session.create.v1") return event;
+  const eventObj = event && typeof event === "object" ? event : {};
+  const hookContextObj = hookContext && typeof hookContext === "object" ? hookContext : {};
+  const hints = {
+    ...eventObj,
+    ...hookContextObj,
+  };
   return {
-    ...(event && typeof event === "object" ? event : {}),
-    ...(hookContext && typeof hookContext === "object" ? hookContext : {}),
-    user_id: resolveSessionUserId(event),
+    ...hints,
+    user_id: resolveSessionUserId(hints, configuredAgentId),
   };
 }
 
-function resolveSessionUserId(event = {}) {
+function resolveSessionUserId(event = {}, configuredAgentId = "") {
   const configUserId =
     event && typeof event === "object"
       ? event.user_id ?? event.userId ?? event.owner_id ?? event.ownerId
@@ -306,6 +311,7 @@ function resolveSessionUserId(event = {}) {
     process.env.APORT_TARGET_USER,
     process.env.APORT_OWNER_EMAIL,
     process.env.APORT_EMAIL,
+    configuredAgentId,
     process.env.APORT_AGENT_ID,
     process.env.USER,
     process.env.LOGNAME,

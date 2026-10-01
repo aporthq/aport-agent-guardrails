@@ -514,7 +514,7 @@ run_hook "preToolUse Task: allow" \
 # --- preToolUse: Agent / WebSearch (Claude Code parity) ---
 run_hook "preToolUse Agent malformed active count: deny" \
     '{"tool_name":"Agent","active_session_count":"many","tool_input":{"description":"explore repo"}}' 2 '"permission":"deny"'
-grep -q 'oap.missing_required_context' "$LAST_HOOK_OUTPUT" || {
+grep -q 'oap.invalid_session_count' "$LAST_HOOK_OUTPUT" || {
     echo "FAIL: expected Cursor Agent malformed active count to fail closed" >&2
     cat "$LAST_HOOK_OUTPUT" >&2
     exit 1

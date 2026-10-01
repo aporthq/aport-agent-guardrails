@@ -108,6 +108,10 @@ map_session_context() {
         deny_or_warn "agent.session.create.v1" "oap.invalid_session_type" \
             "Session type is malformed or outside the supported interactive, batch, webhook, scheduled, or ephemeral values" "hard"
     fi
+    if aport_hook_context_has_invalid_session_count "$CONTEXT_JSON"; then
+        deny_or_warn "agent.session.create.v1" "oap.invalid_session_count" \
+            "Active session count is malformed; expected a non-negative integer from trusted host metadata" "hard"
+    fi
     CONTEXT_JSON="$(aport_hook_strip_adapter_context_flags "$CONTEXT_JSON")"
 }
 
