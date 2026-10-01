@@ -903,6 +903,41 @@ if [[ "$UNKNOWN_TOOL_DECISIONS" -ne 2 ]]; then
     exit 1
 fi
 
+PARALLEL_OBSERVE_DIR="$TEST_DIR/parallel-observe"
+PARALLEL_OBSERVE_COUNT=20
+mkdir -p "$PARALLEL_OBSERVE_DIR"
+rm -f "$TEST_DIR/aport/session-decisions.jsonl"
+parallel_pids=()
+for i in $(seq 1 "$PARALLEL_OBSERVE_COUNT"); do
+    (
+        payload="$(jq -nc --arg tool "parallel_future_provider_tool_$i" '{hook_event_name:"PreToolUse",tool_name:$tool,tool_input:{unknown:true}}')"
+        printf '%s' "$payload" | "$CODEX" > "$PARALLEL_OBSERVE_DIR/out-$i.json" 2> "$PARALLEL_OBSERVE_DIR/err-$i.txt"
+    ) &
+    parallel_pids+=("$!")
+done
+for pid in "${parallel_pids[@]}"; do
+    if ! wait "$pid"; then
+        echo "FAIL: parallel observe-mode unknown tool hook exited non-zero" >&2
+        find "$PARALLEL_OBSERVE_DIR" -type f -maxdepth 1 -print -exec sh -c 'echo "---- $1"; cat "$1"' _ {} \; >&2 || true
+        exit 1
+    fi
+done
+for i in $(seq 1 "$PARALLEL_OBSERVE_COUNT"); do
+    jq -e '.systemMessage and .hookSpecificOutput.additionalContext and (.systemMessage | contains("oap.unknown_tool"))' "$PARALLEL_OBSERVE_DIR/out-$i.json" > /dev/null || {
+        echo "FAIL: parallel observe-mode response $i should allow with an unknown-tool warning" >&2
+        cat "$PARALLEL_OBSERVE_DIR/out-$i.json" >&2 || true
+        cat "$PARALLEL_OBSERVE_DIR/err-$i.txt" >&2 || true
+        exit 1
+    }
+done
+PARALLEL_UNKNOWN_DECISIONS="$(jq -s '[.[] | select(.guardrail_tool == "hook.tool.map" and .decision.allow == false and .decision.reasons[0].code == "oap.unknown_tool")] | length' "$TEST_DIR/aport/session-decisions.jsonl")"
+if [[ "$PARALLEL_UNKNOWN_DECISIONS" -ne "$PARALLEL_OBSERVE_COUNT" ]]; then
+    echo "FAIL: parallel observe-mode adapter failures should record $PARALLEL_OBSERVE_COUNT occurrences, found $PARALLEL_UNKNOWN_DECISIONS" >&2
+    cat "$TEST_DIR/aport/session-decisions.jsonl" >&2 || true
+    exit 1
+fi
+echo "  ✅ Codex observe mode records concurrent unknown tool failures"
+
 SYNTHETIC_SYMLINK_VICTIM="$TEST_DIR/aport/synthetic-victim.txt"
 printf 'do-not-overwrite' > "$SYNTHETIC_SYMLINK_VICTIM"
 rm -f "$TEST_DIR/aport/decision.json"

@@ -447,10 +447,6 @@ aport_hook_record_synthetic_failure_decision() {
     decision_dir="$(dirname "$decision_file")"
     mkdir -p "$decision_dir" 2> /dev/null || return 0
     [ ! -L "$decision_file" ] || return 0
-    if [ -e "$decision_file" ]; then
-        [ -f "$decision_file" ] || return 0
-        rm -f "$decision_file" 2> /dev/null || return 0
-    fi
     tmp_decision="$(mktemp "${decision_dir}/synthetic-decision.XXXXXX" 2> /dev/null || mktemp)" || return 0
 
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -486,14 +482,7 @@ aport_hook_record_synthetic_failure_decision() {
         return 0
     }
     chmod 600 "$tmp_decision" 2> /dev/null || true
-    if ! ln "$tmp_decision" "$decision_file" 2> /dev/null; then
-        rm -f "$tmp_decision" 2> /dev/null || true
-        return 0
-    fi
-    rm -f "$tmp_decision" 2> /dev/null || true
-    chmod 600 "$decision_file" 2> /dev/null || true
-
-    aport_append_local_session_decision "$decision_file" "$framework" "$hook_payload" "$original_tool" "$guardrail_tool" "$context_json" || true
+    aport_append_local_session_decision "$tmp_decision" "$framework" "$hook_payload" "$original_tool" "$guardrail_tool" "$context_json" || true
 
     audit_ref="${AUDIT_LOG:-${APORT_AUDIT_LOG:-}}"
     if [ -n "$audit_ref" ]; then
@@ -504,6 +493,7 @@ aport_hook_record_synthetic_failure_decision() {
         printf '%s\n' "$audit_line" >> "$audit_ref" 2> /dev/null || true
         chmod 600 "$audit_ref" 2> /dev/null || true
     fi
+    rm -f "$tmp_decision" 2> /dev/null || true
 }
 
 aport_format_guardrail_notice() {
