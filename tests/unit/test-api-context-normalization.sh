@@ -52,6 +52,16 @@ printf '%s' "$out" | jq -e '.user_id == "ap_hosted_session_test" and .session_ty
     || fail "session API context must derive hosted user_id and default session_type: $out"
 unset APORT_AGENT_ID
 
+stale_passport="$TEST_DIR/stale-local-passport.json"
+printf '{"owner_id":"stale-local-owner","agent_id":"ap_stale_local"}\n' > "$stale_passport"
+APORT_GUARDRAIL_MODE="api"
+APORT_AGENT_ID="ap_hosted_session_test"
+PASSPORT_FILE="$stale_passport"
+out="$(normalize_api_context agent.session.create.v1 '{"description_length":12,"session_operation":"create"}')"
+printf '%s' "$out" | jq -e '.user_id == "ap_hosted_session_test" and .session_type == "interactive"' > /dev/null \
+    || fail "hosted session API context must prefer hosted agent id over stale local passport: $out"
+unset APORT_GUARDRAIL_MODE APORT_AGENT_ID PASSPORT_FILE
+
 APORT_USER_ID="user-from-env"
 out="$(normalize_api_context agent.session.create.v1 '{"user_id":"payload-user","session_type":"experimental"}')"
 printf '%s' "$out" | jq -e '.user_id == "payload-user" and .session_type == "experimental"' > /dev/null \

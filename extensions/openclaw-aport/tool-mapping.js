@@ -86,8 +86,8 @@ function sessionOperation(toolName) {
   return "other";
 }
 
-function sessionTypeEvidence(toolName, src) {
-  const supplied = providedValues(src, ["session_type", "sessionType"]);
+function sessionTypeEvidence(toolName, ...sources) {
+  const supplied = providedValuesFromSources(sources, ["session_type", "sessionType"]);
   if (supplied.some((value) => typeof value !== "string")) {
     return { sessionType: "", invalid: true };
   }
@@ -114,6 +114,10 @@ function providedValues(src, keys) {
     .map((key) => src[key]);
 }
 
+function providedValuesFromSources(sources, keys) {
+  return sources.flatMap((src) => providedValues(src && typeof src === "object" ? src : {}, keys));
+}
+
 function parseDecimalScalar(value) {
   if (typeof value === "number") {
     return Number.isFinite(value) && value > 0 ? value : null;
@@ -127,16 +131,29 @@ function parseDecimalScalar(value) {
   return null;
 }
 
-function requestedDuration(src) {
+function parsePositiveIntegerScalar(value) {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^(?:0|[1-9]\d*)$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function requestedDuration(...sources) {
   const candidates = [
-    ...providedValues(src, DURATION_SECOND_KEYS).map((value) => ({ unit: "s", value })),
-    ...providedValues(src, DURATION_MILLISECOND_KEYS).map((value) => ({ unit: "ms", value })),
+    ...providedValuesFromSources(sources, DURATION_SECOND_KEYS).map((value) => ({ unit: "s", value })),
+    ...providedValuesFromSources(sources, DURATION_MILLISECOND_KEYS).map((value) => ({ unit: "ms", value })),
   ];
   if (candidates.length === 0) return null;
 
   const normalized = [];
   for (const candidate of candidates) {
-    const parsed = parseDecimalScalar(candidate.value);
+    const parsed = candidate.unit === "ms" ? parsePositiveIntegerScalar(candidate.value) : parseDecimalScalar(candidate.value);
     if (parsed == null) return "invalid";
     normalized.push(candidate.unit === "ms" ? Math.ceil(parsed / 1000) : Math.ceil(parsed));
   }
@@ -454,7 +471,7 @@ export function normalizeSessionContext(toolName, params, event = {}) {
   const input = paramsObj.input && typeof paramsObj.input === "object" ? paramsObj.input : {};
   const nested = { ...args, ...input, ...paramsObj };
   const operation = sessionOperation(toolName);
-  const typeEvidence = sessionTypeEvidence(toolName, nested);
+  const typeEvidence = sessionTypeEvidence(toolName, args, input, paramsObj);
   const description = firstNonEmpty(
     nested.description,
     nested.task,
@@ -462,7 +479,7 @@ export function normalizeSessionContext(toolName, params, event = {}) {
     nested.prompt,
   );
   const userId = cleanString(eventObj.user_id ?? eventObj.userId);
-  const duration = requestedDuration(nested);
+  const duration = requestedDuration(args, input, paramsObj);
   const activeSessionCount = activeSessionCountEvidence(eventObj);
   const sessionId =
     operation === "create"
