@@ -35,8 +35,6 @@ const DURATION_MILLISECOND_KEYS = [
   "sessionDurationMs",
   "duration_ms",
   "durationMs",
-  "timeout_ms",
-  "timeoutMs",
 ];
 
 function firstNonEmpty(...values) {
@@ -90,7 +88,10 @@ function sessionOperation(toolName) {
 
 function sessionTypeEvidence(toolName, src) {
   const rawExplicit = src.session_type ?? src.sessionType;
-  if (rawExplicit != null && String(rawExplicit).trim() !== "") {
+  if (rawExplicit != null && typeof rawExplicit !== "string") {
+    return { sessionType: "", invalid: true };
+  }
+  if (rawExplicit != null && rawExplicit.trim() !== "") {
     const explicit = cleanString(rawExplicit, 32).toLowerCase();
     if (SESSION_TYPES.has(explicit)) return { sessionType: explicit, invalid: false };
     return { sessionType: "", invalid: true };
@@ -145,18 +146,30 @@ function requestedDuration(src) {
   return seconds;
 }
 
+function parseNonNegativeInteger(value) {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string" && /^(?:0|[1-9]\d*)$/.test(value.trim())) {
+    return Number(value.trim());
+  }
+  return null;
+}
+
 function activeSessionCountEvidence(src) {
-  const hasActive = Object.prototype.hasOwnProperty.call(src, "active_session_count");
-  const hasCurrent = Object.prototype.hasOwnProperty.call(src, "current_active_sessions");
-  const raw = hasActive ? src.active_session_count : hasCurrent ? src.current_active_sessions : undefined;
-  if (raw === undefined || raw === null) return { present: false, invalid: false, value: null };
-  if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) {
-    return { present: true, invalid: false, value: raw };
+  const rawValues = [];
+  if (Object.prototype.hasOwnProperty.call(src, "active_session_count") && src.active_session_count != null) {
+    rawValues.push(src.active_session_count);
   }
-  if (typeof raw === "string" && /^(?:0|[1-9]\d*)$/.test(raw.trim())) {
-    return { present: true, invalid: false, value: Number(raw.trim()) };
+  if (Object.prototype.hasOwnProperty.call(src, "current_active_sessions") && src.current_active_sessions != null) {
+    rawValues.push(src.current_active_sessions);
   }
-  return { present: true, invalid: true, value: null };
+  if (rawValues.length === 0) return { present: false, invalid: false, value: null };
+
+  const normalized = rawValues.map(parseNonNegativeInteger);
+  if (normalized.some((value) => value == null)) return { present: true, invalid: true, value: null };
+  if (new Set(normalized).size !== 1) return { present: true, invalid: true, value: null };
+  return { present: true, invalid: false, value: normalized[0] };
 }
 
 export function parseMcpToolName(toolName) {
