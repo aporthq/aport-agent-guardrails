@@ -824,9 +824,7 @@ aport_hook_context_from_payload() {
           $ti.session_duration_ms,
           $ti.sessionDurationMs,
           $ti.duration_ms,
-          $ti.durationMs,
-          $ti.timeout_ms,
-          $ti.timeoutMs
+          $ti.durationMs
         ] | map(select(. != null)) as $millisecond_values |
         (
           [
@@ -853,6 +851,23 @@ aport_hook_context_from_payload() {
               {present: true, invalid: false, value: $seconds}
             else {present: true, invalid: true}
             end
+          end
+        end;
+      def safe_session_count($value):
+        if (($value | type) == "number" and $value >= 0 and ($value | floor) == $value) then $value
+        elif (($value | type) == "string" and ($value | test("^(0|[1-9][0-9]*)$"))) then ($value | tonumber)
+        else null
+        end;
+      def session_count_evidence($root):
+        [
+          (if (($root | has("active_session_count")) and $root.active_session_count != null) then {value: $root.active_session_count} else empty end),
+          (if (($root | has("current_active_sessions")) and $root.current_active_sessions != null) then {value: $root.current_active_sessions} else empty end)
+        ] as $counts |
+        if ($counts | length) == 0 then {present: false, invalid: false, value: null}
+        else ($counts | map(safe_session_count(.value))) as $normalized |
+          if (($normalized | map(select(. == null)) | length) > 0) then {present: true, invalid: true, value: null}
+          elif (($normalized | unique | length) != 1) then {present: true, invalid: true, value: null}
+          else {present: true, invalid: false, value: $normalized[0]}
           end
         end;
       (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
@@ -1080,15 +1095,15 @@ aport_hook_context_from_payload() {
         session_operation($default_tool) as $session_operation |
         session_type_evidence(.; $ti; $default_tool) as $session_type |
         session_duration_evidence($ti) as $requested_duration |
-        (.active_session_count // .current_active_sessions // null) as $active_session_count |
+        session_count_evidence(.) as $active_session_count |
         ({
           description_length: (str($description) | length),
           session_operation: $session_operation,
           session_type: ($session_type.value // session_type($default_tool)),
           session_tracking: (if $event_hint == "codex" then "persistent" else "host_active_count" end),
           hook_event: (.hook_event_name // .event // ""),
-          active_session_count: $active_session_count,
-          current_active_sessions: $active_session_count,
+          active_session_count: $active_session_count.value,
+          current_active_sessions: $active_session_count.value,
           parent_session_id: (.session_id // .sessionId // ""),
           session_call_id: (.tool_call_id // .toolCallId // .tool_use_id // .toolUseId // .request_id // ""),
           session_id: (
@@ -1101,6 +1116,7 @@ aport_hook_context_from_payload() {
           subagent_type: (.subagent_type // $ti.subagent_type // $ti.agent_type // "")
         }
         + (if $session_type.invalid == true then {invalid_session_type: true} else {} end)
+        + (if $active_session_count.invalid == true then {invalid_session_count: true} else {} end)
         + (if $requested_duration.invalid == true then {invalid_session_duration: true}
            elif $requested_duration.value == null then {}
            else {requested_duration: $requested_duration.value}
