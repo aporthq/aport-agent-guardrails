@@ -957,6 +957,37 @@ fi
 rm -f "$TEST_DIR/aport/decision.json"
 echo "  ✅ Observe-mode synthetic decision writer rejects symlinked targets"
 
+SYNTHETIC_AUDIT_VICTIM="$TEST_DIR/aport/synthetic-audit-victim.txt"
+SYNTHETIC_AUDIT_LINK="$TEST_DIR/aport/synthetic-audit-link.log"
+SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+SYNTHETIC_AUDIT_HAD_REF=0
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_REF=1
+fi
+printf 'do-not-append' > "$SYNTHETIC_AUDIT_VICTIM"
+rm -f "$SYNTHETIC_AUDIT_LINK"
+ln -s "$SYNTHETIC_AUDIT_VICTIM" "$SYNTHETIC_AUDIT_LINK"
+export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_LINK"
+run_hook "Codex observe mode refuses symlinked synthetic audit target" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_symlink","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))'
+if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ "$(cat "$SYNTHETIC_AUDIT_VICTIM")" != "do-not-append" ]]; then
+    echo "FAIL: observe-mode synthetic audit writer must not follow audit-log symlinks" >&2
+    cat "$SYNTHETIC_AUDIT_VICTIM" >&2 || true
+    exit 1
+fi
+rm -f "$SYNTHETIC_AUDIT_LINK"
+echo "  ✅ Observe-mode synthetic audit writer rejects symlinked targets"
+
 run_hook "Codex observe mode allows hard parser failures with warning" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status; unauthorized-command"}}' \
@@ -2931,6 +2962,11 @@ run_hook "Codex session rejects conflicting session_type aliases" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"type-conflict-child","prompt":"review this","session_type":"interactive","sessionType":"batch"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_type"))'
 
+run_hook "Codex session rejects conflicting session_type containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"type-container-conflict-child","prompt":"review this","session_type":"batch"},"args":{"session_type":"interactive"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_type"))'
+
 run_hook "Codex session rejects unrepresentable requested duration" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-child","prompt":"review this","duration_ms":172800000}}' \
@@ -2944,6 +2980,11 @@ run_hook "Codex session rejects conflicting active-session count aliases" \
 run_hook "Codex session rejects conflicting requested duration aliases" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-conflict-child","prompt":"review this","duration_seconds":60,"duration_ms":172800000}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
+
+run_hook "Codex session rejects conflicting requested duration containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-container-conflict-child","prompt":"review this","duration_seconds":60},"args":{"duration_seconds":3600}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_duration"))'
 
 run_hook "Codex session rejects millisecond duration overflow after rounding up" \
