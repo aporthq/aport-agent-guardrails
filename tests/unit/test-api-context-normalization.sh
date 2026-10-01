@@ -75,6 +75,14 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_se
 printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
     || fail "session context must reject non-string explicit session_type: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"matching type","session_type":"batch","sessionType":"Batch"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "batch" and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "session context must accept matching session_type aliases: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting type","session_type":"interactive","sessionType":"batch"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
+    || fail "session context must reject conflicting session_type aliases: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"explore repo","duration_ms":30000}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e 'has("requested_duration") | not' > /dev/null \
     || fail "session context must not emit schema-invalid requested_duration values: $out"
