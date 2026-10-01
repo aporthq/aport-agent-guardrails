@@ -87,14 +87,16 @@ function sessionOperation(toolName) {
 }
 
 function sessionTypeEvidence(toolName, src) {
-  const rawExplicit = src.session_type ?? src.sessionType;
-  if (rawExplicit != null && typeof rawExplicit !== "string") {
+  const supplied = providedValues(src, ["session_type", "sessionType"]);
+  if (supplied.some((value) => typeof value !== "string")) {
     return { sessionType: "", invalid: true };
   }
-  if (rawExplicit != null && rawExplicit.trim() !== "") {
-    const explicit = cleanString(rawExplicit, 32).toLowerCase();
-    if (SESSION_TYPES.has(explicit)) return { sessionType: explicit, invalid: false };
-    return { sessionType: "", invalid: true };
+  const normalized = supplied.map((value) => cleanString(value, 32).toLowerCase());
+  if (normalized.length > 0) {
+    if (normalized.some((value) => !SESSION_TYPES.has(value))) return { sessionType: "", invalid: true };
+    const unique = [...new Set(normalized)];
+    if (unique.length !== 1) return { sessionType: "", invalid: true };
+    return { sessionType: unique[0], invalid: false };
   }
   const name = String(toolName ?? "").toLowerCase();
   if (name.includes("cron") || name.includes("schedulewakeup") || name.includes("schedule_wakeup")) {

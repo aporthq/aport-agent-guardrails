@@ -218,6 +218,21 @@ describe("normalizeSessionContext", () => {
       { toolCallId: "tool-3" },
     );
     assert.strictEqual(nonStringContext.invalid_session_type, true);
+
+    const matchingAliasContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "batch", sessionType: "Batch" },
+      { toolCallId: "tool-4" },
+    );
+    assert.strictEqual(matchingAliasContext.session_type, "batch");
+    assert.ok(!Object.prototype.hasOwnProperty.call(matchingAliasContext, "invalid_session_type"));
+
+    const conflictingAliasContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "interactive", sessionType: "batch" },
+      { toolCallId: "tool-5" },
+    );
+    assert.strictEqual(conflictingAliasContext.invalid_session_type, true);
   });
 
   it("rejects coerced, overflowing, and conflicting session durations", () => {
@@ -961,6 +976,14 @@ describe("plugin hook contract", () => {
       });
       assert.strictEqual(nonStringResult.block, true);
       assert.match(nonStringResult.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
+
+      const conflictResult = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", session_type: "interactive", sessionType: "batch" },
+      });
+      assert.strictEqual(conflictResult.block, true);
+      assert.match(conflictResult.blockReason, /oap\.invalid_session_type/);
       assert.strictEqual(fetchCalled, false);
     } finally {
       globalThis.fetch = originalFetch;

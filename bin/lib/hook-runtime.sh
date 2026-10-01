@@ -161,6 +161,7 @@ aport_hook_is_hard_failure_reason() {
             oap.metadata_enumeration_unsupported | \
             oap.context_too_large | \
             oap.input_too_large | \
+            oap.invalid_mcp_server | \
             oap.invalid_json | \
             oap.invalid_tool_arguments | \
             oap.invalid_session_count | \

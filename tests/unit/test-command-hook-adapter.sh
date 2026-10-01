@@ -2926,6 +2926,11 @@ run_hook "Codex session rejects non-string explicit session_type" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"type-array-child","prompt":"review this","session_type":["batch"]}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_type"))'
 
+run_hook "Codex session rejects conflicting session_type aliases" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"type-conflict-child","prompt":"review this","session_type":"interactive","sessionType":"batch"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_type"))'
+
 run_hook "Codex session rejects unrepresentable requested duration" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"duration-child","prompt":"review this","duration_ms":172800000}}' \

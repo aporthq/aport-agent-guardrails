@@ -787,20 +787,22 @@ aport_hook_context_from_payload() {
         elif ($name | contains("ephemeral")) then "ephemeral"
         else "interactive"
         end;
+      def valid_session_type($value):
+        ["interactive", "batch", "webhook", "scheduled", "ephemeral"] | index($value) != null;
       def session_type_evidence($root; $ti; $raw):
         ([
-          $root.session_type,
-          $root.sessionType,
-          $ti.session_type,
-          $ti.sessionType
-        ] | map(select(. != null)) | .[0] // null) as $explicit |
-        if $explicit == null then
+          if ($root | has("session_type")) and $root.session_type != null then $root.session_type else empty end,
+          if ($root | has("sessionType")) and $root.sessionType != null then $root.sessionType else empty end,
+          if ($ti | has("session_type")) and $ti.session_type != null then $ti.session_type else empty end,
+          if ($ti | has("sessionType")) and $ti.sessionType != null then $ti.sessionType else empty end
+        ]) as $explicit_values |
+        if ($explicit_values | length) == 0 then
           {invalid: false, value: session_type($raw)}
-        elif (($explicit | type) != "string") then
+        elif any($explicit_values[]; type != "string") then
           {invalid: true}
-        else ($explicit | ascii_downcase) as $normalized |
-          if (["interactive", "batch", "webhook", "scheduled", "ephemeral"] | index($normalized)) then
-            {invalid: false, value: $normalized}
+        else ($explicit_values | map(ascii_downcase | gsub("^\\s+|\\s+$"; "")) | unique) as $normalized |
+          if (($normalized | length) == 1) and valid_session_type($normalized[0]) then
+            {invalid: false, value: $normalized[0]}
           else
             {invalid: true}
           end

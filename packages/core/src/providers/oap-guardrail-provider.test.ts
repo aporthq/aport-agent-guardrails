@@ -3,11 +3,22 @@
  * Mirrors python/aport_guardrails/tests/test_generic_provider.py.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { OAPGuardrailProvider } from "./oap-guardrail-provider.js";
 import type { GuardrailRequest, GuardrailDecision } from "./oap-guardrail-provider.js";
 
 function makeRequest(toolName: string, toolInput: Record<string, unknown> = {}): GuardrailRequest {
   return { toolName, toolInput, timestamp: new Date().toISOString() };
+}
+
+function repoFile(...segments: string[]): string {
+  for (const root of [process.cwd(), path.resolve(process.cwd(), "../.."), path.resolve(__dirname, "../../../..")]) {
+    const candidate = path.join(root, ...segments);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return path.resolve(__dirname, "../../../..", ...segments);
 }
 
 describe("OAPGuardrailProvider", () => {
@@ -100,6 +111,63 @@ describe("OAPGuardrailProvider", () => {
       enforcementMode: "warn",
       originalAllow: false,
     });
+  });
+
+  it("keeps local MCP parser failures blocking in warn mode", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aport-provider-mcp-"));
+    try {
+      const passportPath = path.join(tmpDir, "passport.json");
+      const configPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(
+        passportPath,
+        JSON.stringify({
+          passport_id: "ap_mcp_parser_failure",
+          agent_id: "ap_mcp_parser_failure",
+          spec_version: "oap/1.0",
+          owner_id: "test@example.com",
+          assurance_level: "L2",
+          status: "active",
+          capabilities: [{ id: "mcp.tool.execute" }],
+          limits: {},
+          regions: ["US"],
+          never_expires: true,
+        }),
+        "utf8",
+      );
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({
+          mode: "local",
+          framework: "generic",
+          passport_path: passportPath,
+          guardrail_script: repoFile("bin", "aport-guardrail-bash.sh"),
+        }),
+        "utf8",
+      );
+
+      const provider = new OAPGuardrailProvider({
+        framework: "generic",
+        configPath,
+        enforcementMode: "warn",
+      });
+      const decision = provider.evaluateSync(
+        makeRequest("mcp.github.issues", {
+          server: "github\\evil",
+          invalid_server: true,
+          mcp_tool: "issues.list",
+        }),
+      );
+
+      expect(decision.allow).toBe(false);
+      expect(decision.policyId).toBe("mcp.tool.execute.v1");
+      expect(decision.reasons[0].code).toBe("oap.invalid_mcp_server");
+      expect(decision.metadata).toMatchObject({
+        enforcementMode: "warn",
+        originalAllow: false,
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it("allows framework execution in observe mode while preserving original deny metadata", () => {
