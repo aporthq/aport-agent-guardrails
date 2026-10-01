@@ -9,6 +9,18 @@ jest.mock('@aporthq/aport-agent-guardrails-core', () => ({
   Evaluator: jest.fn().mockImplementation(() => ({ verify: jest.fn() })),
   findConfigPath: jest.fn(() => null),
   loadConfig: jest.fn(() => ({})),
+  normalizeEnforcementMode: jest.fn((value: unknown) => {
+    const raw = String(value || 'enforce').toLowerCase().replace(/_/g, '-');
+    if (['warn', 'report-only', 'audit-only'].includes(raw)) return 'warn';
+    if (['observe', 'observation'].includes(raw)) return 'observe';
+    return 'enforce';
+  }),
+  shouldAllowDeniedDecision: jest.fn((mode: string, decision: { allow?: boolean; reasons?: Array<{ code?: string }> }) => {
+    if (decision.allow) return true;
+    if (mode === 'observe') return true;
+    if (mode === 'warn') return decision.reasons?.[0]?.code !== 'oap.api_error';
+    return false;
+  }),
   toolToPackId: jest.fn((name: string) => 'system.command.execute.v1'),
 }));
 
@@ -113,6 +125,54 @@ describe('APortGuardrailCallback', () => {
     ).resolves.toBeUndefined();
     expect(Evaluator).toHaveBeenCalledWith(null, 'langchain', {
       enforcementMode: 'warn',
+      harness: 'langchain',
+    });
+  });
+
+  it('keeps API/runtime failures blocking in warn mode', async () => {
+    (Evaluator as jest.Mock).mockImplementation(() => ({
+      verify: jest.fn().mockResolvedValue({
+        allow: false,
+        reasons: [{ code: 'oap.api_error', message: 'API unavailable' }],
+      }),
+    }));
+    const callback = new APortGuardrailCallback({ enforcementMode: 'warn' });
+    await expect(
+      callback.handleToolStart(
+        mockTool as any,
+        '{"command":"ls"}',
+        'run-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'tool-call-1'
+      )
+    ).rejects.toThrow(GuardrailViolationError);
+  });
+
+  it('does not throw on deny when explicit observe mode is configured', async () => {
+    (Evaluator as jest.Mock).mockImplementation(() => ({
+      verify: jest.fn().mockResolvedValue({
+        allow: false,
+        reasons: [{ code: 'oap.command_not_allowed', message: 'Tool not allowed by policy' }],
+      }),
+    }));
+    const callback = new APortGuardrailCallback({ enforcementMode: 'observe' });
+    await expect(
+      callback.handleToolStart(
+        mockTool as any,
+        '{"command":"rm -rf /"}',
+        'run-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'tool-call-1'
+      )
+    ).resolves.toBeUndefined();
+    expect(Evaluator).toHaveBeenCalledWith(null, 'langchain', {
+      enforcementMode: 'observe',
       harness: 'langchain',
     });
   });

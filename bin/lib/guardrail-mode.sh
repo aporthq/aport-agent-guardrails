@@ -81,7 +81,7 @@ parse_guardrail_mode_args() {
                 ;;
             --enforcement)
                 if [[ -z "${2:-}" ]]; then
-                    echo "[aport] ERROR: --enforcement requires a value (enforce|warn)" >&2
+                    echo "[aport] ERROR: --enforcement requires a value (enforce|warn|observe)" >&2
                     return 1
                 fi
                 APORT_ENFORCEMENT_CLI="$2"
@@ -89,6 +89,9 @@ parse_guardrail_mode_args() {
                 ;;
             --warn | --report-only | --audit-only)
                 APORT_ENFORCEMENT_CLI="warn"
+                ;;
+            --observe | --observation)
+                APORT_ENFORCEMENT_CLI="observe"
                 ;;
             --block | --enforce)
                 APORT_ENFORCEMENT_CLI="enforce"
@@ -151,7 +154,11 @@ normalize_aport_enforcement() {
             printf 'enforce'
             ;;
         warn | report-only | audit-only | observe | observation)
-            printf 'warn'
+            if [[ "$value" = "observe" || "$value" = "observation" ]]; then
+                printf 'observe'
+            else
+                printf 'warn'
+            fi
             ;;
         *)
             return 1
@@ -308,7 +315,7 @@ select_guardrail_enforcement() {
     local selected="${APORT_ENFORCEMENT_CLI:-${APORT_ENFORCEMENT_MODE:-${APORT_ENFORCEMENT:-${APORT_GUARDRAIL_ENFORCEMENT:-enforce}}}}"
     local normalized
     if ! normalized="$(normalize_aport_enforcement "$selected")"; then
-        echo "[aport] ERROR: Unsupported --enforcement value: $selected (expected enforce|warn)" >&2
+        echo "[aport] ERROR: Unsupported --enforcement value: $selected (expected enforce|warn|observe)" >&2
         return 1
     fi
     APORT_SELECTED_ENFORCEMENT="$normalized"

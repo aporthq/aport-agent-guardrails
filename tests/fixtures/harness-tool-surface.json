@@ -106,6 +106,7 @@
       { "tool": "WebFetch", "kind": "web" },
       { "tool": "Browser", "kind": "browser" },
       { "tool": "Agent", "kind": "session" },
+      { "tool": "Agent(Explore)", "kind": "session" },
       { "tool": "Task", "kind": "session" },
       { "tool": "TaskCreate", "kind": "session" },
       { "tool": "SendMessage", "kind": "session" },

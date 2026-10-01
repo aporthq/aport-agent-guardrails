@@ -28,7 +28,7 @@ npx --yes @aporthq/aport-agent-guardrails goose --non-interactive
 
 Non-interactive local passport: `npx --yes @aporthq/aport-agent-guardrails goose --mode=local --non-interactive` (add `--output <path>` to choose the file). Interactive local passport: run the installer without flags and choose `3. Create local passport file`.
 
-**Prerequisites:** `jq` on the PATH Goose uses; the hook denies every tool call with `oap.missing_dependency` without it.
+**Prerequisites:** `jq` on the PATH Goose uses; the hook denies every tool call with `oap.missing_dependency` without it in enforce, warn and observe modes because the hook cannot safely parse or evaluate the payload. Install `jq` before setup.
 
 To keep state somewhere other than `~/.aport/goose`, set `APORT_GOOSE_CONFIG_DIR` when running the installer. The generated plugin wrapper script exports the same value, so the hook uses that directory at run time. `mode` and `reset` read the variable too. A passport outside that directory needs `APORT_PASSPORT_FILE` plus `APORT_ALLOW_EXTERNAL_PASSPORT_FILE=1`.
 

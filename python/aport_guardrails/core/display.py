@@ -74,6 +74,7 @@ def format_policy_warning(
     tool_name: Any = "",
     framework: str | None = None,
     config_path: str | None = None,
+    enforcement_mode: str = "warn",
 ) -> str:
     """Build a consistent report-only warning for framework adapters."""
     safe_policy = sanitize_display(policy)
@@ -82,7 +83,10 @@ def format_policy_warning(
     safe_tool_name = sanitize_display(tool_name)
     safe_reference = sanitize_display(policy_reference(framework=framework, config_path=config_path))
 
-    parts = ["[APort] warning: policy would have denied this tool call."]
+    if enforcement_mode == "observe":
+        parts = ["[APort] observation: observe mode allowed a tool call that APort did not authorize."]
+    else:
+        parts = ["[APort] warning: policy would have denied this tool call."]
     if safe_tool_name:
         parts.append(f"Tool: {safe_tool_name}.")
     parts.append(f"Policy: {safe_policy}.")

@@ -1,5 +1,12 @@
 # @aporthq/aport-agent-guardrails-claude-code
 
+## 1.0.35
+
+### Patch Changes
+
+- Updated dependencies
+  - @aporthq/aport-agent-guardrails-core@1.0.35
+
 ## 1.0.34
 
 ### Patch Changes

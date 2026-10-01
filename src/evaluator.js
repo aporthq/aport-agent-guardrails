@@ -28,9 +28,9 @@ function normalizeRuntimeString(value, fallback) {
 
 function normalizeEnforcementMode(value) {
   const raw = String(value || "enforce").trim().toLowerCase().replace(/_/g, "-");
-  return ["warn", "report-only", "audit-only", "observe", "observation"].includes(raw)
-    ? "warn"
-    : "enforce";
+  if (["warn", "report-only", "audit-only"].includes(raw)) return "warn";
+  if (["observe", "observation"].includes(raw)) return "observe";
+  return "enforce";
 }
 
 function buildRuntimeMetadata(options = {}) {

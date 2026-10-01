@@ -53,22 +53,20 @@ agent.invoke(
 )
 ```
 
-Default enforcement is fail-closed. For rollout/report-only mode:
+Default enforcement is fail-closed. For conservative rollout/report-only mode:
 
 ```python
 APortCallback(enforcement_mode="warn")
 ```
 
-Warn mode lets the tool continue and prints an APort warning with the tool,
-policy, reason code, reason detail, and the hosted passport or local passport
-file to review.
+Warn mode lets completed policy denials continue and prints an APort warning with the tool, policy, reason code, reason detail, and the hosted passport or local passport file to review. Use `enforcement_mode="observe"` only for adoption-first rollout where APort should warn but not block while you tune passports and mappings.
 
 **Node:** Add `APortGuardrailCallback` to your chain/agent callbacks. Config is read from `~/.aport/langchain/` or `.aport/config.yaml`.
 
 ```ts
 import { APortGuardrailCallback } from '@aporthq/aport-agent-guardrails-langchain';
 
-const callback = new APortGuardrailCallback(); // optional: { configPath: '...', framework: 'langchain', enforcementMode: 'warn' }
+const callback = new APortGuardrailCallback(); // optional: { configPath: '...', framework: 'langchain', enforcementMode: 'warn' | 'observe' }
 // Pass callback to your LangChain run (e.g. callbacks: [callback])
 // On deny, the callback throws GuardrailViolationError.
 ```
@@ -83,7 +81,7 @@ The Node middleware automatically parses JSON tool input and spreads parameters 
 - **Custom directory:** `APORT_LANGCHAIN_CONFIG_DIR=<dir>` moves the installer output (`config.yaml`, `aport/passport.json`, `aport/runtime/`) for both `npx @aporthq/aport-agent-guardrails langchain` and `aport setup --framework=langchain`. The callback does not read that variable; pass `configPath` (Node) or `config_path` (Python) pointing at `<dir>/config.yaml`.
 - **Usage:** Add the callback to your agent (see above).
 - **`fail_open_on_api_error`**: Set to `true` in config to allow tool execution when the APort API is unreachable (genuine policy denials are never overridden). Default: `false` (fail-closed).
-- **`enforcement_mode`**: `enforce` blocks denied tools. `warn` is explicit report-only rollout: APort records the original deny decision but the adapter lets LangChain continue.
+- **`enforcement_mode`**: `enforce` blocks denied tools. `warn` is explicit report-only rollout for completed policy denials. `observe` is adoption-only and lets LangChain continue while warning on denied APort decisions.
 
 ## Suspend (kill switch)
 

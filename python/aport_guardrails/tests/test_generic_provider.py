@@ -56,6 +56,43 @@ class TestToResult:
         result = _to_result(decision, "test.v1")
         assert result.allow is False
 
+    def test_warn_mode_does_not_allow_api_errors(self):
+        decision = {"allow": False, "reasons": [{"code": "oap.api_error", "message": "down"}]}
+        result = _to_result(decision, "test.v1", enforcement_mode="warn")
+        assert result.allow is False
+        assert result.metadata == {"enforcement_mode": "warn", "original_allow": False}
+
+    def test_warn_mode_does_not_allow_invalid_session_duration(self):
+        decision = {"allow": False, "reasons": [{"code": "oap.invalid_session_duration", "message": "too long"}]}
+        result = _to_result(decision, "agent.session.create.v1", enforcement_mode="warn")
+        assert result.allow is False
+        assert result.metadata == {"enforcement_mode": "warn", "original_allow": False}
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "oap.context_not_serializable",
+            "oap.context_too_nested",
+            "oap.invalid_mcp_server",
+            "oap.invalid_provider",
+            "oap.invalid_session_count",
+            "oap.invalid_session_type",
+            "oap.path_traversal_attempt",
+            "oap.path_resolution_error",
+        ],
+    )
+    def test_warn_mode_does_not_allow_validation_failures(self, code):
+        decision = {"allow": False, "reasons": [{"code": code, "message": "invalid"}]}
+        result = _to_result(decision, "test.v1", enforcement_mode="warn")
+        assert result.allow is False
+        assert result.metadata == {"enforcement_mode": "warn", "original_allow": False}
+
+    def test_observe_mode_allows_api_errors(self):
+        decision = {"allow": False, "reasons": [{"code": "oap.api_error", "message": "down"}]}
+        result = _to_result(decision, "test.v1", enforcement_mode="observe")
+        assert result.allow is True
+        assert result.metadata == {"enforcement_mode": "observe", "original_allow": False}
+
 
 class TestOAPGuardrailProvider:
     @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)
@@ -106,6 +143,28 @@ class TestOAPGuardrailProvider:
         call_args = mock_evaluator.verify_sync.call_args
         # First arg (passport) should be empty -- evaluator uses its own config
         assert call_args[0][0] == {}
+
+    @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)
+    @patch("aport_guardrails.providers.generic.Evaluator")
+    def test_evaluate_warn_mode_keeps_invalid_mcp_server_blocking(self, mock_evaluator_cls, mock_find):
+        mock_evaluator = MagicMock()
+        mock_evaluator.verify_sync.return_value = {
+            "allow": False,
+            "reasons": [{"code": "oap.invalid_mcp_server", "message": "ambiguous parser input"}],
+        }
+        mock_evaluator_cls.return_value = mock_evaluator
+
+        provider = OAPGuardrailProvider(framework="deerflow", enforcement_mode="warn")
+        request = MagicMock()
+        request.tool_name = "mcp.github.issues"
+        request.tool_input = {"server": "github\\evil", "invalid_server": True, "mcp_tool": "issues.list"}
+        request.agent_id = None
+
+        result = provider.evaluate(request)
+        assert result.allow is False
+        assert result.policy_id == "mcp.tool.execute.v1"
+        assert result.reasons[0].code == "oap.invalid_mcp_server"
+        assert result.metadata == {"enforcement_mode": "warn", "original_allow": False}
 
     @pytest.mark.asyncio
     @patch("aport_guardrails.providers.generic.find_config_path", return_value=None)

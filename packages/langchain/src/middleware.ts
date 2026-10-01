@@ -5,7 +5,9 @@
 
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import type { Serialized } from "@langchain/core/load/serializable";
-import { Evaluator, findConfigPath, loadConfig, toolToPackId } from "@aporthq/aport-agent-guardrails-core";
+import { Evaluator, findConfigPath, loadConfig, normalizeEnforcementMode, shouldAllowDeniedDecision, toolToPackId } from "@aporthq/aport-agent-guardrails-core";
+
+type EnforcementMode = "enforce" | "warn" | "observe";
 
 /** Thrown when the guardrail denies a tool call (policy deny). */
 export class GuardrailViolationError extends Error {
@@ -26,8 +28,8 @@ export interface APortGuardrailCallbackOptions {
   configPath?: string | null;
   /** Optional framework key for config lookup (default: "langchain"). */
   framework?: string;
-  /** enforce blocks denied tools; warn records/logs decisions and lets LangChain continue. */
-  enforcementMode?: "enforce" | "warn";
+  /** enforce blocks denied tools; warn/observe record/log decisions and let LangChain continue. */
+  enforcementMode?: EnforcementMode;
 }
 
 type RuntimeAwareEvaluatorConstructor = new (
@@ -44,7 +46,7 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
   name = "aport_guardrail";
 
   private evaluator: Evaluator;
-  private enforcementMode: "enforce" | "warn";
+  private enforcementMode: EnforcementMode;
 
   constructor(options: APortGuardrailCallbackOptions | string | null = {}) {
     super();
@@ -100,8 +102,9 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
       const safeMessage = sanitizeDisplayText(msg);
       const safeCode = sanitizeDisplayText(code);
       const safeToolName = sanitizeDisplayText(toolName);
-      if (this.enforcementMode === "warn") {
-        console.warn(`[APort] warning: policy would have denied ${safeToolName}. Reason: ${safeCode}.`);
+      if (shouldAllowDeniedDecision(this.enforcementMode, decision)) {
+        const label = this.enforcementMode === "observe" ? "observation" : "warning";
+        console.warn(`[APort] ${label}: policy would have denied ${safeToolName}. Reason: ${safeCode}.`);
         return;
       }
       console.warn(`[APort] denied ${safeToolName}. Reason: ${safeCode}. ${safeMessage}`);
@@ -114,7 +117,7 @@ function resolveEnforcementMode(
   explicit: string | undefined,
   configPath: string | null,
   framework: string
-): "enforce" | "warn" {
+): EnforcementMode {
   const foundConfigPath = configPath || findConfigPath(framework);
   const config = foundConfigPath ? loadConfig(foundConfigPath) : {};
   const raw =
@@ -124,10 +127,7 @@ function resolveEnforcementMode(
     process.env.APORT_ENFORCEMENT_MODE ??
     process.env.APORT_ENFORCEMENT ??
     process.env.APORT_GUARDRAIL_ENFORCEMENT;
-  const normalized = String(raw || "enforce").toLowerCase().replace(/_/g, "-");
-  return ["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)
-    ? "warn"
-    : "enforce";
+  return normalizeEnforcementMode(raw);
 }
 
 function sanitizeDisplayText(value: unknown): string {

@@ -348,6 +348,15 @@ if true; then
 		echo ""
 		echo "  Plugin mode: api (required for hosted passport)"
 		prompt_with_default api_url "  APort API URL [$CONFIGURED_API_URL]: " "$CONFIGURED_API_URL"
+	elif [ -n "${APORT_GUARDRAIL_MODE_CLI:-${APORT_GUARDRAIL_MODE:-}}" ]; then
+		select_guardrail_mode "openclaw" ""
+		PLUGIN_MODE="$APORT_SELECTED_GUARDRAIL_MODE"
+		echo ""
+		echo "  Plugin mode: $PLUGIN_MODE (from configured mode)"
+		if [ "$PLUGIN_MODE" = "api" ]; then
+			select_guardrail_api_url "$PLUGIN_MODE"
+			api_url="$APORT_SELECTED_API_URL"
+		fi
 	else
 		echo ""
 		echo "  Plugin mode:"
@@ -433,7 +442,8 @@ YAML
         # Fail-closed: block on error (default: true)
         failClosed: true
 
-        # Enforcement: "enforce" blocks denied actions; "warn" records and allows
+        # Enforcement: "enforce" blocks, "warn" records completed policy denials,
+        # "observe" warns without blocking on APort mapping/runtime/API failures
         enforcementMode: $PLUGIN_ENFORCEMENT
 
         # Allow unmapped tools (false = strict: block custom skills/ClawHub unless mapped)
