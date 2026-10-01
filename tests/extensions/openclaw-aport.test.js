@@ -233,13 +233,22 @@ describe("normalizeSessionContext", () => {
       { toolCallId: "tool-5" },
     );
     assert.strictEqual(conflictingAliasContext.invalid_session_type, true);
+
+    const nestedConflictContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "interactive", args: { session_type: "batch" } },
+      { toolCallId: "tool-6" },
+    );
+    assert.strictEqual(nestedConflictContext.invalid_session_type, true);
   });
 
   it("rejects coerced, overflowing, and conflicting session durations", () => {
     for (const params of [
       { prompt: "review this", duration_ms: [60000] },
       { prompt: "review this", duration_ms: 86400999 },
+      { prompt: "review this", duration_ms: 60000.1 },
       { prompt: "review this", duration_seconds: 60, duration_ms: 172800000 },
+      { prompt: "review this", duration_ms: 60000, args: { duration_ms: 172800000 } },
     ]) {
       const context = normalizeSessionContext("sessions_spawn", params, { toolCallId: "tool-1" });
       assert.strictEqual(context.invalid_session_duration, true, JSON.stringify(params));
@@ -985,6 +994,14 @@ describe("plugin hook contract", () => {
       assert.strictEqual(conflictResult.block, true);
       assert.match(conflictResult.blockReason, /oap\.invalid_session_type/);
       assert.strictEqual(fetchCalled, false);
+
+      const nestedConflictResult = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", session_type: "interactive", args: { session_type: "batch" } },
+      });
+      assert.strictEqual(nestedConflictResult.block, true);
+      assert.match(nestedConflictResult.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1011,6 +1028,15 @@ describe("plugin hook contract", () => {
 
       assert.strictEqual(result.block, true);
       assert.match(result.blockReason, /oap\.invalid_session_duration/);
+      assert.strictEqual(fetchCalled, false);
+
+      const fractionalMsResult = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", duration_ms: 60000.1 },
+      });
+
+      assert.strictEqual(fractionalMsResult.block, true);
+      assert.match(fractionalMsResult.blockReason, /oap\.invalid_session_duration/);
       assert.strictEqual(fetchCalled, false);
     } finally {
       globalThis.fetch = originalFetch;
