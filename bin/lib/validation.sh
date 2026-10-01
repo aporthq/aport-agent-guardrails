@@ -408,6 +408,9 @@ normalize_api_context() {
         agent.session.create*)
             local session_user_id=""
             session_user_id="${APORT_USER_ID:-${APORT_TARGET_USER:-}}"
+            if [[ -z "$session_user_id" && "${APORT_GUARDRAIL_MODE:-}" = "api" && -n "${APORT_AGENT_ID:-}" ]]; then
+                session_user_id="$APORT_AGENT_ID"
+            fi
             if [[ -z "$session_user_id" && -n "${PASSPORT_FILE:-}" && -r "${PASSPORT_FILE:-}" ]]; then
                 session_user_id="$(jq -r '(.owner_id // .agent_id // .passport_id // "") | select(type == "string")' "$PASSPORT_FILE" 2> /dev/null || true)"
             fi
