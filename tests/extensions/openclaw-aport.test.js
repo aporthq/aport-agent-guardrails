@@ -211,6 +211,13 @@ describe("normalizeSessionContext", () => {
       { toolCallId: "tool-2" },
     );
     assert.strictEqual(invalidContext.invalid_session_type, true);
+
+    const nonStringContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: ["batch"] },
+      { toolCallId: "tool-3" },
+    );
+    assert.strictEqual(nonStringContext.invalid_session_type, true);
   });
 
   it("rejects coerced, overflowing, and conflicting session durations", () => {
@@ -231,6 +238,15 @@ describe("normalizeSessionContext", () => {
     );
     assert.strictEqual(context.requested_duration, 60);
     assert.ok(!Object.prototype.hasOwnProperty.call(context, "invalid_session_duration"));
+
+    const waitContext = normalizeSessionContext(
+      "sessions_wait",
+      { id: "child-1", timeout_ms: 30000 },
+      { toolCallId: "tool-1" },
+    );
+    assert.strictEqual(waitContext.session_operation, "list");
+    assert.ok(!Object.prototype.hasOwnProperty.call(waitContext, "requested_duration"));
+    assert.ok(!Object.prototype.hasOwnProperty.call(waitContext, "invalid_session_duration"));
   });
 
   it("rejects malformed active-session count evidence instead of coercing it", () => {
@@ -239,6 +255,7 @@ describe("normalizeSessionContext", () => {
       { active_session_count: [] },
       { active_session_count: -1 },
       { active_session_count: 1.5 },
+      { active_session_count: 0, current_active_sessions: 10 },
     ]) {
       const context = normalizeSessionContext("sessions_spawn", { prompt: "review this" }, event);
       assert.strictEqual(context.invalid_session_count, true, JSON.stringify(event));
@@ -249,9 +266,10 @@ describe("normalizeSessionContext", () => {
     const context = normalizeSessionContext(
       "sessions_spawn",
       { prompt: "review this" },
-      { active_session_count: "5" },
+      { active_session_count: "5", current_active_sessions: 5 },
     );
     assert.strictEqual(context.active_session_count, 5);
+    assert.strictEqual(context.current_active_sessions, 5);
     assert.ok(!Object.prototype.hasOwnProperty.call(context, "invalid_session_count"));
   });
 });
@@ -936,6 +954,14 @@ describe("plugin hook contract", () => {
       assert.strictEqual(result.block, true);
       assert.match(result.blockReason, /oap\.invalid_session_type/);
       assert.strictEqual(fetchCalled, false);
+
+      const nonStringResult = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", session_type: ["batch"] },
+      });
+      assert.strictEqual(nonStringResult.block, true);
+      assert.match(nonStringResult.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -989,6 +1015,14 @@ describe("plugin hook contract", () => {
 
       assert.strictEqual(result.block, true);
       assert.match(result.blockReason, /oap\.invalid_session_count/);
+      assert.strictEqual(fetchCalled, false);
+
+      const conflictResult = await beforeToolCall(
+        { toolName: "sessions_spawn", params: { prompt: "review this" } },
+        { active_session_count: 0, current_active_sessions: 10 },
+      );
+      assert.strictEqual(conflictResult.block, true);
+      assert.match(conflictResult.blockReason, /oap\.invalid_session_count/);
       assert.strictEqual(fetchCalled, false);
     } finally {
       globalThis.fetch = originalFetch;
@@ -1162,6 +1196,50 @@ describe("plugin hook contract", () => {
       globalThis.fetch = originalFetch;
       if (originalUserId === undefined) delete process.env.APORT_USER_ID;
       else process.env.APORT_USER_ID = originalUserId;
+    }
+  });
+
+  it("uses configured hosted agent ID as the session user fallback", async () => {
+    const originalFetch = globalThis.fetch;
+    const envKeys = ["APORT_USER_ID", "APORT_TARGET_USER", "APORT_OWNER_EMAIL", "APORT_EMAIL", "APORT_AGENT_ID"];
+    const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    let seenBody = null;
+    for (const key of envKeys) delete process.env[key];
+
+    globalThis.fetch = async (_url, opts) => {
+      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      const decision = withContentHash({
+        allow: true,
+        decision_id: "dec-session-config-agent",
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_configured_session_user",
+      });
+      const result = await beforeToolCall(
+        { toolName: "sessions_spawn", params: { prompt: "review this", agent_type: "reviewer" } },
+        { toolCallId: "session-call-configured-user", session_id: "parent-session" },
+      );
+
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(seenBody.context.agent_id, "ap_configured_session_user");
+      assert.strictEqual(seenBody.context.user_id, "ap_configured_session_user");
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of envKeys) {
+        if (originalEnv[key] === undefined) delete process.env[key];
+        else process.env[key] = originalEnv[key];
+      }
     }
   });
 

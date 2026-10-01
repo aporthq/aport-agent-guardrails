@@ -71,13 +71,29 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_se
 printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
     || fail "session context must flag invalid explicit session_type: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"bad type","session_type":["batch"]}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
+    || fail "session context must reject non-string explicit session_type: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"explore repo","duration_ms":30000}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e 'has("requested_duration") | not' > /dev/null \
     || fail "session context must not emit schema-invalid requested_duration values: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"collaboration.wait_agent","active_session_count":0,"tool_input":{"id":"child-1","timeout_ms":30000}}' session 'collaboration.wait_agent' codex)"
+printf '%s' "$out" | jq -e '.session_operation == "list" and (. | has("requested_duration") | not) and (. | has("invalid_session_duration") | not)' > /dev/null \
+    || fail "wait_agent timeout_ms must not be treated as a requested session duration: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting duration","duration_seconds":60,"duration_ms":172800000}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
     || fail "session context must flag conflicting duration aliases: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"current_active_sessions":10,"tool_input":{"description":"conflicting count"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_count == true and .active_session_count == null and .current_active_sessions == null' > /dev/null \
+    || fail "session context must flag conflicting active-session count aliases: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":"5","current_active_sessions":5,"tool_input":{"description":"matching count"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.active_session_count == 5 and .current_active_sessions == 5 and (. | has("invalid_session_count") | not)' > /dev/null \
+    || fail "session context must accept matching active-session count aliases: $out"
 
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"fractional overflow","duration_ms":86400999}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \

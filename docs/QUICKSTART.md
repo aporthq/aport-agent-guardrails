@@ -68,8 +68,8 @@ remote suspend/status, and signed hosted decisions. Local JSON remains available
 for offline or privacy-sensitive deployments.
 
 All runtime hooks need `jq` on the PATH the host uses; without it the hook
-denies every tool call in enforce and warn modes. Observe mode may allow with a
-warning for adoption-only rollout, but install `jq` before setup.
+denies every tool call in enforce, warn and observe modes because it cannot
+safely parse or evaluate the payload. Install `jq` before setup.
 
 ### Non-interactive installs
 
@@ -131,8 +131,9 @@ This thin shim uses the
 APort is fail-closed by default. Use `warn` for conservative report-only rollout:
 completed policy denials allow with warnings, while unknown tools and APort
 runtime/API failures still block. Use `observe` for adoption-first rollout:
-policy denials, mapping gaps, and APort verifier/runtime failures allow with
-warnings so developers are not blocked while you tune passports and mappings.
+policy denials, mapping gaps, and non-mandatory APort verifier/runtime failures
+allow with warnings so developers are not blocked while you tune passports and
+mappings. Mandatory prerequisites such as missing `jq` still block.
 
 ```bash
 npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=warn
