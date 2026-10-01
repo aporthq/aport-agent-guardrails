@@ -63,6 +63,44 @@ class TestAportGuardrailBeforeToolCall:
         assert result is None
 
     @patch("crewai_adapter.hook.Evaluator")
+    def test_warn_mode_keeps_api_errors_blocking(self, mock_evaluator_cls: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Warn mode blocks API/evaluator failures instead of fail-opening."""
+        hook._crewai_evaluator = None
+        hook._crewai_enforcement_mode = None
+        monkeypatch.setenv("APORT_ENFORCEMENT", "warn")
+        mock_evaluator_cls.return_value.verify_sync.return_value = {
+            "allow": False,
+            "reasons": [{"code": "oap.api_error", "message": "API unavailable"}],
+        }
+
+        result = aport_guardrail_before_tool_call(_fake_context(tool_input={"command": "ls"}))
+
+        assert result is False
+
+    @patch("crewai_adapter.hook.Evaluator")
+    def test_observe_mode_allows_api_errors(
+        self,
+        mock_evaluator_cls: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Observe mode allows API/evaluator failures with an observation."""
+        hook._crewai_evaluator = None
+        hook._crewai_enforcement_mode = None
+        monkeypatch.setenv("APORT_ENFORCEMENT", "observe")
+        mock_evaluator_cls.return_value.verify_sync.return_value = {
+            "allow": False,
+            "reasons": [{"code": "oap.api_error", "message": "API unavailable"}],
+        }
+
+        result = aport_guardrail_before_tool_call(_fake_context(tool_input={"command": "ls"}))
+
+        output = capsys.readouterr().out
+        assert result is None
+        assert "[APort] observation:" in output
+        assert "oap.api_error" in output
+
+    @patch("crewai_adapter.hook.Evaluator")
     def test_guardrail_enforcement_env_sets_warn_runtime_metadata(
         self,
         mock_evaluator_cls: MagicMock,

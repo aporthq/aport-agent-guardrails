@@ -52,11 +52,12 @@ SCRIPT
 chmod +x "$FAKE_BIN/openclaw"
 
 set +e
-printf '\n3\nN\n2\n\n' | env \
+env \
     PATH="$FAKE_BIN:$NODE_DIR:/usr/bin:/bin" \
     OPENCLAW_HOME="$CONFIG_DIR" \
+    APORT_NONINTERACTIVE=1 \
     APORT_FAKE_OPENCLAW_PLUGIN_VERSION="$PLUGIN_VERSION" \
-    "$REPO_ROOT/bin/openclaw" --api-url http://127.0.0.1:1 > "$LOG_FILE" 2>&1
+    "$REPO_ROOT/bin/openclaw" --mode=api --api-url http://127.0.0.1:1 > "$LOG_FILE" 2>&1
 EXIT_CODE=$?
 set -e
 

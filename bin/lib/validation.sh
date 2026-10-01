@@ -405,6 +405,34 @@ normalize_api_context() {
               else del(.shell) end
             ' 2> /dev/null || printf '%s' "$context_json"
             ;;
+        agent.session.create*)
+            local session_user_id=""
+            session_user_id="${APORT_USER_ID:-${APORT_TARGET_USER:-}}"
+            if [[ -z "$session_user_id" && "${APORT_GUARDRAIL_MODE:-}" = "api" && -n "${APORT_AGENT_ID:-}" ]]; then
+                session_user_id="$APORT_AGENT_ID"
+            fi
+            if [[ -z "$session_user_id" && -n "${PASSPORT_FILE:-}" && -r "${PASSPORT_FILE:-}" ]]; then
+                session_user_id="$(jq -r '(.owner_id // .agent_id // .passport_id // "") | select(type == "string")' "$PASSPORT_FILE" 2> /dev/null || true)"
+            fi
+            if [[ -z "$session_user_id" ]]; then
+                session_user_id="${APORT_OWNER_EMAIL:-${APORT_EMAIL:-${APORT_AGENT_ID:-${USER:-${LOGNAME:-}}}}}"
+            fi
+            session_user_id="$(printf '%s' "$session_user_id" | LC_ALL=C tr -d '\000-\037\177' | head -c 200)"
+            printf '%s' "$context_json" | jq -c --arg user_id "$session_user_id" '
+              def valid_session_type:
+                type == "string" and IN("interactive", "batch", "webhook", "scheduled", "ephemeral");
+              . as $ctx
+              | (if (($ctx.user_id // "") | type) == "string" and (($ctx.user_id // "") | length) > 0 then .
+                 elif $user_id != "" then . + {user_id: $user_id}
+                 else .
+                 end)
+              | (if (.session_type | valid_session_type) then .
+                 elif ((.session_type // "") | type) == "string" and ((.session_type // "") | length) > 0 then .
+                 elif ((.session_operation // "") == "scheduled") then . + {session_type: "scheduled"}
+                 else . + {session_type: "interactive"}
+                 end)
+            ' 2> /dev/null || printf '%s' "$context_json"
+            ;;
         *)
             printf '%s' "$context_json"
             ;;

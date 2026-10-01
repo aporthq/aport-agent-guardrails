@@ -62,33 +62,6 @@ if [ "${APORT_GUARDRAIL_MODE:-local}" = "api" ]; then
     fi
 fi
 
-emit_cursor_input_too_large() {
-    local notice
-    notice="$(aport_format_guardrail_notice deny hook.input oap.input_too_large "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes.")"
-    aport_hook_build_response "deny" "$notice" "" "cursor"
-    exit 2
-}
-
-# Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
-INPUT="$(aport_read_stdin_with_timeout)"
-
-if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
-    emit_cursor_input_too_large
-fi
-
-# Empty input means the host did not provide a tool-call payload. Fail closed.
-if [ -z "$INPUT" ]; then
-    echo '{"permission":"deny","allowed":false,"agentMessage":"🛡️ APort: empty hook input — fail-closed policy","agent_message":"🛡️ APort: empty hook input — fail-closed policy","user_message":"🛡️ APort: empty hook input — fail-closed policy","reason":"🛡️ APort: empty hook input — fail-closed policy"}'
-    exit 2
-fi
-
-# Require jq for JSON parsing
-if ! command -v jq &> /dev/null; then
-    echo '{"permission":"deny","allowed":false,"agentMessage":"APort: jq is required","agent_message":"APort: jq is required","user_message":"APort: jq is required","reason":"APort: jq is required"}'
-    exit 2
-fi
-
-# Deny helper: outputs hook response JSON and exits 2
 deny() {
     local reason="$1"
     aport_hook_build_response "deny" "$reason" "" "cursor"
@@ -108,14 +81,60 @@ deny_or_warn() {
     local message="${3:-}"
     local failure_class="${4:-hard}"
     local notice user_warning
-    if [ "$failure_class" = "policy" ] && aport_hook_is_warn_mode; then
-        notice="$(aport_format_guardrail_notice warn "$policy" "$code" "$message" "cursor")"
+    if aport_hook_should_allow_failure "$failure_class"; then
+        if [ "$failure_class" != "policy" ] && [ "${APORT_ADAPTER_DECISION_RECORDED:-0}" != "1" ]; then
+            aport_hook_record_synthetic_failure_decision \
+                "$policy" "$code" "$message" "cursor" \
+                "${INPUT:-{}}" "${TOOL_NAME:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || true
+            APORT_ADAPTER_DECISION_RECORDED=1
+        fi
+        notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "cursor")"
         user_warning="$(aport_hook_format_user_warning "$policy" "$code" "$message" "cursor")"
         warn_allow "$notice" "$user_warning"
     fi
     notice="$(aport_format_guardrail_notice deny "$policy" "$code" "$message" "cursor")"
     deny "$notice"
 }
+
+map_session_context() {
+    local source_tool="${1:-$TOOL_NAME}"
+    GUARDRAIL_TOOL="session.create"
+    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$source_tool" "cursor")"
+    if aport_hook_context_has_invalid_session_duration "$CONTEXT_JSON"; then
+        deny_or_warn "agent.session.create.v1" "oap.invalid_session_duration" \
+            "Session duration is malformed or outside the supported 60-86400 second range" "hard"
+    fi
+    if aport_hook_context_has_invalid_session_type "$CONTEXT_JSON"; then
+        deny_or_warn "agent.session.create.v1" "oap.invalid_session_type" \
+            "Session type is malformed or outside the supported interactive, batch, webhook, scheduled, or ephemeral values" "hard"
+    fi
+    if aport_hook_context_has_invalid_session_count "$CONTEXT_JSON"; then
+        deny_or_warn "agent.session.create.v1" "oap.invalid_session_count" \
+            "Active session count is malformed; expected a non-negative integer from trusted host metadata" "hard"
+    fi
+    CONTEXT_JSON="$(aport_hook_strip_adapter_context_flags "$CONTEXT_JSON")"
+}
+
+emit_cursor_input_too_large() {
+    deny_or_warn "hook.input" "oap.input_too_large" "Hook payload exceeded ${APORT_HOOK_STDIN_MAX_BYTES} bytes." "hard"
+}
+
+# Read stdin with a bounded wait so a broken host pipe cannot hang the agent session.
+INPUT="$(aport_read_stdin_with_timeout)"
+
+if [ "$INPUT" = "$APORT_HOOK_STDIN_TOO_LARGE_SENTINEL" ]; then
+    emit_cursor_input_too_large
+fi
+
+# Empty input means the host did not provide a tool-call payload. Fail closed.
+if [ -z "$INPUT" ]; then
+    deny_or_warn "hook.input" "oap.empty_input" "Host did not provide a hook payload" "hard"
+fi
+
+# Require jq for JSON parsing
+if ! command -v jq &> /dev/null; then
+    deny_or_warn "hook.runtime" "oap.missing_dependency" "jq is required to parse hook payloads" "mandatory"
+fi
 
 if aport_hook_payload_has_malformed_tool_arguments "$INPUT"; then
     deny_or_warn "hook.input" "oap.invalid_tool_arguments" "Hook tool arguments must be a JSON object"
@@ -183,8 +202,7 @@ if [ "$HOOK_EVENT" = "beforeReadFile" ] || [ "$HOOK_EVENT" = "beforeTabFileRead"
 
 elif [ "$HOOK_EVENT" = "subagentStart" ] || { [ -z "$HOOK_EVENT" ] && echo "$INPUT" | jq -e '.subagent_id' &> /dev/null; }; then
     # subagentStart: sub-agent spawning
-    GUARDRAIL_TOOL="session.create"
-    CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "subagentStart" "cursor")"
+    map_session_context "subagentStart"
 
 elif [ "$HOOK_EVENT" = "beforeMCPExecution" ] || { [ -z "$HOOK_EVENT" ] && [ -n "$TOOL_NAME" ] && echo "$INPUT" | jq -e '.mcp_server_name // .server // .url' &> /dev/null; }; then
     # beforeMCPExecution: MCP tool calls. Cursor's current native field is
@@ -280,12 +298,10 @@ elif [ -n "$TOOL_NAME" ]; then
             CONTEXT_JSON="$(aport_hook_browser_context_from_payload "$INPUT")"
             ;;
         task | agent | taskcreate | taskupdate | taskstop | skill | subagent | subagentstart | sendmessage | teamcreate | teamdelete)
-            GUARDRAIL_TOOL="session.create"
-            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "cursor")"
+            map_session_context "$TOOL_NAME"
             ;;
         croncreate | crondelete)
-            GUARDRAIL_TOOL="session.create"
-            CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$TOOL_NAME" "cursor")"
+            map_session_context "$TOOL_NAME"
             ;;
         mcp__* | mcp:* | callmcptool)
             GUARDRAIL_TOOL="mcp.tool"
@@ -378,6 +394,7 @@ cleanup_decision() { [ -n "$HOOK_DECISION_FILE" ] && rm -f "$HOOK_DECISION_FILE"
 
 if [ "$GUARDRAIL_EXIT" -eq 0 ]; then
     aport_append_local_session_decision "$HOOK_DECISION_FILE" "cursor" "$INPUT" "$TOOL_NAME" "$GUARDRAIL_TOOL" "$CONTEXT_JSON"
+    APORT_ADAPTER_DECISION_RECORDED=1
     cleanup_decision
     allow
 fi
@@ -408,6 +425,7 @@ if [ "$REASON" = "Policy denied this action." ] && [ -n "$GUARDRAIL_OUTPUT" ]; t
     [ -n "$R" ] && REASON="$R"
 fi
 aport_append_local_session_decision "$HOOK_DECISION_FILE" "cursor" "$INPUT" "$TOOL_NAME" "$GUARDRAIL_TOOL" "$CONTEXT_JSON"
+APORT_ADAPTER_DECISION_RECORDED=1
 cleanup_decision
 if [ "$HAS_DECISION_FILE" -ne 1 ]; then
     deny_or_warn "${GUARDRAIL_TOOL:-hook.input}" "oap.evaluator_failed" "$REASON" "hard"

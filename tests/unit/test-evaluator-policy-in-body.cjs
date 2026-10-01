@@ -15,6 +15,7 @@ let capturedBody;
 
 const originalFetch = globalThis.fetch;
 const originalHookFramework = process.env.APORT_HOOK_FRAMEWORK;
+const originalEnforcementMode = process.env.APORT_ENFORCEMENT_MODE;
 process.env.APORT_HOOK_FRAMEWORK = "cursor";
 globalThis.fetch = function (url, options) {
   capturedUrl = url;
@@ -46,6 +47,16 @@ const { evaluatePolicy } = require("../../src/evaluator.js");
       console.error("FAIL: expected runtime enforcement metadata, got", capturedBody && capturedBody.runtime);
       process.exit(1);
     }
+
+    process.env.APORT_ENFORCEMENT_MODE = "observe";
+    await evaluatePolicy(policyPack, passport, context, {
+      apiUrl: "https://example.com",
+      policyInBody: true,
+    });
+    if (capturedBody.runtime?.enforcement_mode !== "observe") {
+      console.error("FAIL: expected observe runtime enforcement metadata, got", capturedBody && capturedBody.runtime);
+      process.exit(1);
+    }
     console.log("OK: policyInBody sends IN_BODY and body.policy");
   } finally {
     globalThis.fetch = originalFetch;
@@ -53,6 +64,11 @@ const { evaluatePolicy } = require("../../src/evaluator.js");
       delete process.env.APORT_HOOK_FRAMEWORK;
     } else {
       process.env.APORT_HOOK_FRAMEWORK = originalHookFramework;
+    }
+    if (originalEnforcementMode === undefined) {
+      delete process.env.APORT_ENFORCEMENT_MODE;
+    } else {
+      process.env.APORT_ENFORCEMENT_MODE = originalEnforcementMode;
     }
   }
 })();

@@ -370,7 +370,7 @@ A: No. Local mode requires a passport file. Use API mode with hosted passports.
 A: With `failClosed: true` (default), all tool calls are blocked. Set `failClosed: false` to allow on error (NOT RECOMMENDED for security).
 
 **Q: How do I roll out without blocking developers?**
-A: Keep `failClosed: true`, but set `enforcementMode: warn` or run `npx @aporthq/aport-agent-guardrails mode <framework> --enforcement=warn`. This records the original deny decision while allowing the framework action to continue. Switch back to `--enforcement=enforce` when the passport is tuned.
+A: Keep `failClosed: true`, but set `enforcementMode: warn` or run `npx @aporthq/aport-agent-guardrails mode <framework> --enforcement=warn` for conservative report-only rollout. This records completed policy denials while allowing the framework action to continue, but still blocks adapter/runtime/API failures. If the priority is adoption and not blocking developers while mappings or hosted availability are still being tuned, use `--enforcement=observe`; observe mode allows with warnings for policy denials and non-mandatory APort runtime/mapping/API failures. Mandatory prerequisites such as missing `jq` still block. Switch back to `--enforcement=enforce` when the passport and mappings are tuned.
 
 Claude Code surfaces warn-mode decisions with a visible `systemMessage`. Cursor returns warning fields as best-effort context but may not display allow warnings in the UI; use the audit log or `bin/aport-status.sh` to inspect report-only decisions.
 

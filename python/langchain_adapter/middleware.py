@@ -12,13 +12,19 @@ except Exception:  # pragma: no cover - keeps the package usable without LangCha
         pass
 
 from aport_guardrails.core.config import find_config_path, load_config
-from aport_guardrails.core import Evaluator, GuardrailViolation, build_tool_context, tool_to_pack_id
+from aport_guardrails.core import (
+    Evaluator,
+    GuardrailViolation,
+    build_tool_context,
+    normalize_enforcement_mode,
+    should_allow_denied_decision,
+    tool_to_pack_id,
+)
 from aport_guardrails.core.display import format_policy_warning
 
 
 def _normalize_enforcement_mode(value: Any) -> str:
-    normalized = str(value or "enforce").lower().replace("_", "-")
-    return "warn" if normalized in {"warn", "report-only", "audit-only", "observe", "observation"} else "enforce"
+    return normalize_enforcement_mode(value)
 
 
 def _resolve_enforcement_mode(config_path: str | None, framework: str, explicit: str | None) -> str:
@@ -89,7 +95,7 @@ class APortCallback(AsyncCallbackHandler):
             reasons = decision.get("reasons") or [{}]
             msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
             code = reasons[0].get("code", "oap.denied") if reasons else "oap.denied"
-            if self.enforcement_mode == "warn":
+            if should_allow_denied_decision(self.enforcement_mode, decision):
                 print(
                     format_policy_warning(
                         policy=pack_id,
@@ -98,6 +104,7 @@ class APortCallback(AsyncCallbackHandler):
                         tool_name=tool_name,
                         framework="langchain",
                         config_path=self.config_path,
+                        enforcement_mode=self.enforcement_mode,
                     )
                 )
                 return

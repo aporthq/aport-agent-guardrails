@@ -24,12 +24,13 @@
 
 import { Evaluator, toolToPackId } from "../core/evaluator.js";
 import { findConfigPath, loadConfig } from "../core/config.js";
+import { normalizeEnforcementMode, shouldAllowDeniedDecision } from "../core/enforcement.js";
 
 export interface OAPGuardrailProviderConfig {
   framework?: string;
   configPath?: string;
-  enforcementMode?: "enforce" | "warn";
-  enforcement_mode?: "enforce" | "warn";
+  enforcementMode?: "enforce" | "warn" | "observe";
+  enforcement_mode?: "enforce" | "warn" | "observe";
 }
 
 export interface GuardrailRequest {
@@ -58,7 +59,7 @@ export class OAPGuardrailProvider {
   name = "aport";
 
   private evaluator: Evaluator;
-  private enforcementMode: "enforce" | "warn";
+  private enforcementMode: "enforce" | "warn" | "observe";
 
   constructor(config: OAPGuardrailProviderConfig | Record<string, unknown> = {}) {
     const framework = (config as OAPGuardrailProviderConfig).framework ?? "generic";
@@ -119,7 +120,7 @@ export class OAPGuardrailProvider {
 function toDecision(
   raw: { allow: boolean; reasons?: Array<{ code?: string; message?: string }> },
   packId: string,
-  enforcementMode: "enforce" | "warn" = "enforce",
+  enforcementMode: "enforce" | "warn" | "observe" = "enforce",
 ): GuardrailDecision {
   const reasons: GuardrailReason[] = (raw.reasons ?? []).map((r) => ({
     code: r.code ?? "oap.denied",
@@ -129,9 +130,9 @@ function toDecision(
     reasons.push({ code: raw.allow ? "allowed" : "oap.denied" });
   }
   const originalAllow = raw.allow;
-  const effectiveAllow = enforcementMode === "warn" ? true : originalAllow;
+  const effectiveAllow = originalAllow || shouldAllowDeniedDecision(enforcementMode, raw);
   const metadata =
-    enforcementMode === "warn" || effectiveAllow !== originalAllow
+    enforcementMode !== "enforce" || effectiveAllow !== originalAllow
       ? { enforcementMode, originalAllow }
       : undefined;
   return {
@@ -142,18 +143,11 @@ function toDecision(
   };
 }
 
-function resolveEnforcementMode(value: unknown): "enforce" | "warn" {
-  const raw = String(
+function resolveEnforcementMode(value: unknown): "enforce" | "warn" | "observe" {
+  return normalizeEnforcementMode(
     value ??
       process.env.APORT_ENFORCEMENT_MODE ??
       process.env.APORT_ENFORCEMENT ??
-      process.env.APORT_GUARDRAIL_ENFORCEMENT ??
-      "",
-  )
-    .trim()
-    .toLowerCase();
-  if (["warn", "report-only", "report_only", "audit-only", "audit_only"].includes(raw)) {
-    return "warn";
-  }
-  return "enforce";
+      process.env.APORT_GUARDRAIL_ENFORCEMENT,
+  );
 }

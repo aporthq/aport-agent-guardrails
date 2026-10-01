@@ -19,6 +19,7 @@ import {
   normalizeFileContext,
   normalizeMcpContext,
   normalizeMessageContext,
+  normalizeSessionContext,
 } from "../../extensions/openclaw-aport/tool-mapping.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -148,6 +149,152 @@ describe("normalizeFileContext", () => {
       file_path: "README.md",
       content: "hi",
     });
+  });
+});
+
+describe("normalizeSessionContext", () => {
+  it("builds hosted session metadata without forwarding raw prompts", () => {
+    const context = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "review this diff", agent_type: "reviewer", duration_ms: 60000 },
+      { toolCallId: "tool-1", session_id: "parent-1" },
+    );
+
+    assert.strictEqual(context.session_operation, "create");
+    assert.strictEqual(context.session_type, "interactive");
+    assert.strictEqual(context.requested_duration, 60);
+    assert.strictEqual(context.description_length, "review this diff".length);
+    assert.strictEqual(context.parent_session_id, "parent-1");
+    assert.strictEqual(context.session_call_id, "tool-1");
+    assert.strictEqual(context.subagent_type, "reviewer");
+    assert.ok(!Object.prototype.hasOwnProperty.call(context, "prompt"));
+  });
+
+  it("keeps host session attribution authoritative over tool params", () => {
+    const context = normalizeSessionContext(
+      "sessions_spawn",
+      {
+        prompt: "review this diff",
+        user_id: "attacker",
+        active_session_count: 0,
+        toolCallId: "attacker-call",
+        session_id: "attacker-parent",
+      },
+      {
+        user_id: "host-user",
+        active_session_count: 5,
+        toolCallId: "host-call",
+        session_id: "host-parent",
+      },
+    );
+
+    assert.strictEqual(context.user_id, "host-user");
+    assert.strictEqual(context.active_session_count, 5);
+    assert.strictEqual(context.current_active_sessions, 5);
+    assert.strictEqual(context.session_call_id, "host-call");
+    assert.strictEqual(context.parent_session_id, "host-parent");
+    assert.strictEqual(context.description_length, "review this diff".length);
+  });
+
+  it("preserves valid explicit session types and flags malformed explicit values", () => {
+    const validContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "batch" },
+      { toolCallId: "tool-1" },
+    );
+    assert.strictEqual(validContext.session_type, "batch");
+    assert.ok(!Object.prototype.hasOwnProperty.call(validContext, "invalid_session_type"));
+
+    const invalidContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "root" },
+      { toolCallId: "tool-2" },
+    );
+    assert.strictEqual(invalidContext.invalid_session_type, true);
+
+    const nonStringContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: ["batch"] },
+      { toolCallId: "tool-3" },
+    );
+    assert.strictEqual(nonStringContext.invalid_session_type, true);
+
+    const matchingAliasContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "batch", sessionType: "Batch" },
+      { toolCallId: "tool-4" },
+    );
+    assert.strictEqual(matchingAliasContext.session_type, "batch");
+    assert.ok(!Object.prototype.hasOwnProperty.call(matchingAliasContext, "invalid_session_type"));
+
+    const conflictingAliasContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "interactive", sessionType: "batch" },
+      { toolCallId: "tool-5" },
+    );
+    assert.strictEqual(conflictingAliasContext.invalid_session_type, true);
+
+    const nestedConflictContext = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "run batch job", session_type: "interactive", args: { session_type: "batch" } },
+      { toolCallId: "tool-6" },
+    );
+    assert.strictEqual(nestedConflictContext.invalid_session_type, true);
+  });
+
+  it("rejects coerced, overflowing, and conflicting session durations", () => {
+    for (const params of [
+      { prompt: "review this", duration_ms: [60000] },
+      { prompt: "review this", duration_ms: 86400999 },
+      { prompt: "review this", duration_ms: 60000.1 },
+      { prompt: "review this", duration_seconds: 60, duration_ms: 172800000 },
+      { prompt: "review this", duration_ms: 60000, args: { duration_ms: 172800000 } },
+    ]) {
+      const context = normalizeSessionContext("sessions_spawn", params, { toolCallId: "tool-1" });
+      assert.strictEqual(context.invalid_session_duration, true, JSON.stringify(params));
+      assert.ok(!Object.prototype.hasOwnProperty.call(context, "requested_duration"), JSON.stringify(params));
+    }
+
+    const context = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "review this", duration_seconds: 60, duration_ms: 60000 },
+      { toolCallId: "tool-1" },
+    );
+    assert.strictEqual(context.requested_duration, 60);
+    assert.ok(!Object.prototype.hasOwnProperty.call(context, "invalid_session_duration"));
+
+    const waitContext = normalizeSessionContext(
+      "sessions_wait",
+      { id: "child-1", timeout_ms: 30000 },
+      { toolCallId: "tool-1" },
+    );
+    assert.strictEqual(waitContext.session_operation, "list");
+    assert.ok(!Object.prototype.hasOwnProperty.call(waitContext, "requested_duration"));
+    assert.ok(!Object.prototype.hasOwnProperty.call(waitContext, "invalid_session_duration"));
+  });
+
+  it("rejects malformed active-session count evidence instead of coercing it", () => {
+    for (const event of [
+      { active_session_count: "" },
+      { active_session_count: [] },
+      { active_session_count: -1 },
+      { active_session_count: 1.5 },
+      { active_session_count: 0, current_active_sessions: 10 },
+    ]) {
+      const context = normalizeSessionContext("sessions_spawn", { prompt: "review this" }, event);
+      assert.strictEqual(context.invalid_session_count, true, JSON.stringify(event));
+      assert.strictEqual(context.active_session_count, null);
+      assert.strictEqual(context.current_active_sessions, null);
+    }
+
+    const context = normalizeSessionContext(
+      "sessions_spawn",
+      { prompt: "review this" },
+      { active_session_count: "5", current_active_sessions: 5 },
+    );
+    assert.strictEqual(context.active_session_count, 5);
+    assert.strictEqual(context.current_active_sessions, 5);
+    assert.ok(!Object.prototype.hasOwnProperty.call(context, "invalid_session_count"));
   });
 });
 
@@ -726,6 +873,20 @@ describe("plugin hook contract", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("allows denied tools when observe mode is configured", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "observe",
+    });
+
+    const result = await beforeToolCall({ toolName: "exec.run", params: { command: "sudo ls" } });
+    assert.deepStrictEqual(result, {});
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("blocks unmapped tools by default and allows only with explicit allowUnmappedTools", async () => {
     const { tempDir, passportPath } = await createTestPassport();
     const strictBeforeToolCall = await registerPlugin({ mode: "local", passportFile: passportPath });
@@ -773,6 +934,195 @@ describe("plugin hook contract", () => {
     const result = await beforeToolCall({ toolName: "new_host_tool", params: {} });
     assert.strictEqual(result.block, true);
     assert.match(result.blockReason, /oap\.unknown_tool/);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("keeps invalid session durations blocking in warn mode", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "warn",
+    });
+
+    const result = await beforeToolCall({
+      toolName: "sessions_spawn",
+      params: { prompt: "review this", duration_ms: 172800000 },
+    });
+    assert.strictEqual(result.block, true);
+    assert.match(result.blockReason, /oap\.invalid_session_duration/);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("keeps invalid explicit session types blocking before hosted verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      throw new Error("fetch should not be called");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", session_type: "root" },
+      });
+
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
+
+      const nonStringResult = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", session_type: ["batch"] },
+      });
+      assert.strictEqual(nonStringResult.block, true);
+      assert.match(nonStringResult.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
+
+      const conflictResult = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", session_type: "interactive", sessionType: "batch" },
+      });
+      assert.strictEqual(conflictResult.block, true);
+      assert.match(conflictResult.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
+
+      const nestedConflictResult = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", session_type: "interactive", args: { session_type: "batch" } },
+      });
+      assert.strictEqual(nestedConflictResult.block, true);
+      assert.match(nestedConflictResult.blockReason, /oap\.invalid_session_type/);
+      assert.strictEqual(fetchCalled, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps malformed session durations blocking before hosted verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      throw new Error("fetch should not be called");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", duration_seconds: 60, duration_ms: 172800000 },
+      });
+
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.invalid_session_duration/);
+      assert.strictEqual(fetchCalled, false);
+
+      const fractionalMsResult = await beforeToolCall({
+        toolName: "sessions_spawn",
+        params: { prompt: "review this", duration_ms: 60000.1 },
+      });
+
+      assert.strictEqual(fractionalMsResult.block, true);
+      assert.match(fractionalMsResult.blockReason, /oap\.invalid_session_duration/);
+      assert.strictEqual(fetchCalled, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps malformed active-session counts blocking before hosted verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      throw new Error("fetch should not be called");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall(
+        { toolName: "sessions_spawn", params: { prompt: "review this" } },
+        { active_session_count: "" },
+      );
+
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /oap\.invalid_session_count/);
+      assert.strictEqual(fetchCalled, false);
+
+      const conflictResult = await beforeToolCall(
+        { toolName: "sessions_spawn", params: { prompt: "review this" } },
+        { active_session_count: 0, current_active_sessions: 10 },
+      );
+      assert.strictEqual(conflictResult.block, true);
+      assert.match(conflictResult.blockReason, /oap\.invalid_session_count/);
+      assert.strictEqual(fetchCalled, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps missing local passports blocking in warn mode", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "aport-openclaw-missing-passport-"));
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: path.join(tempDir, "aport", "missing-passport.json"),
+      enforcementMode: "warn",
+    });
+
+    const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+    assert.strictEqual(result.block, true);
+    assert.match(result.blockReason, /APort denied this tool call/);
+    assert.match(result.blockReason, /oap\.passport_not_found/);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("keeps suspended local passports blocking in warn mode", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const passport = JSON.parse(await readFile(passportPath, "utf8"));
+    passport.status = "suspended";
+    await writeFile(passportPath, JSON.stringify(passport, null, 2), "utf8");
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "warn",
+    });
+
+    const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+    assert.strictEqual(result.block, true);
+    assert.match(result.blockReason, /APort denied this tool call/);
+    assert.match(result.blockReason, /oap\.passport_suspended/);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("allows unmapped tools in observe mode", async () => {
+    const { tempDir, passportPath } = await createTestPassport();
+    const beforeToolCall = await registerPlugin({
+      mode: "local",
+      passportFile: passportPath,
+      enforcementMode: "observe",
+    });
+
+    const result = await beforeToolCall({ toolName: "new_host_tool", params: {} });
+    assert.deepStrictEqual(result, {});
 
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -848,6 +1198,127 @@ describe("plugin hook contract", () => {
         enforced_by: "@aporthq/openclaw-aport",
         harness: "openclaw",
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("normalizes session tool params before API verification", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalUserId = process.env.APORT_USER_ID;
+    let seenUrl = "";
+    let seenBody = null;
+    process.env.APORT_USER_ID = "user-openclaw-test";
+    globalThis.fetch = async (url, opts) => {
+      seenUrl = String(url);
+      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      const decision = withContentHash({
+        allow: true,
+        decision_id: "dec-session-api",
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({ mode: "api", agentId: "ap_test" });
+      const result = await beforeToolCall(
+        { toolName: "sessions_spawn", params: { prompt: "review this", agent_type: "reviewer" } },
+        { toolCallId: "session-call-1", session_id: "parent-session" },
+      );
+
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(seenUrl, "https://api.aport.io/api/verify/policy/agent.session.create.v1");
+      assert.strictEqual(seenBody.context.agent_id, "ap_test");
+      assert.strictEqual(seenBody.context.user_id, "user-openclaw-test");
+      assert.strictEqual(seenBody.context.session_operation, "create");
+      assert.strictEqual(seenBody.context.session_type, "interactive");
+      assert.strictEqual(seenBody.context.description_length, "review this".length);
+      assert.strictEqual(seenBody.context.session_call_id, "session-call-1");
+      assert.ok(!Object.prototype.hasOwnProperty.call(seenBody.context, "prompt"));
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalUserId === undefined) delete process.env.APORT_USER_ID;
+      else process.env.APORT_USER_ID = originalUserId;
+    }
+  });
+
+  it("uses configured hosted agent ID as the session user fallback", async () => {
+    const originalFetch = globalThis.fetch;
+    const envKeys = ["APORT_USER_ID", "APORT_TARGET_USER", "APORT_OWNER_EMAIL", "APORT_EMAIL", "APORT_AGENT_ID"];
+    const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    let seenBody = null;
+    for (const key of envKeys) delete process.env[key];
+
+    globalThis.fetch = async (_url, opts) => {
+      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      const decision = withContentHash({
+        allow: true,
+        decision_id: "dec-session-config-agent",
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_configured_session_user",
+      });
+      const result = await beforeToolCall(
+        { toolName: "sessions_spawn", params: { prompt: "review this", agent_type: "reviewer" } },
+        { toolCallId: "session-call-configured-user", session_id: "parent-session" },
+      );
+
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(seenBody.context.agent_id, "ap_configured_session_user");
+      assert.strictEqual(seenBody.context.user_id, "ap_configured_session_user");
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of envKeys) {
+        if (originalEnv[key] === undefined) delete process.env[key];
+        else process.env[key] = originalEnv[key];
+      }
+    }
+  });
+
+  it("sends observe enforcement metadata during API verification", async () => {
+    const originalFetch = globalThis.fetch;
+    let seenBody = null;
+    globalThis.fetch = async (_url, opts) => {
+      seenBody = JSON.parse(String(opts?.body ?? "{}"));
+      const decision = withContentHash({
+        allow: true,
+        decision_id: "dec-observe-runtime",
+        reasons: [{ code: "oap.allowed", message: "ok" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "observe",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(seenBody.runtime.enforcement_mode, "observe");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -963,6 +1434,35 @@ describe("plugin hook contract", () => {
     }
   });
 
+  it("allows API decision integrity failures in observe mode", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      async json() {
+        return {
+          decision: {
+            allow: true,
+            decision_id: "dec-bad-integrity-observe",
+            reasons: [{ code: "oap.allowed", message: "ok" }],
+            content_hash: "sha256:bad",
+          },
+        };
+      },
+    });
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "observe",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.deepStrictEqual(result, {});
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("keeps API evaluator errors blocking in warn mode", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => {
@@ -978,6 +1478,56 @@ describe("plugin hook contract", () => {
       const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
       assert.strictEqual(result.block, true);
       assert.match(result.blockReason, /oap\.policy_error/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps hosted hard denials blocking in warn mode", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      const decision = withContentHash({
+        allow: false,
+        decision_id: "dec-missing-context",
+        reasons: [{ code: "oap.missing_required_context", message: "repository is required" }],
+      });
+      return {
+        ok: true,
+        async json() {
+          return { decision };
+        },
+      };
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "warn",
+      });
+      const result = await beforeToolCall({ toolName: "git.merge", params: { action: "merge" } });
+      assert.strictEqual(result.block, true);
+      assert.match(result.blockReason, /APort denied this tool call/);
+      assert.match(result.blockReason, /oap\.missing_required_context/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("allows API evaluator errors in observe mode", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("network down");
+    };
+
+    try {
+      const beforeToolCall = await registerPlugin({
+        mode: "api",
+        agentId: "ap_test",
+        enforcementMode: "observe",
+      });
+      const result = await beforeToolCall({ toolName: "exec.run", params: { command: "ls" } });
+      assert.deepStrictEqual(result, {});
     } finally {
       globalThis.fetch = originalFetch;
     }

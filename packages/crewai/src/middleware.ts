@@ -8,8 +8,12 @@ import {
   Evaluator,
   findConfigPath,
   loadConfig,
+  normalizeEnforcementMode,
+  shouldAllowDeniedDecision,
   toolToPackId,
 } from "@aporthq/aport-agent-guardrails-core";
+
+type EnforcementMode = "enforce" | "warn" | "observe";
 
 export interface BeforeToolCallContext {
   tool_name: string;
@@ -17,7 +21,7 @@ export interface BeforeToolCallContext {
 }
 
 let _crewaiEvaluator: Evaluator | null = null;
-let _crewaiEnforcementMode: "enforce" | "warn" | null = null;
+let _crewaiEnforcementMode: EnforcementMode | null = null;
 
 type RuntimeAwareEvaluatorConstructor = new (
   configPath?: string | null,
@@ -36,7 +40,7 @@ function getCrewaiEvaluator(): Evaluator {
   return _crewaiEvaluator;
 }
 
-function getCrewaiEnforcementMode(): "enforce" | "warn" {
+function getCrewaiEnforcementMode(): EnforcementMode {
   if (_crewaiEnforcementMode) return _crewaiEnforcementMode;
   const configPath = findConfigPath("crewai");
   const config = configPath ? loadConfig(configPath) : {};
@@ -46,10 +50,7 @@ function getCrewaiEnforcementMode(): "enforce" | "warn" {
     process.env.APORT_ENFORCEMENT_MODE ??
     process.env.APORT_ENFORCEMENT ??
     process.env.APORT_GUARDRAIL_ENFORCEMENT;
-  const normalized = String(raw || "enforce").toLowerCase().replace(/_/g, "-");
-  _crewaiEnforcementMode = ["warn", "report-only", "audit-only", "observe", "observation"].includes(normalized)
-    ? "warn"
-    : "enforce";
+  _crewaiEnforcementMode = normalizeEnforcementMode(raw);
   return _crewaiEnforcementMode;
 }
 
@@ -100,8 +101,10 @@ export function beforeToolCall(context: BeforeToolCallContext): false | null {
     const msg = sanitizeDisplayText(decision.reasons?.[0]?.message ?? "APort policy denied");
     const code = sanitizeDisplayText(decision.reasons?.[0]?.code ?? "oap.denied");
     const toolName = sanitizeDisplayText(context.tool_name);
-    if (getCrewaiEnforcementMode() === "warn") {
-      console.warn(`[APort] warning: policy would have denied ${toolName}. Reason: ${code}.`);
+    const enforcementMode = getCrewaiEnforcementMode();
+    if (shouldAllowDeniedDecision(enforcementMode, decision)) {
+      const label = enforcementMode === "observe" ? "observation" : "warning";
+      console.warn(`[APort] ${label}: policy would have denied ${toolName}. Reason: ${code}.`);
       return null;
     }
     console.warn(`[APort] denied ${toolName}. Reason: ${code}. ${msg}`);
