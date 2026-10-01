@@ -93,6 +93,10 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_se
 printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
     || fail "session context must reject conflicting session_type aliases: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting nested type","session_type":"batch"},"args":{"session_type":"interactive"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
+    || fail "session context must reject conflicting session_type evidence across containers: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"explore repo","duration_ms":30000}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e 'has("requested_duration") | not' > /dev/null \
     || fail "session context must not emit schema-invalid requested_duration values: $out"
@@ -104,6 +108,10 @@ printf '%s' "$out" | jq -e '.session_operation == "list" and (. | has("requested
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting duration","duration_seconds":60,"duration_ms":172800000}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
     || fail "session context must flag conflicting duration aliases: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting nested duration","duration_seconds":60},"args":{"duration_seconds":3600}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
+    || fail "session context must reject conflicting requested durations across containers: $out"
 
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"current_active_sessions":10,"tool_input":{"description":"conflicting count"}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_count == true and .active_session_count == null and .current_active_sessions == null' > /dev/null \

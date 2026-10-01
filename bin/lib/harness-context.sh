@@ -789,13 +789,13 @@ aport_hook_context_from_payload() {
         end;
       def valid_session_type($value):
         ["interactive", "batch", "webhook", "scheduled", "ephemeral"] | index($value) != null;
-      def session_type_evidence($root; $ti; $raw):
+      def session_type_values($src):
         ([
-          if ($root | has("session_type")) and $root.session_type != null then $root.session_type else empty end,
-          if ($root | has("sessionType")) and $root.sessionType != null then $root.sessionType else empty end,
-          if ($ti | has("session_type")) and $ti.session_type != null then $ti.session_type else empty end,
-          if ($ti | has("sessionType")) and $ti.sessionType != null then $ti.sessionType else empty end
-        ]) as $explicit_values |
+          if (($src | type) == "object" and ($src | has("session_type")) and $src.session_type != null) then $src.session_type else empty end,
+          if (($src | type) == "object" and ($src | has("sessionType")) and $src.sessionType != null) then $src.sessionType else empty end
+        ]);
+      def session_type_evidence($sources; $raw):
+        ([$sources[] | session_type_values(.)[]]) as $explicit_values |
         if ($explicit_values | length) == 0 then
           {invalid: false, value: session_type($raw)}
         elif any($explicit_values[]; type != "string") then
@@ -807,27 +807,39 @@ aport_hook_context_from_payload() {
             {invalid: true}
           end
         end;
-      def session_duration_evidence($ti):
+      def session_duration_second_values($src):
+        if ($src | type) != "object" then [] else
+          [
+            $src.requested_duration,
+            $src.requestedDuration,
+            $src.requested_duration_seconds,
+            $src.requestedDurationSeconds,
+            $src.session_duration_seconds,
+            $src.sessionDurationSeconds,
+            $src.duration_seconds,
+            $src.durationSeconds,
+            $src.ttl_seconds,
+            $src.ttlSeconds
+          ] | map(select(. != null))
+        end;
+      def session_duration_millisecond_values($src):
+        if ($src | type) != "object" then [] else
+          [
+            $src.requested_duration_ms,
+            $src.requestedDurationMs,
+            $src.session_duration_ms,
+            $src.sessionDurationMs,
+            $src.duration_ms,
+            $src.durationMs
+          ] | map(select(. != null))
+        end;
+      def session_duration_evidence($sources):
         [
-          $ti.requested_duration,
-          $ti.requestedDuration,
-          $ti.requested_duration_seconds,
-          $ti.requestedDurationSeconds,
-          $ti.session_duration_seconds,
-          $ti.sessionDurationSeconds,
-          $ti.duration_seconds,
-          $ti.durationSeconds,
-          $ti.ttl_seconds,
-          $ti.ttlSeconds
-        ] | map(select(. != null)) as $second_values |
+          $sources[] | session_duration_second_values(.)[]
+        ] as $second_values |
         [
-          $ti.requested_duration_ms,
-          $ti.requestedDurationMs,
-          $ti.session_duration_ms,
-          $ti.sessionDurationMs,
-          $ti.duration_ms,
-          $ti.durationMs
-        ] | map(select(. != null)) as $millisecond_values |
+          $sources[] | session_duration_millisecond_values(.)[]
+        ] as $millisecond_values |
         (
           [
             ($second_values[] | {unit: "s", value: .}),
@@ -872,7 +884,22 @@ aport_hook_context_from_payload() {
           else {present: true, invalid: false, value: $normalized[0]}
           end
         end;
-      (obj(.tool_input) + obj(.input) + obj(.args)) as $raw_ti |
+      obj(.tool_input) as $tool_input_obj |
+      obj(.input) as $input_obj |
+      obj(.args) as $args_obj |
+      ($tool_input_obj + $input_obj + $args_obj) as $raw_ti |
+      ([
+        .,
+        $tool_input_obj,
+        $input_obj,
+        $args_obj,
+        obj($tool_input_obj.args),
+        obj($tool_input_obj.arguments),
+        obj($input_obj.args),
+        obj($input_obj.arguments),
+        obj($args_obj.args),
+        obj($args_obj.arguments)
+      ]) as $session_sources |
       ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
       if $kind == "shell" then
         ($event_hint == "claude-code" and ($default_tool | ascii_downcase | IN("bash", "powershell", "monitor"))) as $claude_bounded_shell |
@@ -1095,8 +1122,8 @@ aport_hook_context_from_payload() {
           $ti.description // $ti.prompt // $ti.task // $ti.message // ""
         ) as $description |
         session_operation($default_tool) as $session_operation |
-        session_type_evidence(.; $ti; $default_tool) as $session_type |
-        session_duration_evidence($ti) as $requested_duration |
+        session_type_evidence($session_sources; $default_tool) as $session_type |
+        session_duration_evidence($session_sources) as $requested_duration |
         session_count_evidence(.) as $active_session_count |
         ({
           description_length: (str($description) | length),

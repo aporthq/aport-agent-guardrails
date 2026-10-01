@@ -440,7 +440,7 @@ aport_hook_record_synthetic_failure_decision() {
     local original_tool="${6:-unknown}"
     local guardrail_tool="${7:-$policy}"
     local context_json="${8:-$default_context}"
-    local decision_file decision_dir tmp_decision now expires decision_id safe_policy safe_code safe_message escaped_policy escaped_code escaped_message escaped_id escaped_now escaped_expires audit_ref audit_line audit_message
+    local decision_file decision_dir tmp_decision now expires decision_id safe_policy safe_code safe_message escaped_policy escaped_code escaped_message escaped_id escaped_now escaped_expires audit_ref audit_dir audit_line audit_message
 
     decision_file="${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-${DECISION_FILE:-}}}"
     [ -n "$decision_file" ] || return 0
@@ -487,12 +487,14 @@ aport_hook_record_synthetic_failure_decision() {
 
     audit_ref="${AUDIT_LOG:-${APORT_AUDIT_LOG:-}}"
     if [ -n "$audit_ref" ]; then
-        mkdir -p "$(dirname "$audit_ref")" 2> /dev/null || true
-        audit_line="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$(aport_sanitize_display_text "$original_tool") framework=$(aport_sanitize_display_text "$framework") decision_id=$decision_id allow=false policy=$safe_policy code=$safe_code"
-        audit_message="${safe_message//\"/\\\"}"
-        [ -n "$audit_message" ] && audit_line="${audit_line} reason=\"${audit_message}\""
-        printf '%s\n' "$audit_line" >> "$audit_ref" 2> /dev/null || true
-        chmod 600 "$audit_ref" 2> /dev/null || true
+        audit_dir="$(dirname "$audit_ref")"
+        if [ ! -L "$audit_ref" ] && mkdir -p "$audit_dir" 2> /dev/null && [ ! -L "$audit_ref" ]; then
+            audit_line="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$(aport_sanitize_display_text "$original_tool") framework=$(aport_sanitize_display_text "$framework") decision_id=$decision_id allow=false policy=$safe_policy code=$safe_code"
+            audit_message="${safe_message//\"/\\\"}"
+            [ -n "$audit_message" ] && audit_line="${audit_line} reason=\"${audit_message}\""
+            printf '%s\n' "$audit_line" >> "$audit_ref" 2> /dev/null || true
+            chmod 600 "$audit_ref" 2> /dev/null || true
+        fi
     fi
     rm -f "$tmp_decision" 2> /dev/null || true
 }
