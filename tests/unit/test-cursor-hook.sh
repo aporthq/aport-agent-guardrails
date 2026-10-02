@@ -686,6 +686,14 @@ tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '.guardrail_tool == 
     exit 1
 }
 
+run_hook "preToolUse Task malformed nested arguments: deny" \
+    '{"hook_event_name":"preToolUse","tool_name":"Task","active_session_count":0,"tool_input":{"description":"worker","arguments":"not-json"}}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected invalid_tool_arguments for malformed Task arguments" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
 # --- Legacy Copilot-style ---
 run_hook "Copilot-style: allow (npm install)" \
     '{"tool":"runTerminalCommand","input":{"command":"npm install"}}' 0 '"permission":"allow"'
@@ -771,6 +779,58 @@ if grep -q "apk_cursor_secret" "$OBSERVE_OUT"; then
     cat "$OBSERVE_OUT" >&2
     exit 1
 fi
+CURSOR_AUDIT_VICTIM="$TEST_DIR/aport/cursor-audit-victim.txt"
+CURSOR_AUDIT_LINK="$TEST_DIR/aport/cursor-audit-link.log"
+CURSOR_AUDIT_OLD_AUDIT_LOG="${AUDIT_LOG-}"
+CURSOR_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+CURSOR_AUDIT_OLD_OPENCLAW_REF="${OPENCLAW_AUDIT_LOG-}"
+CURSOR_AUDIT_HAD_AUDIT_LOG=0
+CURSOR_AUDIT_HAD_REF=0
+CURSOR_AUDIT_HAD_OPENCLAW_REF=0
+if [[ -n "${AUDIT_LOG+x}" ]]; then
+    CURSOR_AUDIT_HAD_AUDIT_LOG=1
+fi
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    CURSOR_AUDIT_HAD_REF=1
+fi
+if [[ -n "${OPENCLAW_AUDIT_LOG+x}" ]]; then
+    CURSOR_AUDIT_HAD_OPENCLAW_REF=1
+fi
+printf 'do-not-append' > "$CURSOR_AUDIT_VICTIM"
+rm -f "$CURSOR_AUDIT_LINK"
+ln -s "$CURSOR_AUDIT_VICTIM" "$CURSOR_AUDIT_LINK"
+export AUDIT_LOG="$CURSOR_AUDIT_LINK"
+export APORT_AUDIT_LOG="$CURSOR_AUDIT_LINK"
+export OPENCLAW_AUDIT_LOG="$CURSOR_AUDIT_LINK"
+run_hook "Mode=api observe with unsafe synthetic audit target: deny" \
+    '{"tool_name":"Shell","tool_input":{"command":"ls -la"}}' 2 '"permission":"deny"'
+CURSOR_AUDIT_OUT="$LAST_HOOK_OUTPUT"
+if [[ "$CURSOR_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$CURSOR_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ "$CURSOR_AUDIT_HAD_AUDIT_LOG" -eq 1 ]]; then
+    export AUDIT_LOG="$CURSOR_AUDIT_OLD_AUDIT_LOG"
+else
+    unset AUDIT_LOG
+fi
+if [[ "$CURSOR_AUDIT_HAD_OPENCLAW_REF" -eq 1 ]]; then
+    export OPENCLAW_AUDIT_LOG="$CURSOR_AUDIT_OLD_OPENCLAW_REF"
+else
+    unset OPENCLAW_AUDIT_LOG
+fi
+jq -e '.permission == "deny" and (.reason | contains("oap.audit_unavailable"))' "$CURSOR_AUDIT_OUT" > /dev/null || {
+    echo "FAIL: Cursor observe mode should deny when synthetic audit target is unsafe" >&2
+    cat "$CURSOR_AUDIT_OUT" >&2
+    exit 1
+}
+if [[ "$(cat "$CURSOR_AUDIT_VICTIM")" != "do-not-append" ]]; then
+    echo "FAIL: Cursor observe-mode synthetic audit writer must not follow audit-log symlinks" >&2
+    cat "$CURSOR_AUDIT_VICTIM" >&2 || true
+    exit 1
+fi
+rm -f "$CURSOR_AUDIT_LINK"
 
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=api

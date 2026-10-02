@@ -278,16 +278,38 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.VERSION }}"
 
+          npm_package_exists() {
+            local package_name="$1"
+            npm view "${package_name}@${VERSION}" version --registry https://registry.npmjs.org/ >/dev/null 2>&1
+          }
+
           publish_if_needed() {
             local package_name="$1"
             shift || true
-            if npm view "${package_name}@${VERSION}" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            if npm_package_exists "$package_name"; then
               echo "Skipping ${package_name}@${VERSION}: already published"
               return 0
             fi
 
             echo "Publishing ${package_name}@${VERSION}"
-            npm publish "$@" --access public
+            local publish_log
+            publish_log="$(mktemp)"
+            if npm publish "$@" --access public >"$publish_log" 2>&1; then
+              cat "$publish_log"
+              rm -f "$publish_log"
+              return 0
+            else
+              local publish_status="$?"
+              cat "$publish_log" >&2
+              if grep -Eiq "E409|previously staged version|Cannot publish over" "$publish_log"; then
+                echo "::warning::${package_name}@${VERSION} is already staged in npm; continuing to registry verification."
+                rm -f "$publish_log"
+                return 0
+              fi
+
+              rm -f "$publish_log"
+              return "$publish_status"
+            fi
           }
 
           publish_if_needed "@aporthq/aport-agent-guardrails"
@@ -316,14 +338,20 @@ jobs:
             "@aporthq/openclaw-aport"
             "@aporthq/agent-guardrails"
           )
-          MAX_ATTEMPTS="4"
-          SLEEP_SECONDS="25"
+          MAX_ATTEMPTS="12"
+          SLEEP_SECONDS="30"
+          LAST_MISSING=()
 
           verify_all() {
             local failed=0
+            LAST_MISSING=()
             for pkg in "${PACKAGES[@]}"; do
               echo "  Checking ${pkg}@${VERSION}"
-              if ! npm view "${pkg}@${VERSION}" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+              if npm view "${pkg}@${VERSION}" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+                echo "  Found ${pkg}@${VERSION}"
+              else
+                echo "  Missing ${pkg}@${VERSION}"
+                LAST_MISSING+=("${pkg}")
                 failed=1
               fi
             done
@@ -346,6 +374,7 @@ jobs:
             fi
           done
           echo "::error::npm verification failed after ${MAX_ATTEMPTS} attempts (${SLEEP_SECONDS}s between retries)"
+          echo "::error::Missing npm packages for ${VERSION}: ${LAST_MISSING[*]}"
           exit 1
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

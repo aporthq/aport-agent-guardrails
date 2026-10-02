@@ -108,7 +108,13 @@ emit_response() {
     local code="${3:-oap.denied}"
     local message="${4:-}"
     local failure_class="${5:-hard}"
-    local notice user_warning
+    local notice user_warning synthetic_status
+
+    case "$code" in
+        oap.audit_unavailable | oap.missing_dependency)
+            failure_class="mandatory"
+            ;;
+    esac
 
     if [ "$disposition" = "allow" ]; then
         aport_hook_build_response "allow" "" "" "$FRAMEWORK"
@@ -117,9 +123,15 @@ emit_response() {
 
     if aport_hook_should_allow_failure "$failure_class"; then
         if [ "$failure_class" != "policy" ] && [ "${APORT_ADAPTER_DECISION_RECORDED:-0}" != "1" ]; then
+            synthetic_status=0
             aport_hook_record_synthetic_failure_decision \
                 "$policy" "$code" "$message" "$FRAMEWORK" \
-                "${INPUT:-{}}" "${ORIGINAL_TOOL:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || true
+                "${INPUT:-{}}" "${ORIGINAL_TOOL:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || synthetic_status=$?
+            if [ "$synthetic_status" -eq 127 ]; then
+                notice="$(aport_format_guardrail_notice deny "hook.audit" "${APORT_SYNTHETIC_AUDIT_ERROR_CODE:-oap.missing_dependency}" "${APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE:-APort could not record a synthetic audit entry.}" "$FRAMEWORK")"
+                aport_hook_build_response "deny" "$notice" "" "$FRAMEWORK"
+                exit 0
+            fi
             APORT_ADAPTER_DECISION_RECORDED=1
         fi
         notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "$FRAMEWORK")"
@@ -770,6 +782,10 @@ map_codex_plugin_install() {
 
 map_session() {
     GUARDRAIL_TOOL="session.create"
+    if aport_hook_payload_has_malformed_nested_argument_containers "$INPUT" "$ORIGINAL_TOOL"; then
+        emit_response "deny" "agent.session.create.v1" "oap.invalid_tool_arguments" \
+            "Session argument containers must be JSON objects" "hard"
+    fi
     CONTEXT_JSON="$(aport_hook_context_from_payload "$INPUT" session "$ORIGINAL_TOOL" "$FRAMEWORK")"
     if aport_hook_context_has_invalid_session_duration "$CONTEXT_JSON"; then
         emit_response "deny" "agent.session.create.v1" "oap.invalid_session_duration" \
