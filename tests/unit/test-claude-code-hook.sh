@@ -957,6 +957,28 @@ grep -q 'oap.missing_required_context' "$OUT10B" || {
 }
 echo "  ✅ Agent tool_input active_session_count is not trusted"
 
+echo "  Test: Agent malformed nested arguments -> deny..."
+OUT10C="$TEST_DIR/claude-deny-agent-malformed-nested-arguments.txt"
+set +e
+echo '{"tool_name":"Agent","active_session_count":0,"tool_input":{"description":"explore repo","arguments":"not-json"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10C" 2> /dev/null
+EXIT10C=$?
+set -e
+[[ "$EXIT10C" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for malformed Agent arguments, got $EXIT10C" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT10C" || {
+    echo "FAIL: expected structured deny payload for malformed Agent arguments" >&2
+    cat "$OUT10C" >&2
+    exit 1
+}
+grep -q 'oap.invalid_tool_arguments' "$OUT10C" || {
+    echo "FAIL: expected invalid tool arguments reason for malformed Agent arguments" >&2
+    cat "$OUT10C" >&2
+    exit 1
+}
+echo "  ✅ Agent malformed nested arguments fails closed"
+
 echo "  Test: Agent tool -> allow..."
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 OUT10="$TEST_DIR/claude-allow-agent.txt"
