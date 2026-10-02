@@ -92,6 +92,21 @@ if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Sk
     fail "Skill scalar args must not be treated as malformed session argument containers"
 fi
 
+if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","input":{"skill":"review-pr","args":"--base main"}}' "Skill"; then
+    fail "Skill scalar input.args must not be treated as malformed session argument containers"
+fi
+
+aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","arguments":"not-json"}}' "Skill" \
+    || fail "Skill malformed arguments container must still be detected"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Skill","active_session_count":0,"tool_input":{"skill":"review-pr","args":"{\"session_type\":\"batch\",\"duration_seconds\":3600}"}}' session 'Skill' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "interactive" and (. | has("requested_duration") | not) and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "Skill args must remain opaque session arguments, not structured session evidence: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Skill","active_session_count":0,"tool_input":{"skill":"review-pr","arguments":"{\"session_type\":\"batch\",\"duration_seconds\":3600}"}}' session 'Skill' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "batch" and .requested_duration == 3600 and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "Skill arguments must remain a structured session evidence container: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"bad type","session_type":"root"}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
     || fail "session context must flag invalid explicit session_type: $out"
