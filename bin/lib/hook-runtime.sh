@@ -429,6 +429,43 @@ aport_hook_strip_adapter_context_flags() {
     printf '%s' "$context_json"
 }
 
+aport_hook_append_audit_line() {
+    local audit_ref="${1:-}"
+    local audit_line="${2:-}"
+    local audit_dir
+    [ -n "$audit_ref" ] || return 1
+    audit_dir="$(dirname "$audit_ref")"
+    mkdir -p "$audit_dir" 2> /dev/null || return 1
+    command -v node > /dev/null 2>&1 || return 1
+    printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" node -e '
+const fs = require("fs");
+const target = process.env.APORT_AUDIT_APPEND_PATH || "";
+if (!target || typeof fs.constants.O_NOFOLLOW !== "number") process.exit(1);
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  input += chunk;
+});
+process.stdin.on("end", () => {
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW;
+  let fd;
+  try {
+    fd = fs.openSync(target, flags, 0o600);
+    fs.writeSync(fd, input);
+    fs.fchmodSync(fd, 0o600);
+  } catch (_) {
+    process.exitCode = 1;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch (_) {}
+    }
+  }
+});
+' 2> /dev/null
+}
+
 aport_hook_record_synthetic_failure_decision() {
     local default_payload='{}'
     local default_context='{}'
@@ -440,7 +477,7 @@ aport_hook_record_synthetic_failure_decision() {
     local original_tool="${6:-unknown}"
     local guardrail_tool="${7:-$policy}"
     local context_json="${8:-$default_context}"
-    local decision_file decision_dir tmp_decision now expires decision_id safe_policy safe_code safe_message escaped_policy escaped_code escaped_message escaped_id escaped_now escaped_expires audit_ref audit_dir audit_line audit_message
+    local decision_file decision_dir tmp_decision now expires decision_id safe_policy safe_code safe_message escaped_policy escaped_code escaped_message escaped_id escaped_now escaped_expires audit_ref audit_line audit_message
 
     decision_file="${APORT_DECISION_FILE:-${OPENCLAW_DECISION_FILE:-${DECISION_FILE:-}}}"
     [ -n "$decision_file" ] || return 0
@@ -487,14 +524,10 @@ aport_hook_record_synthetic_failure_decision() {
 
     audit_ref="${AUDIT_LOG:-${APORT_AUDIT_LOG:-}}"
     if [ -n "$audit_ref" ]; then
-        audit_dir="$(dirname "$audit_ref")"
-        if [ ! -L "$audit_ref" ] && mkdir -p "$audit_dir" 2> /dev/null && [ ! -L "$audit_ref" ]; then
-            audit_line="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$(aport_sanitize_display_text "$original_tool") framework=$(aport_sanitize_display_text "$framework") decision_id=$decision_id allow=false policy=$safe_policy code=$safe_code"
-            audit_message="${safe_message//\"/\\\"}"
-            [ -n "$audit_message" ] && audit_line="${audit_line} reason=\"${audit_message}\""
-            printf '%s\n' "$audit_line" >> "$audit_ref" 2> /dev/null || true
-            chmod 600 "$audit_ref" 2> /dev/null || true
-        fi
+        audit_line="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$(aport_sanitize_display_text "$original_tool") framework=$(aport_sanitize_display_text "$framework") decision_id=$decision_id allow=false policy=$safe_policy code=$safe_code"
+        audit_message="${safe_message//\"/\\\"}"
+        [ -n "$audit_message" ] && audit_line="${audit_line} reason=\"${audit_message}\""
+        aport_hook_append_audit_line "$audit_ref" "$audit_line" || true
     fi
     rm -f "$tmp_decision" 2> /dev/null || true
 }

@@ -988,6 +988,85 @@ fi
 rm -f "$SYNTHETIC_AUDIT_LINK"
 echo "  ✅ Observe-mode synthetic audit writer rejects symlinked targets"
 
+SYNTHETIC_AUDIT_RACE_VICTIM="$TEST_DIR/aport/synthetic-audit-race-victim.txt"
+SYNTHETIC_AUDIT_RACE_LOG="$TEST_DIR/aport/synthetic-audit-race.log"
+SYNTHETIC_AUDIT_RACE_BIN="$TEST_DIR/aport/date-race-bin"
+SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+SYNTHETIC_AUDIT_HAD_REF=0
+SYNTHETIC_AUDIT_OLD_PATH="$PATH"
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_REF=1
+fi
+mkdir -p "$SYNTHETIC_AUDIT_RACE_BIN"
+cat > "$SYNTHETIC_AUDIT_RACE_BIN/date" << 'EOF'
+#!/usr/bin/env bash
+case "$*" in
+    *"+%Y-%m-%d %H:%M:%S"*)
+        if [[ -n "${APORT_RACE_AUDIT_LINK:-}" && -n "${APORT_RACE_AUDIT_VICTIM:-}" ]]; then
+            rm -f "$APORT_RACE_AUDIT_LINK"
+            ln -s "$APORT_RACE_AUDIT_VICTIM" "$APORT_RACE_AUDIT_LINK"
+        fi
+        ;;
+esac
+exec /bin/date "$@"
+EOF
+chmod +x "$SYNTHETIC_AUDIT_RACE_BIN/date"
+printf 'race-target\n' > "$SYNTHETIC_AUDIT_RACE_VICTIM"
+printf 'regular-before-race\n' > "$SYNTHETIC_AUDIT_RACE_LOG"
+export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_RACE_LOG"
+export APORT_RACE_AUDIT_LINK="$SYNTHETIC_AUDIT_RACE_LOG"
+export APORT_RACE_AUDIT_VICTIM="$SYNTHETIC_AUDIT_RACE_VICTIM"
+export PATH="$SYNTHETIC_AUDIT_RACE_BIN:$PATH"
+run_hook "Codex observe mode opens synthetic audit target without symlink race" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_race","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))'
+PATH="$SYNTHETIC_AUDIT_OLD_PATH"
+export PATH
+unset APORT_RACE_AUDIT_LINK APORT_RACE_AUDIT_VICTIM
+if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ "$(cat "$SYNTHETIC_AUDIT_RACE_VICTIM")" != "race-target" ]]; then
+    echo "FAIL: observe-mode synthetic audit writer must not follow audit-log symlink swaps" >&2
+    cat "$SYNTHETIC_AUDIT_RACE_VICTIM" >&2 || true
+    exit 1
+fi
+rm -f "$SYNTHETIC_AUDIT_RACE_LOG"
+echo "  ✅ Observe-mode synthetic audit writer resists symlink swaps"
+
+SYNTHETIC_AUDIT_SAFE_LOG="$TEST_DIR/aport/synthetic-audit-safe.log"
+SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+SYNTHETIC_AUDIT_HAD_REF=0
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_REF=1
+fi
+rm -f "$SYNTHETIC_AUDIT_SAFE_LOG"
+export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_SAFE_LOG"
+run_hook "Codex observe mode appends synthetic audit entries safely" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_regular","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))'
+if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+grep -q 'oap.unknown_tool' "$SYNTHETIC_AUDIT_SAFE_LOG" || {
+    echo "FAIL: observe-mode synthetic audit writer should append regular audit targets" >&2
+    cat "$SYNTHETIC_AUDIT_SAFE_LOG" >&2 || true
+    exit 1
+}
+echo "  ✅ Observe-mode synthetic audit writer appends regular targets"
+
 run_hook "Codex observe mode allows hard parser failures with warning" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status; unauthorized-command"}}' \
@@ -2947,6 +3026,11 @@ jq -e '.guardrail_tool == "session.create" and .context.session_type == "batch" 
 }
 echo "  ✅ Codex session preserves explicit session_type"
 
+run_hook "Codex session accepts JSON-string nested argument containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","tool_call_id":"json-string-nested-session-call","tool_input":{"prompt":"batch work","arguments":"{\"session_type\":\"batch\"}"}}' \
+    '. == {}'
+
 run_hook "Codex session rejects invalid explicit session_type" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"type-child","prompt":"review this","session_type":"root"}}' \
@@ -2966,6 +3050,11 @@ run_hook "Codex session rejects conflicting session_type containers" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"type-container-conflict-child","prompt":"review this","session_type":"batch"},"args":{"session_type":"interactive"}}' \
     '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_session_type"))'
+
+run_hook "Codex session rejects malformed nested argument containers" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"collaboration.spawn_agent","session_id":"parent-session","tool_input":{"id":"malformed-nested-arguments-child","prompt":"review this","arguments":"not-json"}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.invalid_tool_arguments"))'
 
 run_hook "Codex session rejects unrepresentable requested duration" \
     codex "$CODEX" \

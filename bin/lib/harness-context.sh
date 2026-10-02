@@ -24,6 +24,32 @@ aport_hook_payload_has_malformed_tool_arguments() {
     ' <<< "$payload" > /dev/null 2>&1
 }
 
+aport_hook_payload_has_malformed_nested_argument_containers() {
+    local payload="$1"
+    jq -e '
+      def obj(v):
+        if (v | type) == "object" then v
+        elif (v | type) == "string" then (try (v | fromjson) catch {})
+        else {}
+        end;
+      def malformed(v):
+        if v == null then false
+        elif (v | type) == "object" then false
+        elif (v | type) == "string" then
+          (try ((v | fromjson | type) == "object") catch false) | not
+        else true
+        end;
+      [
+        obj(.tool_input).args,
+        obj(.tool_input).arguments,
+        obj(.input).args,
+        obj(.input).arguments,
+        obj(.args).args,
+        obj(.args).arguments
+      ] | any(malformed(.))
+    ' <<< "$payload" > /dev/null 2>&1
+}
+
 aport_hook_payload_has_conflicting_shell_command_aliases() {
     local payload="$1"
     jq -e '
