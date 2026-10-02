@@ -45,9 +45,9 @@ aport_hook_payload_has_malformed_nested_argument_containers() {
       [
         (if normalized_tool == "skill" then empty else obj(.tool_input).args end),
         obj(.tool_input).arguments,
-        obj(.input).args,
+        (if normalized_tool == "skill" then empty else obj(.input).args end),
         obj(.input).arguments,
-        obj(.args).args,
+        (if normalized_tool == "skill" then empty else obj(.args).args end),
         obj(.args).arguments
       ] | any(malformed(.))
     ' <<< "$payload" > /dev/null 2>&1
@@ -913,23 +913,28 @@ aport_hook_context_from_payload() {
           else {present: true, invalid: false, value: $normalized[0]}
           end
         end;
+      ((if ($default_tool | length) > 0 then $default_tool else (.tool_name // .tool // "") end) | tostring | gsub("\\s"; "") | sub("^functions\\."; "") | sub("\\(.*$"; "") | ascii_downcase) as $default_tool_key |
       obj(.tool_input) as $tool_input_obj |
       obj(.input) as $input_obj |
       obj(.args) as $args_obj |
       ($tool_input_obj + $input_obj + $args_obj) as $raw_ti |
+      (if $kind == "session" and $default_tool_key == "skill" then {} else obj($tool_input_obj.args) end) as $tool_input_args_obj |
+      (if $kind == "session" and $default_tool_key == "skill" then {} else obj($input_obj.args) end) as $input_args_obj |
+      (if $kind == "session" and $default_tool_key == "skill" then {} else obj($args_obj.args) end) as $args_args_obj |
+      (if $kind == "session" and $default_tool_key == "skill" then {} else obj($raw_ti.args) end) as $raw_args_obj |
       ([
         .,
         $tool_input_obj,
         $input_obj,
         $args_obj,
-        obj($tool_input_obj.args),
+        $tool_input_args_obj,
         obj($tool_input_obj.arguments),
-        obj($input_obj.args),
+        $input_args_obj,
         obj($input_obj.arguments),
-        obj($args_obj.args),
+        $args_args_obj,
         obj($args_obj.arguments)
       ]) as $session_sources |
-      ((obj($raw_ti.args) + obj($raw_ti.arguments)) + $raw_ti) as $ti |
+      (($raw_args_obj + obj($raw_ti.arguments)) + $raw_ti) as $ti |
       if $kind == "shell" then
         ($event_hint == "claude-code" and ($default_tool | ascii_downcase | IN("bash", "powershell", "monitor"))) as $claude_bounded_shell |
         (
