@@ -81,6 +81,11 @@ deny_or_warn() {
     local message="${3:-}"
     local failure_class="${4:-hard}"
     local notice user_warning synthetic_status
+    case "$code" in
+        oap.audit_unavailable | oap.missing_dependency)
+            failure_class="mandatory"
+            ;;
+    esac
     if aport_hook_should_allow_failure "$failure_class"; then
         if [ "$failure_class" != "policy" ] && [ "${APORT_ADAPTER_DECISION_RECORDED:-0}" != "1" ]; then
             synthetic_status=0

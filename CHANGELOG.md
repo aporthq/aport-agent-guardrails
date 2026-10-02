@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.36] - 2026-10-02
+
+### Changed
+- **Release recovery:** The main-merge release dispatcher now recovers incomplete releases when the tag exists but the GitHub Release is missing, and npm verification tolerates registry staging delays with clearer missing-package diagnostics.
+
+### Fixed
+- **Audit safety:** Hook audit writes now use the shared no-follow audit writer and fail closed if the audit log cannot be written safely, including unsafe symlink/race targets.
+- **Codex skill context:** Codex `Skill.args` is treated as opaque string metadata and non-string nested skill arguments are rejected instead of being parsed into session context.
+
 ## [1.0.35] - 2026-09-30
 
 ### Added

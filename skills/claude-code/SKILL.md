@@ -7,7 +7,7 @@ You are setting up APort Agent Guardrails for Claude Code. Follow these steps in
 
 ## Step 1: Check prerequisites
 
-Run these checks. If either fails, tell the user what to install and stop.
+Run these checks. If bash or `jq` fails, tell the user what to install and stop.
 
 ```bash
 bash --version | head -1
@@ -17,7 +17,12 @@ Expected: `GNU bash, version 4` or higher.
 ```bash
 jq --version
 ```
-Expected: `jq-1.x`. If missing, tell the user: `brew install jq` (macOS) or `apt install jq` (Linux). The hook calls `jq` on every tool call; without it every call is denied with `APort: jq is required`, in warn mode too.
+Expected: `jq-1.x`. If missing, tell the user: `brew install jq` (macOS) or `apt install jq` (Linux). The hook calls `jq` on every tool call; without it every call is denied with `APort: jq is required` in enforce, warn and observe modes.
+
+```bash
+command -v python3 >/dev/null || command -v node >/dev/null
+```
+Expected: at least one command succeeds on the PATH Claude Code uses. If both are missing, setup can continue, but APort will deny with `oap.missing_dependency` instead of allowing without an audit record because audit logs cannot be appended safely. Install `python3` or `node` before using the hook.
 
 ## Step 2: Check if already configured
 
@@ -63,12 +68,14 @@ The PreToolUse hook is registered automatically by the plugin system. No `settin
 - Bash commands are checked as text only: `allowed_commands` is a prefix match; `blocked_patterns` uses word-boundary and glob matching, case-insensitive: a single word such as `sudo` matches only as a whole word (it does not block `sudoku`), an entry containing `*` or `?` is a glob, and a multi-word entry such as `rm -rf` matches as written; when `allowed_commands` is restrictive (not `*`), a command containing an unquoted `&&`, `||`, `;`, `|`, `&`, newline, `(`, `)`, `$(`, `<(`, `>(`, a `#` comment or `$'...'` quoting is denied with `oap.command_chain_unsupported`. The hook does not see which files `cat` or `>` touch, where `git push` goes, or which host `curl` contacts. Path and domain limits apply to the Read, Write, Edit and WebFetch tools. Pair APort with the sandbox, a branch ruleset and a scoped token for the rest.
 - Reads of `.env` and anything starting with `.env`, the `.ssh`, `.aws`, `.gnupg` and `.kube` directories, `id_rsa`, `id_dsa`, `id_ecdsa` and `id_ed25519` anywhere in the path, files ending in `.pem` or `.key`, and any path containing `credentials` or `password` are always denied (case-insensitive). Other `id_*` names such as `id_token` are not on the list. Anything else (for example `~/.codex/auth.json`) needs a `limits["data.file.read"].blocked_patterns` entry (substring match). Writes have no built-in list; use `limits["data.file.write"].blocked_paths` (path prefix).
 - A Bash call with no `timeout` is judged under Claude Code's 120 s default. A call with `run_in_background` or a malformed timeout has no bound, so a passport that sets `max_execution_time` denies it with `oap.missing_required_context`; drop the limit or run the command in the foreground.
-- Grep without a `file_path` and any unknown tool are denied, and warn mode does not change that.
+- Grep without a `file_path` and any unknown tool are denied, and warn mode does not change that. Observe mode can allow non-policy mapping/runtime failures only after writing a synthetic audit entry; if the audit path is unsafe or cannot be written, the hook denies with `oap.audit_unavailable`.
 
 ## Troubleshooting
 
 If the wizard fails or status shows no passport:
 - Every tool call denied with `jq is required`: install `jq` on the PATH Claude Code uses
+- Tool calls deny with `oap.missing_dependency`: install `python3` or `node` on the PATH Claude Code uses so audit entries can be appended safely
+- Observe mode denies with `oap.audit_unavailable`: check the audit log path is a writable regular file, not a symlink
 - Check `~/.claude/aport/` (or `$APORT_CLAUDE_CODE_CONFIG_DIR/aport/`) directory exists
 - Check the user has write permissions to `~/.claude/`
 - Run with `DEBUG_APORT=1` prefix for verbose output

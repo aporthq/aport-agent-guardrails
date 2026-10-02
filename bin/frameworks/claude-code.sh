@@ -35,6 +35,7 @@ run_setup() {
     parse_guardrail_mode_args "$@"
 
     log_info "Setting up APort guardrails for Claude Code..."
+    warn_if_safe_audit_writer_missing
     config_dir="$(ensure_aport_dir_secure claude-code)"
 
     export APORT_FRAMEWORK=claude-code

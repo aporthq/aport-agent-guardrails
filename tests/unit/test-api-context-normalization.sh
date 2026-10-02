@@ -96,6 +96,12 @@ if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Sk
     fail "Skill scalar input.args must not be treated as malformed session argument containers"
 fi
 
+aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","args":{"session_type":"batch"}}}' "Skill" \
+    || fail "Skill object args must be rejected instead of treated as structured session evidence"
+
+aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","args":["--base","main"]}}' "Skill" \
+    || fail "Skill array args must be rejected instead of silently dropped"
+
 aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","arguments":"not-json"}}' "Skill" \
     || fail "Skill malformed arguments container must still be detected"
 
