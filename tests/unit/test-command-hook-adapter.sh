@@ -1067,6 +1067,52 @@ grep -q 'oap.unknown_tool' "$SYNTHETIC_AUDIT_SAFE_LOG" || {
 }
 echo "  ✅ Observe-mode synthetic audit writer appends regular targets"
 
+SYNTHETIC_AUDIT_NO_NODE_LOG="$TEST_DIR/aport/synthetic-audit-no-node.log"
+SYNTHETIC_AUDIT_NO_NODE_PATH="$TEST_DIR/aport/no-node-path"
+SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+SYNTHETIC_AUDIT_HAD_REF=0
+SYNTHETIC_AUDIT_OLD_PATH="$PATH"
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_REF=1
+fi
+PYTHON3_BIN="$(command -v python3 || true)"
+if [[ -z "$PYTHON3_BIN" ]]; then
+    echo "FAIL: python3 is required for the no-node audit append regression" >&2
+    exit 1
+fi
+mkdir -p "$SYNTHETIC_AUDIT_NO_NODE_PATH"
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut python3; do
+    tool_path="$(command -v "$tool" || true)"
+    if [[ -z "$tool_path" ]]; then
+        echo "FAIL: required command for no-node audit test is missing: $tool" >&2
+        exit 1
+    fi
+    ln -sf "$tool_path" "$SYNTHETIC_AUDIT_NO_NODE_PATH/$tool"
+done
+rm -f "$SYNTHETIC_AUDIT_NO_NODE_PATH/node" "$SYNTHETIC_AUDIT_NO_NODE_LOG"
+export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_NO_NODE_LOG"
+export PATH="$SYNTHETIC_AUDIT_NO_NODE_PATH"
+run_hook "Codex observe mode appends synthetic audit entries without node" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_no_node","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))'
+PATH="$SYNTHETIC_AUDIT_OLD_PATH"
+export PATH
+if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+grep -q 'oap.unknown_tool' "$SYNTHETIC_AUDIT_NO_NODE_LOG" || {
+    echo "FAIL: observe-mode synthetic audit writer should append when node is absent" >&2
+    cat "$SYNTHETIC_AUDIT_NO_NODE_LOG" >&2 || true
+    exit 1
+}
+echo "  ✅ Observe-mode synthetic audit writer appends without node"
+
 run_hook "Codex observe mode allows hard parser failures with warning" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status; unauthorized-command"}}' \

@@ -686,6 +686,14 @@ tail -n 1 "$TEST_DIR/aport/session-decisions.jsonl" | jq -e '.guardrail_tool == 
     exit 1
 }
 
+run_hook "preToolUse Task malformed nested arguments: deny" \
+    '{"hook_event_name":"preToolUse","tool_name":"Task","active_session_count":0,"tool_input":{"description":"worker","arguments":"not-json"}}' 2 '"permission":"deny"'
+grep -q 'oap.invalid_tool_arguments' "$LAST_HOOK_OUTPUT" || {
+    echo "FAIL: expected invalid_tool_arguments for malformed Task arguments" >&2
+    cat "$LAST_HOOK_OUTPUT" >&2
+    exit 1
+}
+
 # --- Legacy Copilot-style ---
 run_hook "Copilot-style: allow (npm install)" \
     '{"tool":"runTerminalCommand","input":{"command":"npm install"}}' 0 '"permission":"allow"'

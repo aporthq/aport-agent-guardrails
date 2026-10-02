@@ -436,6 +436,34 @@ aport_hook_append_audit_line() {
     [ -n "$audit_ref" ] || return 1
     audit_dir="$(dirname "$audit_ref")"
     mkdir -p "$audit_dir" 2> /dev/null || return 1
+
+    if command -v python3 > /dev/null 2>&1; then
+        printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" python3 -c '
+import os
+import sys
+
+target = os.environ.get("APORT_AUDIT_APPEND_PATH", "")
+if not target or not hasattr(os, "O_NOFOLLOW"):
+    sys.exit(1)
+
+flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
+fd = None
+try:
+    fd = os.open(target, flags, 0o600)
+    data = sys.stdin.buffer.read()
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        view = view[written:]
+    os.fchmod(fd, 0o600)
+except OSError:
+    sys.exit(1)
+finally:
+    if fd is not None:
+        os.close(fd)
+' 2> /dev/null && return 0
+    fi
+
     command -v node > /dev/null 2>&1 || return 1
     printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" node -e '
 const fs = require("fs");
