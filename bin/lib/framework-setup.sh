@@ -70,11 +70,11 @@ warn_if_framework_command_missing() {
 }
 
 warn_if_safe_audit_writer_missing() {
-    if command -v python3 > /dev/null 2>&1 || command -v node > /dev/null 2>&1; then
+    if command -v python3 > /dev/null 2>&1; then
         return 0
     fi
 
-    log_warn "APort audit entries require python3 or node on the PATH used by the host so audit logs can be appended without following symlinks. Without one, APort denies with oap.missing_dependency instead of allowing without an audit record."
+    log_warn "APort audit entries require python3 on the PATH used by the host so audit logs can be appended without following symlinks. Without it, APort denies with oap.missing_dependency instead of allowing without an audit record."
 }
 
 refuse_symlink_path() {

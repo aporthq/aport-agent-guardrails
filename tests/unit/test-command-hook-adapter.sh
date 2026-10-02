@@ -1027,6 +1027,96 @@ fi
 rm -f "$SYNTHETIC_AUDIT_LINK"
 echo "  ✅ Observe-mode synthetic audit writer rejects symlinked targets"
 
+SYNTHETIC_AUDIT_PARENT_REAL="$TEST_DIR/aport/synthetic-audit-parent-real"
+SYNTHETIC_AUDIT_PARENT_LINK="$TEST_DIR/aport/synthetic-audit-parent-link"
+SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+SYNTHETIC_AUDIT_HAD_REF=0
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_REF=1
+fi
+mkdir -p "$SYNTHETIC_AUDIT_PARENT_REAL"
+rm -f "$SYNTHETIC_AUDIT_PARENT_LINK"
+ln -s "$SYNTHETIC_AUDIT_PARENT_REAL" "$SYNTHETIC_AUDIT_PARENT_LINK"
+export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_PARENT_LINK/audit.log"
+run_hook "Codex observe mode refuses symlinked synthetic audit parent" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_parent_symlink","tool_input":{"unknown":true}}' \
+    '.hookSpecificOutput.permissionDecision == "deny"
+      and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))
+      and (.hookSpecificOutput.permissionDecisionReason | contains("audit log"))'
+if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ -e "$SYNTHETIC_AUDIT_PARENT_REAL/audit.log" ]]; then
+    echo "FAIL: observe-mode synthetic audit writer must not follow symlinked audit directory components" >&2
+    cat "$SYNTHETIC_AUDIT_PARENT_REAL/audit.log" >&2 || true
+    exit 1
+fi
+rm -f "$SYNTHETIC_AUDIT_PARENT_LINK"
+echo "  ✅ Observe-mode synthetic audit writer rejects symlinked parent directories"
+
+if command -v mkfifo > /dev/null 2>&1; then
+    SYNTHETIC_AUDIT_FIFO="$TEST_DIR/aport/synthetic-audit-fifo.log"
+    SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+    SYNTHETIC_AUDIT_HAD_REF=0
+    if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+        SYNTHETIC_AUDIT_HAD_REF=1
+    fi
+    rm -f "$SYNTHETIC_AUDIT_FIFO"
+    mkfifo "$SYNTHETIC_AUDIT_FIFO"
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_FIFO"
+    run_hook "Codex observe mode refuses non-regular synthetic audit target" \
+        codex "$CODEX" \
+        '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_fifo","tool_input":{"unknown":true}}' \
+        '.hookSpecificOutput.permissionDecision == "deny"
+          and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))
+          and (.hookSpecificOutput.permissionDecisionReason | contains("audit log"))'
+    if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+        export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+    else
+        unset APORT_AUDIT_LOG
+    fi
+    rm -f "$SYNTHETIC_AUDIT_FIFO"
+    echo "  ✅ Observe-mode synthetic audit writer rejects non-regular targets"
+else
+    echo "  ⚠️  Skipping non-regular audit target test (mkfifo unavailable)"
+fi
+
+SYNTHETIC_AUDIT_HARDLINK_VICTIM="$TEST_DIR/aport/synthetic-audit-hardlink-victim.log"
+SYNTHETIC_AUDIT_HARDLINK="$TEST_DIR/aport/synthetic-audit-hardlink.log"
+rm -f "$SYNTHETIC_AUDIT_HARDLINK_VICTIM" "$SYNTHETIC_AUDIT_HARDLINK"
+printf 'original\n' > "$SYNTHETIC_AUDIT_HARDLINK_VICTIM"
+if ln "$SYNTHETIC_AUDIT_HARDLINK_VICTIM" "$SYNTHETIC_AUDIT_HARDLINK" 2> /dev/null; then
+    SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+    SYNTHETIC_AUDIT_HAD_REF=0
+    if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+        SYNTHETIC_AUDIT_HAD_REF=1
+    fi
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_HARDLINK"
+    run_hook "Codex observe mode refuses hardlinked synthetic audit target" \
+        codex "$CODEX" \
+        '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_hardlink","tool_input":{"unknown":true}}' \
+        '.hookSpecificOutput.permissionDecision == "deny"
+          and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))
+          and (.hookSpecificOutput.permissionDecisionReason | contains("audit log"))'
+    if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+        export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+    else
+        unset APORT_AUDIT_LOG
+    fi
+    if [[ "$(cat "$SYNTHETIC_AUDIT_HARDLINK_VICTIM")" != "original" ]]; then
+        echo "FAIL: observe-mode synthetic audit writer must not append through hardlinked audit targets" >&2
+        cat "$SYNTHETIC_AUDIT_HARDLINK_VICTIM" >&2 || true
+        exit 1
+    fi
+    echo "  ✅ Observe-mode synthetic audit writer rejects hardlinked targets"
+else
+    echo "  ⚠️  Skipping hardlinked audit target test (hard links unavailable)"
+fi
+rm -f "$SYNTHETIC_AUDIT_HARDLINK_VICTIM" "$SYNTHETIC_AUDIT_HARDLINK"
+
 SYNTHETIC_AUDIT_RACE_VICTIM="$TEST_DIR/aport/synthetic-audit-race-victim.txt"
 SYNTHETIC_AUDIT_RACE_LOG="$TEST_DIR/aport/synthetic-audit-race.log"
 SYNTHETIC_AUDIT_RACE_BIN="$TEST_DIR/aport/date-race-bin"

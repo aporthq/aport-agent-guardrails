@@ -459,7 +459,7 @@ sudo yum install jq
 **Resolution**:
 - Set the audit log to a writable regular file inside the framework APort config directory
 - Remove symlinks from the audit log path
-- Ensure the host PATH includes `python3` or `node` for safe audit entries
+- Ensure the host PATH includes `python3` for safe audit entries
 
 ---
 
