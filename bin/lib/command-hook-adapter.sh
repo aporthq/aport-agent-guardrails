@@ -776,7 +776,7 @@ map_codex_plugin_install() {
 
 map_session() {
     GUARDRAIL_TOOL="session.create"
-    if aport_hook_payload_has_malformed_nested_argument_containers "$INPUT"; then
+    if aport_hook_payload_has_malformed_nested_argument_containers "$INPUT" "$ORIGINAL_TOOL"; then
         emit_response "deny" "agent.session.create.v1" "oap.invalid_tool_arguments" \
             "Session argument containers must be JSON objects" "hard"
     fi

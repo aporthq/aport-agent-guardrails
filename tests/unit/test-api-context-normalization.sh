@@ -88,6 +88,10 @@ if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Ag
     fail "valid JSON-string nested argument containers must not be rejected"
 fi
 
+if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","args":"--base main"}}' "Skill"; then
+    fail "Skill scalar args must not be treated as malformed session argument containers"
+fi
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"bad type","session_type":"root"}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
     || fail "session context must flag invalid explicit session_type: $out"

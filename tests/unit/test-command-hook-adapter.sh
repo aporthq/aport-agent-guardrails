@@ -1080,6 +1080,10 @@ if [[ -z "$PYTHON3_BIN" ]]; then
     echo "FAIL: python3 is required for the no-node audit append regression" >&2
     exit 1
 fi
+PYTHON3_RESOLVED_BIN="$("$PYTHON3_BIN" -c 'import sys; print(sys.executable)' 2> /dev/null || printf '%s' "$PYTHON3_BIN")"
+if [[ -n "$PYTHON3_RESOLVED_BIN" && -x "$PYTHON3_RESOLVED_BIN" ]]; then
+    PYTHON3_BIN="$PYTHON3_RESOLVED_BIN"
+fi
 mkdir -p "$SYNTHETIC_AUDIT_NO_NODE_PATH"
 for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut; do
     tool_path="$(command -v "$tool" || true)"

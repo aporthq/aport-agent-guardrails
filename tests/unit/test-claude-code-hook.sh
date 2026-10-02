@@ -979,6 +979,24 @@ grep -q 'oap.invalid_tool_arguments' "$OUT10C" || {
 }
 echo "  ✅ Agent malformed nested arguments fails closed"
 
+echo "  Test: Skill scalar args -> allow..."
+OUT10D="$TEST_DIR/claude-allow-skill-scalar-args.txt"
+set +e
+echo '{"tool_name":"Skill","active_session_count":0,"tool_input":{"skill":"review-pr","args":"--base main"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10D" 2> /dev/null
+EXIT10D=$?
+set -e
+[[ "$EXIT10D" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Skill scalar args, got $EXIT10D" >&2
+    cat "$OUT10D" >&2 || true
+    exit 1
+}
+if grep -q 'oap.invalid_tool_arguments' "$OUT10D"; then
+    echo "FAIL: Skill scalar args should not be treated as malformed nested argument containers" >&2
+    cat "$OUT10D" >&2
+    exit 1
+fi
+echo "  ✅ Skill scalar args are allowed"
+
 echo "  Test: Agent tool -> allow..."
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 OUT10="$TEST_DIR/claude-allow-agent.txt"
