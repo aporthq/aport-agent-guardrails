@@ -215,10 +215,10 @@ write_decision() {
     if [ "$audit_status" -ne 0 ]; then
         if [ "$audit_status" -eq 127 ]; then
             audit_code="oap.missing_dependency"
-            audit_message="No safe audit writer runtime is available; install python3 or node so APort can append audit entries without following symlinks."
+            audit_message="No safe audit writer runtime is available; install python3 so APort can append audit entries without following symlinks."
         else
             audit_code="oap.audit_unavailable"
-            audit_message="APort could not safely append the configured audit log; check the audit path is a writable regular file and not a symlink."
+            audit_message="APort could not safely append the configured audit log; check the audit path is a writable regular file and not a symlink or hard link."
         fi
         aport_hook_write_audit_unavailable_decision "$DECISION_FILE" "$audit_code" "$audit_message" "hook.audit"
         echo "APort deny (${audit_code}): ${audit_message}" >&2

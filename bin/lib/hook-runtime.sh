@@ -433,80 +433,113 @@ aport_hook_strip_adapter_context_flags() {
 aport_hook_append_audit_line() {
     local audit_ref="${1:-}"
     local audit_line="${2:-}"
-    local audit_dir audit_status old_opts
+    local audit_status old_opts
     [ -n "$audit_ref" ] || return 1
-    audit_dir="$(dirname "$audit_ref")"
-    mkdir -p "$audit_dir" 2> /dev/null || return 1
 
-    if command -v python3 > /dev/null 2>&1; then
-        old_opts="$-"
-        set +e
-        printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" python3 -c '
+    command -v python3 > /dev/null 2>&1 || return 127
+    old_opts="$-"
+    set +e
+    printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" python3 -c '
 import os
+import stat
 import sys
 
 target = os.environ.get("APORT_AUDIT_APPEND_PATH", "")
-if not target or not hasattr(os, "O_NOFOLLOW"):
+if not target or not os.path.isabs(target):
+    sys.exit(1)
+
+has_required_primitives = (
+    hasattr(os, "O_NOFOLLOW")
+    and hasattr(os, "O_DIRECTORY")
+    and os.open in os.supports_dir_fd
+    and os.mkdir in os.supports_dir_fd
+)
+if not has_required_primitives:
     sys.exit(78)
 
-flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
-fd = None
-try:
-    fd = os.open(target, flags, 0o600)
-except OSError:
+target = os.path.normpath(target)
+parts = [part for part in target.split(os.sep) if part]
+if parts and parts[0] in ("etc", "tmp", "var"):
+    # macOS exposes these as fixed root-level aliases into /private. Resolve
+    # only that OS-managed first component so /var/folders style paths still
+    # work, then reject any remaining symlinked component below.
+    root_alias = os.sep + parts[0]
+    root_target = os.path.realpath(root_alias)
+    if root_target == os.path.join(os.sep, "private", parts[0]):
+        target = os.path.normpath(os.path.join(root_target, *parts[1:]))
+parent, leaf = os.path.split(target)
+if not leaf or leaf in (".", ".."):
     sys.exit(1)
+
+dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+file_flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
+if hasattr(os, "O_CLOEXEC"):
+    dir_flags |= os.O_CLOEXEC
+    file_flags |= os.O_CLOEXEC
+if hasattr(os, "O_NONBLOCK"):
+    file_flags |= os.O_NONBLOCK
+
+current_fd = None
+file_fd = None
 try:
+    current_fd = os.open(os.sep, os.O_RDONLY | os.O_DIRECTORY)
+    for component in [part for part in parent.split(os.sep) if part]:
+        if component in (".", ".."):
+            sys.exit(1)
+        try:
+            next_fd = os.open(component, dir_flags, dir_fd=current_fd)
+        except FileNotFoundError:
+            try:
+                os.mkdir(component, 0o700, dir_fd=current_fd)
+            except FileExistsError:
+                pass
+            next_fd = os.open(component, dir_flags, dir_fd=current_fd)
+        except OSError:
+            sys.exit(1)
+
+        try:
+            next_stat = os.fstat(next_fd)
+            if not stat.S_ISDIR(next_stat.st_mode):
+                sys.exit(1)
+        except OSError:
+            os.close(next_fd)
+            sys.exit(1)
+
+        os.close(current_fd)
+        current_fd = next_fd
+
+    file_fd = os.open(leaf, file_flags, 0o600, dir_fd=current_fd)
+    file_stat = os.fstat(file_fd)
+    if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+        sys.exit(1)
+
     data = sys.stdin.buffer.read()
     view = memoryview(data)
     while view:
-        written = os.write(fd, view)
+        written = os.write(file_fd, view)
+        if written <= 0:
+            sys.exit(1)
         view = view[written:]
+
+    try:
+        os.fchmod(file_fd, 0o600)
+    except OSError:
+        pass
+except SystemExit:
+    raise
 except OSError:
     sys.exit(1)
-try:
-    os.fchmod(fd, 0o600)
-except OSError:
-    pass
 finally:
-    if fd is not None:
-        os.close(fd)
-' 2> /dev/null
-        audit_status=$?
-        case "$old_opts" in
-            *e*) set -e ;;
-        esac
-        case "$audit_status" in
-            0) return 0 ;;
-            78) ;;
-            *) return 1 ;;
-        esac
-    fi
-
-    command -v node > /dev/null 2>&1 || return 127
-    old_opts="$-"
-    set +e
-    printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" node -e '
-const fs = require("fs");
-const target = process.env.APORT_AUDIT_APPEND_PATH || "";
-if (!target || typeof fs.constants.O_NOFOLLOW !== "number") process.exit(78);
-const input = fs.readFileSync(0, "utf8");
-const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW;
-let fd;
-try {
-  fd = fs.openSync(target, flags, 0o600);
-  fs.writeSync(fd, input);
-} catch (_) {
-  process.exitCode = 1;
-} finally {
-  if (fd !== undefined) {
-    try {
-      fs.fchmodSync(fd, 0o600);
-    } catch (_) {}
-    try {
-      fs.closeSync(fd);
-    } catch (_) {}
-  }
-}
+    if file_fd is not None:
+        try:
+            os.close(file_fd)
+        except OSError:
+            pass
+    if current_fd is not None:
+        try:
+            os.close(current_fd)
+        except OSError:
+            pass
 ' 2> /dev/null
     audit_status=$?
     case "$old_opts" in
@@ -618,13 +651,13 @@ aport_hook_record_synthetic_failure_decision() {
             case "$?" in
                 127)
                     APORT_SYNTHETIC_AUDIT_ERROR_CODE="oap.missing_dependency"
-                    APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE="No safe audit writer runtime is available; install python3 or node so APort can append audit entries without following symlinks."
+                    APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE="No safe audit writer runtime is available; install python3 so APort can append audit entries without following symlinks."
                     rm -f "$tmp_decision" 2> /dev/null || true
                     return 127
                     ;;
                 *)
                     APORT_SYNTHETIC_AUDIT_ERROR_CODE="oap.audit_unavailable"
-                    APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE="APort could not safely append the configured audit log; check the audit path is a writable regular file and not a symlink."
+                    APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE="APort could not safely append the configured audit log; check the audit path is a writable regular file and not a symlink or hard link."
                     rm -f "$tmp_decision" 2> /dev/null || true
                     return 127
                     ;;

@@ -20,9 +20,9 @@ jq --version
 Expected: `jq-1.x`. If missing, tell the user: `brew install jq` (macOS) or `apt install jq` (Linux). The hook calls `jq` on every tool call; without it every call is denied with `APort: jq is required` in enforce, warn and observe modes.
 
 ```bash
-command -v python3 >/dev/null || command -v node >/dev/null
+command -v python3 >/dev/null
 ```
-Expected: at least one command succeeds on the PATH Claude Code uses. If both are missing, setup can continue, but APort will deny with `oap.missing_dependency` instead of allowing without an audit record because audit logs cannot be appended safely. Install `python3` or `node` before using the hook.
+Expected: the command succeeds on the PATH Claude Code uses. If missing, setup can continue, but APort will deny with `oap.missing_dependency` instead of allowing without an audit record because audit logs cannot be appended safely. Install `python3` before using the hook.
 
 ## Step 2: Check if already configured
 
@@ -74,8 +74,8 @@ The PreToolUse hook is registered automatically by the plugin system. No `settin
 
 If the wizard fails or status shows no passport:
 - Every tool call denied with `jq is required`: install `jq` on the PATH Claude Code uses
-- Tool calls deny with `oap.missing_dependency`: install `python3` or `node` on the PATH Claude Code uses so audit entries can be appended safely
-- Observe mode denies with `oap.audit_unavailable`: check the audit log path is a writable regular file, not a symlink
+- Tool calls deny with `oap.missing_dependency`: install `python3` on the PATH Claude Code uses so audit entries can be appended safely
+- Observe mode denies with `oap.audit_unavailable`: check the audit log path is a writable regular file, not a symlink or hard link
 - Check `~/.claude/aport/` (or `$APORT_CLAUDE_CODE_CONFIG_DIR/aport/`) directory exists
 - Check the user has write permissions to `~/.claude/`
 - Run with `DEBUG_APORT=1` prefix for verbose output

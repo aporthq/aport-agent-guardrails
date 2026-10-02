@@ -31,7 +31,7 @@ Hook wiring is project-local by default, but APort state is not. Hosted API keys
 
 Non-interactive local passport: `npx --yes @aporthq/aport-agent-guardrails gemini --mode=local --non-interactive` (add `--output <path>` to choose the file). Interactive local passport: run the installer without flags and choose `3. Create local passport file`.
 
-**Prerequisites:** `jq` on the PATH Gemini CLI uses; the hook denies every tool call with `oap.missing_dependency` without it in enforce, warn and observe modes because the hook cannot safely parse or evaluate the payload. Install `jq` before setup. Audit entries also require `python3` or `node` on the PATH Gemini CLI uses; without one, APort denies with `oap.missing_dependency` instead of allowing without an audit record. If the configured audit log cannot be safely appended as a regular non-symlink file, the hook denies with `oap.audit_unavailable`.
+**Prerequisites:** `jq` on the PATH Gemini CLI uses; the hook denies every tool call with `oap.missing_dependency` without it in enforce, warn and observe modes because the hook cannot safely parse or evaluate the payload. Install `jq` before setup. Audit entries also require `python3` on the PATH Gemini CLI uses; without it, APort denies with `oap.missing_dependency` instead of allowing without an audit record. If the configured audit log cannot be safely appended as a regular non-symlink, non-hardlinked file, the hook denies with `oap.audit_unavailable`.
 
 To keep state elsewhere, set `APORT_GEMINI_CLI_CONFIG_DIR` when running the installer. It writes `APORT_GEMINI_CLI_CONFIG_DIR=<dir>` into the hook command in `settings.json`, so the hook uses the same directory at run time. `mode` and `reset` read the variable too. A passport outside that directory needs `APORT_PASSPORT_FILE` plus `APORT_ALLOW_EXTERNAL_PASSPORT_FILE=1`.
 
@@ -82,7 +82,7 @@ config, missing dependencies, and unmapped effectful tools still fail closed.
 Use `--enforcement=observe` only for adoption-first rollout; observe returns
 allow semantics with warnings for policy denials and non-mandatory APort
 runtime/mapping/API failures while you tune mappings and passports. Mandatory
-prerequisites such as missing `jq` still block. Audit entries require `python3` or `node`; unsafe or unavailable audit paths still block with `oap.audit_unavailable` because APort will not allow a tool call without its audit record.
+prerequisites such as missing `jq` still block. Audit entries require `python3`; unsafe or unavailable audit paths still block with `oap.audit_unavailable` because APort will not allow a tool call without its audit record.
 Restart Gemini CLI after setup or mode changes if your running process does not
 reload settings.
 

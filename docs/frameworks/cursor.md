@@ -66,7 +66,7 @@ npx @aporthq/aport-agent-guardrails --framework=cursor
 
 This runs setup and writes **`~/.cursor/hooks.json`** with fail-closed APort hook entries for shell/tool/MCP/file-read events. Choose hosted setup for passport and setup-key creation, or local setup to write a passport at the framework default path: **`~/.cursor/aport/passport.json`**. In non-interactive local mode you can pass **`--output /path/to/passport.json`** to choose the path. Restart Cursor (or reload the window) after setup so the hooks are loaded.
 
-**Prerequisites:** `jq` on the PATH Cursor uses. The hook returns `permission: deny` with `APort: jq is required` for every event when it is missing in enforce, warn and observe modes because the hook cannot safely parse or evaluate the payload. Install `jq` before setup. Audit entries also require `python3` or `node` on the PATH Cursor uses; without one, APort denies with `oap.missing_dependency` instead of allowing without an audit record. If the configured audit log cannot be safely appended as a regular non-symlink file, the hook denies with `oap.audit_unavailable`.
+**Prerequisites:** `jq` on the PATH Cursor uses. The hook returns `permission: deny` with `APort: jq is required` for every event when it is missing in enforce, warn and observe modes because the hook cannot safely parse or evaluate the payload. Install `jq` before setup. Audit entries also require `python3` on the PATH Cursor uses; without it, APort denies with `oap.missing_dependency` instead of allowing without an audit record. If the configured audit log cannot be safely appended as a regular non-symlink, non-hardlinked file, the hook denies with `oap.audit_unavailable`.
 
 Non-interactive local passport: `npx --yes @aporthq/aport-agent-guardrails cursor --mode=local --non-interactive` (add `--output <path>` to choose the file). Interactive local passport: choose `3. Create local passport file` at the passport prompt and keep `Spawn sub-agents and tasks?` at `Y`, since `subagentStart` maps to `agent.session.create.v1` and is denied without that capability.
 
@@ -85,7 +85,7 @@ missing dependencies, and evaluator integrity failures still fail closed.
 Use `--enforcement=observe` for adoption-first rollout: Cursor continues with a
 warning for policy denials and non-mandatory APort runtime/mapping/API
 failures, including unknown tool mappings while APort catches up to Cursor
-changes. Mandatory prerequisites such as missing `jq` still block. Audit entries require `python3` or `node`; unsafe or unavailable audit paths still block with `oap.audit_unavailable` because APort will not allow a tool call without its audit record.
+changes. Mandatory prerequisites such as missing `jq` still block. Audit entries require `python3`; unsafe or unavailable audit paths still block with `oap.audit_unavailable` because APort will not allow a tool call without its audit record.
 Cursor's hook UI is most reliable at surfacing messages on deny; allow warnings
 are returned in the JSON as best-effort context, but the audit log and
 `bin/aport-status.sh` are the source of truth for report-only decisions.
