@@ -80,12 +80,17 @@ deny_or_warn() {
     local code="${2:-oap.denied}"
     local message="${3:-}"
     local failure_class="${4:-hard}"
-    local notice user_warning
+    local notice user_warning synthetic_status
     if aport_hook_should_allow_failure "$failure_class"; then
         if [ "$failure_class" != "policy" ] && [ "${APORT_ADAPTER_DECISION_RECORDED:-0}" != "1" ]; then
+            synthetic_status=0
             aport_hook_record_synthetic_failure_decision \
                 "$policy" "$code" "$message" "cursor" \
-                "${INPUT:-{}}" "${TOOL_NAME:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || true
+                "${INPUT:-{}}" "${TOOL_NAME:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || synthetic_status=$?
+            if [ "$synthetic_status" -eq 127 ]; then
+                notice="$(aport_format_guardrail_notice deny "hook.audit" "${APORT_SYNTHETIC_AUDIT_ERROR_CODE:-oap.missing_dependency}" "${APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE:-APort could not record a synthetic audit entry.}" "cursor")"
+                deny "$notice"
+            fi
             APORT_ADAPTER_DECISION_RECORDED=1
         fi
         notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "cursor")"

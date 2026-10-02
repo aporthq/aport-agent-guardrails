@@ -432,66 +432,90 @@ aport_hook_strip_adapter_context_flags() {
 aport_hook_append_audit_line() {
     local audit_ref="${1:-}"
     local audit_line="${2:-}"
-    local audit_dir
+    local audit_dir audit_status old_opts
     [ -n "$audit_ref" ] || return 1
     audit_dir="$(dirname "$audit_ref")"
     mkdir -p "$audit_dir" 2> /dev/null || return 1
 
     if command -v python3 > /dev/null 2>&1; then
+        old_opts="$-"
+        set +e
         printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" python3 -c '
 import os
 import sys
 
 target = os.environ.get("APORT_AUDIT_APPEND_PATH", "")
 if not target or not hasattr(os, "O_NOFOLLOW"):
-    sys.exit(1)
+    sys.exit(78)
 
 flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
 fd = None
 try:
     fd = os.open(target, flags, 0o600)
+except OSError:
+    sys.exit(1)
+try:
     data = sys.stdin.buffer.read()
     view = memoryview(data)
     while view:
         written = os.write(fd, view)
         view = view[written:]
-    os.fchmod(fd, 0o600)
 except OSError:
     sys.exit(1)
+try:
+    os.fchmod(fd, 0o600)
+except OSError:
+    pass
 finally:
     if fd is not None:
         os.close(fd)
-' 2> /dev/null && return 0
+' 2> /dev/null
+        audit_status=$?
+        case "$old_opts" in
+            *e*) set -e ;;
+        esac
+        case "$audit_status" in
+            0) return 0 ;;
+            78) ;;
+            *) return 1 ;;
+        esac
     fi
 
-    command -v node > /dev/null 2>&1 || return 1
+    command -v node > /dev/null 2>&1 || return 127
+    old_opts="$-"
+    set +e
     printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" node -e '
 const fs = require("fs");
 const target = process.env.APORT_AUDIT_APPEND_PATH || "";
-if (!target || typeof fs.constants.O_NOFOLLOW !== "number") process.exit(1);
-let input = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
-  input += chunk;
-});
-process.stdin.on("end", () => {
-  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW;
-  let fd;
-  try {
-    fd = fs.openSync(target, flags, 0o600);
-    fs.writeSync(fd, input);
-    fs.fchmodSync(fd, 0o600);
-  } catch (_) {
-    process.exitCode = 1;
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch (_) {}
-    }
+if (!target || typeof fs.constants.O_NOFOLLOW !== "number") process.exit(78);
+const input = fs.readFileSync(0, "utf8");
+const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW;
+let fd;
+try {
+  fd = fs.openSync(target, flags, 0o600);
+  fs.writeSync(fd, input);
+} catch (_) {
+  process.exitCode = 1;
+} finally {
+  if (fd !== undefined) {
+    try {
+      fs.fchmodSync(fd, 0o600);
+    } catch (_) {}
+    try {
+      fs.closeSync(fd);
+    } catch (_) {}
   }
-});
+}
 ' 2> /dev/null
+    audit_status=$?
+    case "$old_opts" in
+        *e*) set -e ;;
+    esac
+    case "$audit_status" in
+        0) return 0 ;;
+        78) return 127 ;;
+        *) return 1 ;;
+    esac
 }
 
 aport_hook_record_synthetic_failure_decision() {
@@ -555,7 +579,18 @@ aport_hook_record_synthetic_failure_decision() {
         audit_line="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$(aport_sanitize_display_text "$original_tool") framework=$(aport_sanitize_display_text "$framework") decision_id=$decision_id allow=false policy=$safe_policy code=$safe_code"
         audit_message="${safe_message//\"/\\\"}"
         [ -n "$audit_message" ] && audit_line="${audit_line} reason=\"${audit_message}\""
-        aport_hook_append_audit_line "$audit_ref" "$audit_line" || true
+        if aport_hook_append_audit_line "$audit_ref" "$audit_line"; then
+            :
+        else
+            case "$?" in
+                127)
+                    APORT_SYNTHETIC_AUDIT_ERROR_CODE="oap.missing_dependency"
+                    APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE="No safe audit writer runtime is available; install python3 or node so APort can append audit entries without following symlinks."
+                    rm -f "$tmp_decision" 2> /dev/null || true
+                    return 127
+                    ;;
+            esac
+        fi
     fi
     rm -f "$tmp_decision" 2> /dev/null || true
 }
