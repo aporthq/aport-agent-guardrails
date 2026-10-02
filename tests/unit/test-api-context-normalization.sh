@@ -77,6 +77,17 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_se
 printf '%s' "$out" | jq -e '.session_type == "batch" and (. | has("invalid_session_type") | not)' > /dev/null \
     || fail "session context must preserve explicit valid session_type: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"batch work","arguments":"{\"session_type\":\"batch\"}"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "batch" and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "session context must parse valid JSON-string nested argument containers: $out"
+
+aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Agent(Explore)","tool_input":{"arguments":"not-json"}}' \
+    || fail "malformed nested argument containers must be detected"
+
+if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Agent(Explore)","tool_input":{"arguments":"{\"session_type\":\"batch\"}"}}'; then
+    fail "valid JSON-string nested argument containers must not be rejected"
+fi
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"bad type","session_type":"root"}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
     || fail "session context must flag invalid explicit session_type: $out"
