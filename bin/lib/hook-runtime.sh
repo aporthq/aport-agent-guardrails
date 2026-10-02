@@ -430,23 +430,19 @@ aport_hook_strip_adapter_context_flags() {
     printf '%s' "$context_json"
 }
 
-aport_hook_append_audit_line() {
-    local audit_ref="${1:-}"
-    local audit_line="${2:-}"
-    local audit_status old_opts
-    [ -n "$audit_ref" ] || return 1
-
-    command -v python3 > /dev/null 2>&1 || return 127
-    old_opts="$-"
-    set +e
-    printf '%s\n' "$audit_line" | APORT_AUDIT_APPEND_PATH="$audit_ref" python3 -c '
+aport_hook_run_audit_python_writer() {
+    export APORT_AUDIT_APPEND_PATH="$1"
+    export APORT_AUDIT_APPEND_LINE="$2"
+    exec python3 -I -S -c '
 import os
 import stat
 import sys
 
 target = os.environ.get("APORT_AUDIT_APPEND_PATH", "")
-if not target or not os.path.isabs(target):
+if not target:
     sys.exit(1)
+if not os.path.isabs(target):
+    target = os.path.abspath(target)
 
 has_required_primitives = (
     hasattr(os, "O_NOFOLLOW")
@@ -513,8 +509,12 @@ try:
     if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
         sys.exit(1)
 
-    data = sys.stdin.buffer.read()
-    view = memoryview(data)
+    data = os.environ.get("APORT_AUDIT_APPEND_LINE")
+    if data is None:
+        sys.exit(1)
+    if not data.endswith("\n"):
+        data += "\n"
+    view = memoryview(data.encode("utf-8", "surrogateescape"))
     while view:
         written = os.write(file_fd, view)
         if written <= 0:
@@ -540,7 +540,50 @@ finally:
             os.close(current_fd)
         except OSError:
             pass
-' 2> /dev/null
+'
+}
+
+aport_hook_run_audit_writer_with_timeout() {
+    local audit_ref="$1"
+    local audit_line="$2"
+    local writer_pid watcher_pid writer_status sleep_bin
+
+    if [ -x /bin/sleep ]; then
+        sleep_bin=/bin/sleep
+    elif [ -x /usr/bin/sleep ]; then
+        sleep_bin=/usr/bin/sleep
+    else
+        return 1
+    fi
+
+    aport_hook_run_audit_python_writer "$audit_ref" "$audit_line" 2> /dev/null &
+    writer_pid=$!
+    (
+        "$sleep_bin" 3
+        if kill "$writer_pid" 2> /dev/null; then
+            "$sleep_bin" 1
+            kill -KILL "$writer_pid" 2> /dev/null || true
+        fi
+    ) &
+    watcher_pid=$!
+
+    wait "$writer_pid"
+    writer_status=$?
+    kill "$watcher_pid" 2> /dev/null || true
+    wait "$watcher_pid" 2> /dev/null || true
+    return "$writer_status"
+}
+
+aport_hook_append_audit_line() {
+    local audit_ref="${1:-}"
+    local audit_line="${2:-}"
+    local audit_status old_opts
+    [ -n "$audit_ref" ] || return 1
+
+    command -v python3 > /dev/null 2>&1 || return 127
+    old_opts="$-"
+    set +e
+    aport_hook_run_audit_writer_with_timeout "$audit_ref" "$audit_line"
     audit_status=$?
     case "$old_opts" in
         *e*) set -e ;;
