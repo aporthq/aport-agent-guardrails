@@ -5,6 +5,8 @@ on:
     branches:
       - main
     paths:
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-on-version.yml"
       - "package.json"
       - "packages/**/package.json"
       - "extensions/openclaw-aport/package.json"
@@ -38,6 +40,8 @@ jobs:
 
       - name: Resolve version change
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -55,16 +59,31 @@ jobs:
             fi
           fi
 
-          if [ "${{ github.event_name }}" = "push" ] && [ "$CURRENT_VERSION" = "$PREVIOUS_VERSION" ]; then
-            echo "package.json version unchanged (${CURRENT_VERSION}); skipping release dispatch."
+          TAG="v${CURRENT_VERSION}"
+          TAG_EXISTS="false"
+          RELEASE_EXISTS="false"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            TAG_EXISTS="true"
+          fi
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            RELEASE_EXISTS="true"
+          fi
+
+          if [ "$TAG_EXISTS" = "true" ] && [ "$RELEASE_EXISTS" = "true" ]; then
+            if [ "${{ github.event_name }}" = "push" ] && [ "$CURRENT_VERSION" = "$PREVIOUS_VERSION" ]; then
+              echo "package.json version unchanged (${CURRENT_VERSION}) and ${TAG} already has a GitHub Release; skipping release dispatch."
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Release tag ${TAG} and GitHub Release already exist; skipping release dispatch."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          if git ls-remote --exit-code --tags origin "refs/tags/v${CURRENT_VERSION}" >/dev/null 2>&1; then
-            echo "Release tag v${CURRENT_VERSION} already exists; skipping release dispatch."
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ "${{ github.event_name }}" = "push" ] && [ "$CURRENT_VERSION" = "$PREVIOUS_VERSION" ]; then
+            echo "package.json version unchanged (${CURRENT_VERSION}), but ${TAG} is incomplete (tag=${TAG_EXISTS}, release=${RELEASE_EXISTS}); dispatching recovery."
           fi
 
           echo "version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
