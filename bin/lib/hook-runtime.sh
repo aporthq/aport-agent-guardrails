@@ -144,6 +144,7 @@ aport_hook_is_hard_failure_reason() {
         oap.evaluator_crash | \
             oap.evaluation_error | \
             oap.evaluator_failed | \
+            oap.audit_unavailable | \
             oap.missing_dependency | \
             oap.passport_not_found | \
             oap.passport_invalid | \
@@ -518,6 +519,38 @@ try {
     esac
 }
 
+aport_hook_write_audit_unavailable_decision() {
+    local decision_file="${1:-}"
+    local code="${2:-oap.audit_unavailable}"
+    local message="${3:-APort could not safely append the configured audit log.}"
+    local policy="${4:-hook.audit}"
+    local now decision_id escaped_code escaped_message escaped_policy escaped_id escaped_now
+
+    [ -n "$decision_file" ] || return 0
+    now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    decision_id="audit-unavailable-$$-$(date -u +%s)"
+    escaped_code="$(aport_hook_json_escape "$code")"
+    escaped_message="$(aport_hook_json_escape "$message")"
+    escaped_policy="$(aport_hook_json_escape "$policy")"
+    escaped_id="$(aport_hook_json_escape "$decision_id")"
+    escaped_now="$(aport_hook_json_escape "$now")"
+
+    {
+        printf '{'
+        printf '"decision_id":"%s",' "$escaped_id"
+        printf '"policy_id":"%s",' "$escaped_policy"
+        printf '"allow":false,'
+        printf '"reasons":[{"code":"%s","message":"%s"}],' "$escaped_code" "$escaped_message"
+        printf '"issued_at":"%s",' "$escaped_now"
+        printf '"created_at":"%s",' "$escaped_now"
+        printf '"verification_mode":"hook-audit",'
+        printf '"signature":"synthetic-unsigned",'
+        printf '"kid":"oap:hook:audit"'
+        printf '}\n'
+    } > "$decision_file" 2> /dev/null || true
+    chmod 600 "$decision_file" 2> /dev/null || true
+}
+
 aport_hook_record_synthetic_failure_decision() {
     local default_payload='{}'
     local default_context='{}'
@@ -586,6 +619,12 @@ aport_hook_record_synthetic_failure_decision() {
                 127)
                     APORT_SYNTHETIC_AUDIT_ERROR_CODE="oap.missing_dependency"
                     APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE="No safe audit writer runtime is available; install python3 or node so APort can append audit entries without following symlinks."
+                    rm -f "$tmp_decision" 2> /dev/null || true
+                    return 127
+                    ;;
+                *)
+                    APORT_SYNTHETIC_AUDIT_ERROR_CODE="oap.audit_unavailable"
+                    APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE="APort could not safely append the configured audit log; check the audit path is a writable regular file and not a symlink."
                     rm -f "$tmp_decision" 2> /dev/null || true
                     return 127
                     ;;

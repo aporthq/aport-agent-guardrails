@@ -451,6 +451,16 @@ sudo yum install jq
 - Verify user has read access to config directories
 - Verify user has write access to data directories
 
+#### `oap.audit_unavailable`
+**Description**: Hook could not safely append the configured audit log
+
+**Cause**: Audit log path is a symlink, non-regular file, missing parent directory, or otherwise not writable through the no-follow audit writer
+
+**Resolution**:
+- Set the audit log to a writable regular file inside the framework APort config directory
+- Remove symlinks from the audit log path
+- Ensure the host PATH includes `python3` or `node` for safe audit entries
+
 ---
 
 ### 8. Rate Limiting Errors (`oap.rate_limit.*`)

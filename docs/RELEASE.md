@@ -1,6 +1,6 @@
 # Release process and version policy
 
-**Current release:** 1.0.35 (see [CHANGELOG.md](../CHANGELOG.md)).
+**Current release:** 1.0.36 (see [CHANGELOG.md](../CHANGELOG.md)).
 
 We keep **one version number** across all published packages (Node core, Python core, and every framework adapter). That avoids “core is 1.2 but CLI is 0.9” and keeps the story simple for users and support.
 
@@ -55,6 +55,8 @@ So: **root = CLI/setup**; **core = library**. We publish core so that (1) the ad
    - **create-release**: creates the GitHub Release with install notes for both ecosystems.
 
    **PyPI**: In [PyPI project settings](https://pypi.org/help/#project-urls), set Repository and (if using trusted publishing) add this repo and workflow name **Release**. Otherwise configure the `PYPI_TOKEN` secret in the GitHub repo.
+
+If npm or PyPI registry consistency delays leave a release tag without a GitHub Release, a later push to `main` that touches the release workflow can dispatch the same version again. The release workflow checks out the existing tag, skips already-published artifacts, verifies registry availability, and creates the missing GitHub Release.
 
 ### Manual fallback
 

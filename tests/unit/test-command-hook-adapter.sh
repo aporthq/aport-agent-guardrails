@@ -98,6 +98,46 @@ run_hook "Codex Bash allow returns empty success JSON" \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
     '. == {}'
 
+EVALUATOR_AUDIT_VICTIM="$TEST_DIR/aport/evaluator-audit-victim.txt"
+EVALUATOR_AUDIT_LINK="$TEST_DIR/aport/evaluator-audit-link.log"
+EVALUATOR_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+EVALUATOR_AUDIT_OLD_OPENCLAW_REF="${OPENCLAW_AUDIT_LOG-}"
+EVALUATOR_AUDIT_HAD_REF=0
+EVALUATOR_AUDIT_HAD_OPENCLAW_REF=0
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    EVALUATOR_AUDIT_HAD_REF=1
+fi
+if [[ -n "${OPENCLAW_AUDIT_LOG+x}" ]]; then
+    EVALUATOR_AUDIT_HAD_OPENCLAW_REF=1
+fi
+printf 'do-not-append' > "$EVALUATOR_AUDIT_VICTIM"
+rm -f "$EVALUATOR_AUDIT_LINK"
+ln -s "$EVALUATOR_AUDIT_VICTIM" "$EVALUATOR_AUDIT_LINK"
+export APORT_AUDIT_LOG="$EVALUATOR_AUDIT_LINK"
+export OPENCLAW_AUDIT_LOG="$EVALUATOR_AUDIT_LINK"
+run_hook "Codex local evaluator denies unsafe audit target" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"}}' \
+    '.hookSpecificOutput.permissionDecision == "deny"
+      and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))'
+if [[ "$EVALUATOR_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$EVALUATOR_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ "$EVALUATOR_AUDIT_HAD_OPENCLAW_REF" -eq 1 ]]; then
+    export OPENCLAW_AUDIT_LOG="$EVALUATOR_AUDIT_OLD_OPENCLAW_REF"
+else
+    unset OPENCLAW_AUDIT_LOG
+fi
+if [[ "$(cat "$EVALUATOR_AUDIT_VICTIM")" != "do-not-append" ]]; then
+    echo "FAIL: local evaluator audit writer must not follow audit-log symlinks" >&2
+    cat "$EVALUATOR_AUDIT_VICTIM" >&2 || true
+    exit 1
+fi
+rm -f "$EVALUATOR_AUDIT_LINK"
+echo "  ✅ Local evaluator audit writer rejects symlinked targets"
+
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"
 run_hook "Codex shell session context stores hash instead of raw command" \
     codex "$CODEX" \
@@ -971,10 +1011,9 @@ export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_LINK"
 run_hook "Codex observe mode refuses symlinked synthetic audit target" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_symlink","tool_input":{"unknown":true}}' \
-    '.systemMessage
-      and .hookSpecificOutput.additionalContext
-      and (.systemMessage | contains("observe mode allowed"))
-      and (.systemMessage | contains("oap.unknown_tool"))'
+    '.hookSpecificOutput.permissionDecision == "deny"
+      and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))
+      and (.hookSpecificOutput.permissionDecisionReason | contains("audit log"))'
 if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
     export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
 else
@@ -1020,10 +1059,9 @@ export PATH="$SYNTHETIC_AUDIT_RACE_BIN:$PATH"
 run_hook "Codex observe mode opens synthetic audit target without symlink race" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_race","tool_input":{"unknown":true}}' \
-    '.systemMessage
-      and .hookSpecificOutput.additionalContext
-      and (.systemMessage | contains("observe mode allowed"))
-      and (.systemMessage | contains("oap.unknown_tool"))'
+    '.hookSpecificOutput.permissionDecision == "deny"
+      and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))
+      and (.hookSpecificOutput.permissionDecisionReason | contains("audit log"))'
 PATH="$SYNTHETIC_AUDIT_OLD_PATH"
 export PATH
 unset APORT_RACE_AUDIT_LINK APORT_RACE_AUDIT_VICTIM
@@ -1156,10 +1194,8 @@ export PATH="$SYNTHETIC_AUDIT_CHMOD_PATH"
 run_hook "Codex observe mode does not retry audit append after write" \
     codex "$CODEX" \
     '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_chmod","tool_input":{"unknown":true}}' \
-    '.systemMessage
-      and .hookSpecificOutput.additionalContext
-      and (.systemMessage | contains("observe mode allowed"))
-      and (.systemMessage | contains("oap.unknown_tool"))'
+    '.hookSpecificOutput.permissionDecision == "deny"
+      and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))'
 PATH="$SYNTHETIC_AUDIT_OLD_PATH"
 export PATH
 if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then

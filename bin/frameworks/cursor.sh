@@ -44,6 +44,7 @@ run_setup() {
     parse_guardrail_mode_args "$@"
 
     log_info "Setting up APort guardrails for Cursor..."
+    warn_if_safe_audit_writer_missing
     # Passport and data live under Cursor's config dir (~/.cursor/aport/ by default).
     config_dir="$(ensure_aport_dir_secure cursor)"
 

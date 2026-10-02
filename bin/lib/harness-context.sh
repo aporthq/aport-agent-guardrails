@@ -42,14 +42,26 @@ aport_hook_payload_has_malformed_nested_argument_containers() {
           (try ((v | fromjson | type) == "object") catch false) | not
         else true
         end;
-      [
-        (if normalized_tool == "skill" then empty else obj(.tool_input).args end),
-        obj(.tool_input).arguments,
-        (if normalized_tool == "skill" then empty else obj(.input).args end),
-        obj(.input).arguments,
-        (if normalized_tool == "skill" then empty else obj(.args).args end),
-        obj(.args).arguments
-      ] | any(malformed(.))
+      def malformed_skill_args(v): v != null and (v | type) != "string";
+      if normalized_tool == "skill" then
+        (
+          malformed_skill_args(obj(.tool_input).args) or
+          malformed_skill_args(obj(.input).args) or
+          malformed_skill_args(obj(.args).args) or
+          malformed(obj(.tool_input).arguments) or
+          malformed(obj(.input).arguments) or
+          malformed(obj(.args).arguments)
+        )
+      else
+        [
+          obj(.tool_input).args,
+          obj(.tool_input).arguments,
+          obj(.input).args,
+          obj(.input).arguments,
+          obj(.args).args,
+          obj(.args).arguments
+        ] | any(malformed(.))
+      end
     ' <<< "$payload" > /dev/null 2>&1
 }
 

@@ -110,6 +110,12 @@ emit_response() {
     local failure_class="${5:-hard}"
     local notice user_warning synthetic_status
 
+    case "$code" in
+        oap.audit_unavailable | oap.missing_dependency)
+            failure_class="mandatory"
+            ;;
+    esac
+
     if [ "$disposition" = "allow" ]; then
         aport_hook_build_response "allow" "" "" "$FRAMEWORK"
         exit 0

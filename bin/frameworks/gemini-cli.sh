@@ -57,6 +57,7 @@ run_setup() {
 
     warn_if_framework_command_missing "gemini" "Install Gemini CLI first if this machine has not been onboarded yet."
     log_info "Setting up APort guardrails for Gemini CLI..."
+    warn_if_safe_audit_writer_missing
     config_dir="$(ensure_aport_dir_secure gemini-cli)"
     export APORT_FRAMEWORK=gemini-cli
 

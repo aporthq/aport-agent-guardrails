@@ -57,6 +57,7 @@ run_setup() {
 
     warn_if_framework_command_missing "codex" "Install Codex CLI first if this machine has not been onboarded yet."
     log_info "Setting up APort guardrails for Codex..."
+    warn_if_safe_audit_writer_missing
     config_dir="$(ensure_aport_dir_secure codex)"
     export APORT_FRAMEWORK=codex
 
