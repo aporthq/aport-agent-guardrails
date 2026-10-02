@@ -1081,7 +1081,7 @@ if [[ -z "$PYTHON3_BIN" ]]; then
     exit 1
 fi
 mkdir -p "$SYNTHETIC_AUDIT_NO_NODE_PATH"
-for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut python3; do
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut; do
     tool_path="$(command -v "$tool" || true)"
     if [[ -z "$tool_path" ]]; then
         echo "FAIL: required command for no-node audit test is missing: $tool" >&2
@@ -1089,6 +1089,11 @@ for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv ca
     fi
     ln -sf "$tool_path" "$SYNTHETIC_AUDIT_NO_NODE_PATH/$tool"
 done
+cat > "$SYNTHETIC_AUDIT_NO_NODE_PATH/python3" << EOF
+#!/usr/bin/env bash
+exec "$PYTHON3_BIN" "\$@"
+EOF
+chmod +x "$SYNTHETIC_AUDIT_NO_NODE_PATH/python3"
 rm -f "$SYNTHETIC_AUDIT_NO_NODE_PATH/node" "$SYNTHETIC_AUDIT_NO_NODE_LOG"
 export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_NO_NODE_LOG"
 export PATH="$SYNTHETIC_AUDIT_NO_NODE_PATH"
@@ -1112,6 +1117,95 @@ grep -q 'oap.unknown_tool' "$SYNTHETIC_AUDIT_NO_NODE_LOG" || {
     exit 1
 }
 echo "  ✅ Observe-mode synthetic audit writer appends without node"
+
+SYNTHETIC_AUDIT_CHMOD_LOG="$TEST_DIR/aport/synthetic-audit-chmod.log"
+SYNTHETIC_AUDIT_CHMOD_PATH="$TEST_DIR/aport/chmod-fail-path"
+SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+SYNTHETIC_AUDIT_HAD_REF=0
+SYNTHETIC_AUDIT_OLD_PATH="$PATH"
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_REF=1
+fi
+mkdir -p "$SYNTHETIC_AUDIT_CHMOD_PATH"
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut; do
+    tool_path="$(command -v "$tool" || true)"
+    if [[ -z "$tool_path" ]]; then
+        echo "FAIL: required command for chmod-failure audit test is missing: $tool" >&2
+        exit 1
+    fi
+    ln -sf "$tool_path" "$SYNTHETIC_AUDIT_CHMOD_PATH/$tool"
+done
+cat > "$SYNTHETIC_AUDIT_CHMOD_PATH/python3" << 'EOF'
+#!/usr/bin/env bash
+cat >> "$APORT_AUDIT_APPEND_PATH"
+exit 1
+EOF
+cat > "$SYNTHETIC_AUDIT_CHMOD_PATH/node" << 'EOF'
+#!/usr/bin/env bash
+cat >> "$APORT_AUDIT_APPEND_PATH"
+exit 0
+EOF
+chmod +x "$SYNTHETIC_AUDIT_CHMOD_PATH/python3" "$SYNTHETIC_AUDIT_CHMOD_PATH/node"
+rm -f "$SYNTHETIC_AUDIT_CHMOD_LOG"
+export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_CHMOD_LOG"
+export PATH="$SYNTHETIC_AUDIT_CHMOD_PATH"
+run_hook "Codex observe mode does not retry audit append after write" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_chmod","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))'
+PATH="$SYNTHETIC_AUDIT_OLD_PATH"
+export PATH
+if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+SYNTHETIC_AUDIT_CHMOD_COUNT="$(grep -c 'oap.unknown_tool' "$SYNTHETIC_AUDIT_CHMOD_LOG" 2> /dev/null || true)"
+if [[ "$SYNTHETIC_AUDIT_CHMOD_COUNT" -ne 1 ]]; then
+    echo "FAIL: observe-mode synthetic audit writer must not retry after a post-write chmod failure" >&2
+    cat "$SYNTHETIC_AUDIT_CHMOD_LOG" >&2 || true
+    exit 1
+fi
+echo "  ✅ Observe-mode synthetic audit writer avoids duplicate post-write retries"
+
+SYNTHETIC_AUDIT_NO_RUNTIME_LOG="$TEST_DIR/aport/synthetic-audit-no-runtime.log"
+SYNTHETIC_AUDIT_NO_RUNTIME_PATH="$TEST_DIR/aport/no-runtime-path"
+SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+SYNTHETIC_AUDIT_HAD_REF=0
+SYNTHETIC_AUDIT_OLD_PATH="$PATH"
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_REF=1
+fi
+mkdir -p "$SYNTHETIC_AUDIT_NO_RUNTIME_PATH"
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut; do
+    tool_path="$(command -v "$tool" || true)"
+    if [[ -z "$tool_path" ]]; then
+        echo "FAIL: required command for no-runtime audit test is missing: $tool" >&2
+        exit 1
+    fi
+    ln -sf "$tool_path" "$SYNTHETIC_AUDIT_NO_RUNTIME_PATH/$tool"
+done
+rm -f "$SYNTHETIC_AUDIT_NO_RUNTIME_PATH/python3" "$SYNTHETIC_AUDIT_NO_RUNTIME_PATH/node" "$SYNTHETIC_AUDIT_NO_RUNTIME_LOG"
+export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_NO_RUNTIME_LOG"
+export PATH="$SYNTHETIC_AUDIT_NO_RUNTIME_PATH"
+run_hook "Codex observe mode surfaces missing safe audit writer runtime" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_no_runtime","tool_input":{"unknown":true}}' \
+    '.hookSpecificOutput.hookEventName == "PreToolUse"
+      and .hookSpecificOutput.permissionDecision == "deny"
+      and (.hookSpecificOutput.permissionDecisionReason | contains("oap.missing_dependency"))
+      and (.hookSpecificOutput.permissionDecisionReason | contains("No safe audit writer runtime"))'
+PATH="$SYNTHETIC_AUDIT_OLD_PATH"
+export PATH
+if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+echo "  ✅ Observe-mode synthetic audit writer surfaces missing runtime"
 
 run_hook "Codex observe mode allows hard parser failures with warning" \
     codex "$CODEX" \

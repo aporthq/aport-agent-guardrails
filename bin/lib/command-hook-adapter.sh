@@ -108,7 +108,7 @@ emit_response() {
     local code="${3:-oap.denied}"
     local message="${4:-}"
     local failure_class="${5:-hard}"
-    local notice user_warning
+    local notice user_warning synthetic_status
 
     if [ "$disposition" = "allow" ]; then
         aport_hook_build_response "allow" "" "" "$FRAMEWORK"
@@ -117,9 +117,15 @@ emit_response() {
 
     if aport_hook_should_allow_failure "$failure_class"; then
         if [ "$failure_class" != "policy" ] && [ "${APORT_ADAPTER_DECISION_RECORDED:-0}" != "1" ]; then
+            synthetic_status=0
             aport_hook_record_synthetic_failure_decision \
                 "$policy" "$code" "$message" "$FRAMEWORK" \
-                "${INPUT:-{}}" "${ORIGINAL_TOOL:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || true
+                "${INPUT:-{}}" "${ORIGINAL_TOOL:-unknown}" "${GUARDRAIL_TOOL:-$policy}" "${CONTEXT_JSON:-{}}" || synthetic_status=$?
+            if [ "$synthetic_status" -eq 127 ]; then
+                notice="$(aport_format_guardrail_notice deny "hook.audit" "${APORT_SYNTHETIC_AUDIT_ERROR_CODE:-oap.missing_dependency}" "${APORT_SYNTHETIC_AUDIT_ERROR_MESSAGE:-APort could not record a synthetic audit entry.}" "$FRAMEWORK")"
+                aport_hook_build_response "deny" "$notice" "" "$FRAMEWORK"
+                exit 0
+            fi
             APORT_ADAPTER_DECISION_RECORDED=1
         fi
         notice="$(aport_format_guardrail_notice "$(aport_hook_enforcement_mode)" "$policy" "$code" "$message" "$FRAMEWORK")"
