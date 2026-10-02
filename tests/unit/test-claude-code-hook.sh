@@ -524,6 +524,110 @@ if [[ "$(cat "$CLAUDE_AUDIT_VICTIM")" != "do-not-append" ]]; then
 fi
 rm -f "$CLAUDE_AUDIT_LINK"
 echo "  ✅ Claude observe mode denies unsafe synthetic audit target"
+
+CLAUDE_RELATIVE_CONFIG_WORK="$TEST_DIR/claude-relative-config-work"
+mkdir -p "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport"
+cp "$FIXTURE_PASSPORT" "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport/passport.json"
+cat > "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=observe
+EOF
+OUT4OR="$TEST_DIR/claude-observe-relative-config.txt"
+set +e
+(
+    cd "$CLAUDE_RELATIVE_CONFIG_WORK" || exit 1
+    unset APORT_CONFIG_DIR OPENCLAW_CONFIG_DIR APORT_PASSPORT_FILE OPENCLAW_PASSPORT_FILE
+    unset APORT_DECISION_FILE OPENCLAW_DECISION_FILE APORT_AUDIT_LOG OPENCLAW_AUDIT_LOG AUDIT_LOG
+    printf '%s' '{"tool_name":"UnknownToolRelativeAudit","tool_input":{}}' \
+        | APORT_CLAUDE_CODE_CONFIG_DIR=.claude-custom "$HOOK_SCRIPT"
+) > "$OUT4OR" 2> /dev/null
+EXIT4OR=$?
+set -e
+[[ "$EXIT4OR" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Claude relative config observe warning, got $EXIT4OR" >&2
+    cat "$OUT4OR" >&2 || true
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("observe mode allowed"))
+  and (.systemMessage | contains("oap.unknown_tool"))
+' "$OUT4OR" > /dev/null || {
+    echo "FAIL: Claude relative custom config should allow observed unknown tools with warning" >&2
+    cat "$OUT4OR" >&2
+    exit 1
+}
+grep -q 'oap.unknown_tool' "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport/audit.log" || {
+    echo "FAIL: Claude relative custom config should append to its relative audit path" >&2
+    cat "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport/audit.log" >&2 || true
+    exit 1
+}
+echo "  ✅ Claude observe mode appends audit entries for relative custom config"
+
+CLAUDE_AUDIT_STALL_LOG="$TEST_DIR/aport/claude-audit-stall.log"
+CLAUDE_AUDIT_STALL_PATH="$TEST_DIR/aport/claude-audit-stall-path"
+CLAUDE_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+CLAUDE_AUDIT_OLD_OPENCLAW_REF="${OPENCLAW_AUDIT_LOG-}"
+CLAUDE_AUDIT_HAD_REF=0
+CLAUDE_AUDIT_HAD_OPENCLAW_REF=0
+CLAUDE_AUDIT_OLD_PATH="$PATH"
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    CLAUDE_AUDIT_HAD_REF=1
+fi
+if [[ -n "${OPENCLAW_AUDIT_LOG+x}" ]]; then
+    CLAUDE_AUDIT_HAD_OPENCLAW_REF=1
+fi
+mkdir -p "$CLAUDE_AUDIT_STALL_PATH"
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut sleep; do
+    tool_path="$(command -v "$tool" || true)"
+    if [[ -z "$tool_path" ]]; then
+        echo "FAIL: required command for stalled audit test is missing: $tool" >&2
+        exit 1
+    fi
+    ln -sf "$tool_path" "$CLAUDE_AUDIT_STALL_PATH/$tool"
+done
+cat > "$CLAUDE_AUDIT_STALL_PATH/python3" << 'EOF'
+#!/usr/bin/env bash
+/bin/sleep 10
+exit 0
+EOF
+chmod +x "$CLAUDE_AUDIT_STALL_PATH/python3"
+rm -f "$CLAUDE_AUDIT_STALL_LOG"
+export APORT_AUDIT_LOG="$CLAUDE_AUDIT_STALL_LOG"
+export OPENCLAW_AUDIT_LOG="$CLAUDE_AUDIT_STALL_LOG"
+OUT4OS="$TEST_DIR/claude-observe-audit-stall.txt"
+set +e
+printf '%s' '{"tool_name":"UnknownToolAuditStall","tool_input":{}}' \
+    | PATH="$CLAUDE_AUDIT_STALL_PATH" OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4OS" 2> /dev/null
+EXIT4OS=$?
+set -e
+PATH="$CLAUDE_AUDIT_OLD_PATH"
+export PATH
+if [[ "$CLAUDE_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$CLAUDE_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ "$CLAUDE_AUDIT_HAD_OPENCLAW_REF" -eq 1 ]]; then
+    export OPENCLAW_AUDIT_LOG="$CLAUDE_AUDIT_OLD_OPENCLAW_REF"
+else
+    unset OPENCLAW_AUDIT_LOG
+fi
+[[ "$EXIT4OS" -eq 0 ]] || {
+    echo "FAIL: expected structured deny with exit 0 for stalled Claude audit writer, got $EXIT4OS" >&2
+    cat "$OUT4OS" >&2 || true
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "deny"
+  and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))
+' "$OUT4OS" > /dev/null || {
+    echo "FAIL: Claude observe mode should deny when synthetic audit writer stalls" >&2
+    cat "$OUT4OS" >&2
+    exit 1
+}
+echo "  ✅ Claude observe mode bounds stalled synthetic audit writer"
+
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF

@@ -1195,6 +1195,50 @@ grep -q 'oap.unknown_tool' "$SYNTHETIC_AUDIT_SAFE_LOG" || {
 }
 echo "  ✅ Observe-mode synthetic audit writer appends regular targets"
 
+SYNTHETIC_AUDIT_PYTHONPATH_LOG="$TEST_DIR/aport/synthetic-audit-pythonpath.log"
+SYNTHETIC_AUDIT_HOSTILE_PYTHONPATH="$TEST_DIR/aport/hostile-pythonpath"
+SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+SYNTHETIC_AUDIT_HAD_REF=0
+SYNTHETIC_AUDIT_OLD_PYTHONPATH="${PYTHONPATH-}"
+SYNTHETIC_AUDIT_HAD_PYTHONPATH=0
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_REF=1
+fi
+if [[ -n "${PYTHONPATH+x}" ]]; then
+    SYNTHETIC_AUDIT_HAD_PYTHONPATH=1
+fi
+mkdir -p "$SYNTHETIC_AUDIT_HOSTILE_PYTHONPATH"
+cat > "$SYNTHETIC_AUDIT_HOSTILE_PYTHONPATH/sitecustomize.py" << 'EOF'
+import os
+os._exit(0)
+EOF
+rm -f "$SYNTHETIC_AUDIT_PYTHONPATH_LOG"
+export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_PYTHONPATH_LOG"
+export PYTHONPATH="$SYNTHETIC_AUDIT_HOSTILE_PYTHONPATH"
+run_hook "Codex observe mode isolates synthetic audit writer from PYTHONPATH" \
+    codex "$CODEX" \
+    '{"hook_event_name":"PreToolUse","tool_name":"future_provider_tool_audit_pythonpath","tool_input":{"unknown":true}}' \
+    '.systemMessage
+      and .hookSpecificOutput.additionalContext
+      and (.systemMessage | contains("observe mode allowed"))
+      and (.systemMessage | contains("oap.unknown_tool"))'
+if [[ "$SYNTHETIC_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$SYNTHETIC_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ "$SYNTHETIC_AUDIT_HAD_PYTHONPATH" -eq 1 ]]; then
+    export PYTHONPATH="$SYNTHETIC_AUDIT_OLD_PYTHONPATH"
+else
+    unset PYTHONPATH
+fi
+grep -q 'oap.unknown_tool' "$SYNTHETIC_AUDIT_PYTHONPATH_LOG" || {
+    echo "FAIL: observe-mode synthetic audit writer must not trust PYTHONPATH/sitecustomize startup hooks" >&2
+    cat "$SYNTHETIC_AUDIT_PYTHONPATH_LOG" >&2 || true
+    exit 1
+}
+echo "  ✅ Observe-mode synthetic audit writer ignores hostile PYTHONPATH"
+
 SYNTHETIC_AUDIT_NO_NODE_LOG="$TEST_DIR/aport/synthetic-audit-no-node.log"
 SYNTHETIC_AUDIT_NO_NODE_PATH="$TEST_DIR/aport/no-node-path"
 SYNTHETIC_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
@@ -1213,7 +1257,7 @@ if [[ -n "$PYTHON3_RESOLVED_BIN" && -x "$PYTHON3_RESOLVED_BIN" ]]; then
     PYTHON3_BIN="$PYTHON3_RESOLVED_BIN"
 fi
 mkdir -p "$SYNTHETIC_AUDIT_NO_NODE_PATH"
-for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut; do
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut sleep; do
     tool_path="$(command -v "$tool" || true)"
     if [[ -z "$tool_path" ]]; then
         echo "FAIL: required command for no-node audit test is missing: $tool" >&2
@@ -1259,7 +1303,7 @@ if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
     SYNTHETIC_AUDIT_HAD_REF=1
 fi
 mkdir -p "$SYNTHETIC_AUDIT_CHMOD_PATH"
-for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut; do
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut sleep; do
     tool_path="$(command -v "$tool" || true)"
     if [[ -z "$tool_path" ]]; then
         echo "FAIL: required command for chmod-failure audit test is missing: $tool" >&2
@@ -1269,12 +1313,12 @@ for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv ca
 done
 cat > "$SYNTHETIC_AUDIT_CHMOD_PATH/python3" << 'EOF'
 #!/usr/bin/env bash
-cat >> "$APORT_AUDIT_APPEND_PATH"
+printf '%s\n' "$APORT_AUDIT_APPEND_LINE" >> "$APORT_AUDIT_APPEND_PATH"
 exit 1
 EOF
 cat > "$SYNTHETIC_AUDIT_CHMOD_PATH/node" << 'EOF'
 #!/usr/bin/env bash
-cat >> "$APORT_AUDIT_APPEND_PATH"
+printf '%s\n' "$APORT_AUDIT_APPEND_LINE" >> "$APORT_AUDIT_APPEND_PATH"
 exit 0
 EOF
 chmod +x "$SYNTHETIC_AUDIT_CHMOD_PATH/python3" "$SYNTHETIC_AUDIT_CHMOD_PATH/node"
@@ -1310,7 +1354,7 @@ if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
     SYNTHETIC_AUDIT_HAD_REF=1
 fi
 mkdir -p "$SYNTHETIC_AUDIT_NO_RUNTIME_PATH"
-for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut; do
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut sleep; do
     tool_path="$(command -v "$tool" || true)"
     if [[ -z "$tool_path" ]]; then
         echo "FAIL: required command for no-runtime audit test is missing: $tool" >&2
