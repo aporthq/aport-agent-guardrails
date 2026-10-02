@@ -104,7 +104,7 @@ deny_or_warn() {
 map_session_context() {
     local source_tool="${1:-$TOOL_NAME}"
     GUARDRAIL_TOOL="session.create"
-    if aport_hook_payload_has_malformed_nested_argument_containers "$INPUT"; then
+    if aport_hook_payload_has_malformed_nested_argument_containers "$INPUT" "$source_tool"; then
         deny_or_warn "agent.session.create.v1" "oap.invalid_tool_arguments" \
             "Session argument containers must be JSON objects" "hard"
     fi

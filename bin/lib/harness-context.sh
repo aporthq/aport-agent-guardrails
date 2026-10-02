@@ -26,12 +26,15 @@ aport_hook_payload_has_malformed_tool_arguments() {
 
 aport_hook_payload_has_malformed_nested_argument_containers() {
     local payload="$1"
-    jq -e '
+    local tool_name="${2:-}"
+    jq --arg tool_name "$tool_name" -e '
       def obj(v):
         if (v | type) == "object" then v
         elif (v | type) == "string" then (try (v | fromjson) catch {})
         else {}
         end;
+      def normalized_tool:
+        ((if ($tool_name | length) > 0 then $tool_name else (.tool_name // .tool // "") end) | tostring | gsub("\\s"; "") | sub("^functions\\."; "") | sub("\\(.*$"; "") | ascii_downcase);
       def malformed(v):
         if v == null then false
         elif (v | type) == "object" then false
@@ -40,7 +43,7 @@ aport_hook_payload_has_malformed_nested_argument_containers() {
         else true
         end;
       [
-        obj(.tool_input).args,
+        (if normalized_tool == "skill" then empty else obj(.tool_input).args end),
         obj(.tool_input).arguments,
         obj(.input).args,
         obj(.input).arguments,
