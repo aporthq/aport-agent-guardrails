@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.36
+
+### Patch Changes
+
+- Harden guardrail audit logging, Codex skill argument validation, and release recovery so unsafe audit paths fail closed and main-merge releases can recover missing GitHub Release pages after npm registry staging delays.
+
 ## 1.0.35
 
 ### Patch Changes

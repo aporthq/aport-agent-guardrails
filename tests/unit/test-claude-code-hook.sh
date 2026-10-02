@@ -461,6 +461,173 @@ jq -e '.guardrail_tool == "hook.tool.map" and .decision.allow == false and .deci
     cat "$TEST_DIR/aport/session-decisions.jsonl" >&2 || true
     exit 1
 }
+CLAUDE_AUDIT_VICTIM="$TEST_DIR/aport/claude-audit-victim.txt"
+CLAUDE_AUDIT_LINK="$TEST_DIR/aport/claude-audit-link.log"
+CLAUDE_AUDIT_OLD_AUDIT_LOG="${AUDIT_LOG-}"
+CLAUDE_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+CLAUDE_AUDIT_OLD_OPENCLAW_REF="${OPENCLAW_AUDIT_LOG-}"
+CLAUDE_AUDIT_HAD_AUDIT_LOG=0
+CLAUDE_AUDIT_HAD_REF=0
+CLAUDE_AUDIT_HAD_OPENCLAW_REF=0
+if [[ -n "${AUDIT_LOG+x}" ]]; then
+    CLAUDE_AUDIT_HAD_AUDIT_LOG=1
+fi
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    CLAUDE_AUDIT_HAD_REF=1
+fi
+if [[ -n "${OPENCLAW_AUDIT_LOG+x}" ]]; then
+    CLAUDE_AUDIT_HAD_OPENCLAW_REF=1
+fi
+printf 'do-not-append' > "$CLAUDE_AUDIT_VICTIM"
+rm -f "$CLAUDE_AUDIT_LINK"
+ln -s "$CLAUDE_AUDIT_VICTIM" "$CLAUDE_AUDIT_LINK"
+export AUDIT_LOG="$CLAUDE_AUDIT_LINK"
+export APORT_AUDIT_LOG="$CLAUDE_AUDIT_LINK"
+export OPENCLAW_AUDIT_LOG="$CLAUDE_AUDIT_LINK"
+OUT4OA="$TEST_DIR/claude-observe-audit-symlink.txt"
+set +e
+echo '{"tool_name":"UnknownToolAuditSymlink","tool_input":{}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4OA" 2> /dev/null
+EXIT4OA=$?
+set -e
+if [[ "$CLAUDE_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$CLAUDE_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ "$CLAUDE_AUDIT_HAD_AUDIT_LOG" -eq 1 ]]; then
+    export AUDIT_LOG="$CLAUDE_AUDIT_OLD_AUDIT_LOG"
+else
+    unset AUDIT_LOG
+fi
+if [[ "$CLAUDE_AUDIT_HAD_OPENCLAW_REF" -eq 1 ]]; then
+    export OPENCLAW_AUDIT_LOG="$CLAUDE_AUDIT_OLD_OPENCLAW_REF"
+else
+    unset OPENCLAW_AUDIT_LOG
+fi
+[[ "$EXIT4OA" -eq 0 ]] || {
+    echo "FAIL: expected structured deny with exit 0 for Claude unsafe audit target, got $EXIT4OA" >&2
+    cat "$OUT4OA" >&2 || true
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "deny"
+  and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))
+' "$OUT4OA" > /dev/null || {
+    echo "FAIL: Claude observe mode should deny when synthetic audit target is unsafe" >&2
+    cat "$OUT4OA" >&2
+    exit 1
+}
+if [[ "$(cat "$CLAUDE_AUDIT_VICTIM")" != "do-not-append" ]]; then
+    echo "FAIL: Claude observe-mode synthetic audit writer must not follow audit-log symlinks" >&2
+    cat "$CLAUDE_AUDIT_VICTIM" >&2 || true
+    exit 1
+fi
+rm -f "$CLAUDE_AUDIT_LINK"
+echo "  ✅ Claude observe mode denies unsafe synthetic audit target"
+
+CLAUDE_RELATIVE_CONFIG_WORK="$TEST_DIR/claude-relative-config-work"
+mkdir -p "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport"
+cp "$FIXTURE_PASSPORT" "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport/passport.json"
+cat > "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport/guardrail-mode.env" << 'EOF'
+APORT_GUARDRAIL_MODE=local
+APORT_ENFORCEMENT=observe
+EOF
+OUT4OR="$TEST_DIR/claude-observe-relative-config.txt"
+set +e
+(
+    cd "$CLAUDE_RELATIVE_CONFIG_WORK" || exit 1
+    unset APORT_CONFIG_DIR OPENCLAW_CONFIG_DIR APORT_PASSPORT_FILE OPENCLAW_PASSPORT_FILE
+    unset APORT_DECISION_FILE OPENCLAW_DECISION_FILE APORT_AUDIT_LOG OPENCLAW_AUDIT_LOG AUDIT_LOG
+    printf '%s' '{"tool_name":"UnknownToolRelativeAudit","tool_input":{}}' \
+        | APORT_CLAUDE_CODE_CONFIG_DIR=.claude-custom "$HOOK_SCRIPT"
+) > "$OUT4OR" 2> /dev/null
+EXIT4OR=$?
+set -e
+[[ "$EXIT4OR" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Claude relative config observe warning, got $EXIT4OR" >&2
+    cat "$OUT4OR" >&2 || true
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "allow"
+  and (.systemMessage | contains("observe mode allowed"))
+  and (.systemMessage | contains("oap.unknown_tool"))
+' "$OUT4OR" > /dev/null || {
+    echo "FAIL: Claude relative custom config should allow observed unknown tools with warning" >&2
+    cat "$OUT4OR" >&2
+    exit 1
+}
+grep -q 'oap.unknown_tool' "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport/audit.log" || {
+    echo "FAIL: Claude relative custom config should append to its relative audit path" >&2
+    cat "$CLAUDE_RELATIVE_CONFIG_WORK/.claude-custom/aport/audit.log" >&2 || true
+    exit 1
+}
+echo "  ✅ Claude observe mode appends audit entries for relative custom config"
+
+CLAUDE_AUDIT_STALL_LOG="$TEST_DIR/aport/claude-audit-stall.log"
+CLAUDE_AUDIT_STALL_PATH="$TEST_DIR/aport/claude-audit-stall-path"
+CLAUDE_AUDIT_OLD_REF="${APORT_AUDIT_LOG-}"
+CLAUDE_AUDIT_OLD_OPENCLAW_REF="${OPENCLAW_AUDIT_LOG-}"
+CLAUDE_AUDIT_HAD_REF=0
+CLAUDE_AUDIT_HAD_OPENCLAW_REF=0
+CLAUDE_AUDIT_OLD_PATH="$PATH"
+if [[ -n "${APORT_AUDIT_LOG+x}" ]]; then
+    CLAUDE_AUDIT_HAD_REF=1
+fi
+if [[ -n "${OPENCLAW_AUDIT_LOG+x}" ]]; then
+    CLAUDE_AUDIT_HAD_OPENCLAW_REF=1
+fi
+mkdir -p "$CLAUDE_AUDIT_STALL_PATH"
+for tool in bash dirname pwd basename tr sed jq mkdir chmod date mktemp rm mv cat head sort wc cut sleep; do
+    tool_path="$(command -v "$tool" || true)"
+    if [[ -z "$tool_path" ]]; then
+        echo "FAIL: required command for stalled audit test is missing: $tool" >&2
+        exit 1
+    fi
+    ln -sf "$tool_path" "$CLAUDE_AUDIT_STALL_PATH/$tool"
+done
+cat > "$CLAUDE_AUDIT_STALL_PATH/python3" << 'EOF'
+#!/usr/bin/env bash
+/bin/sleep 10
+exit 0
+EOF
+chmod +x "$CLAUDE_AUDIT_STALL_PATH/python3"
+rm -f "$CLAUDE_AUDIT_STALL_LOG"
+export APORT_AUDIT_LOG="$CLAUDE_AUDIT_STALL_LOG"
+export OPENCLAW_AUDIT_LOG="$CLAUDE_AUDIT_STALL_LOG"
+OUT4OS="$TEST_DIR/claude-observe-audit-stall.txt"
+set +e
+printf '%s' '{"tool_name":"UnknownToolAuditStall","tool_input":{}}' \
+    | PATH="$CLAUDE_AUDIT_STALL_PATH" OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT4OS" 2> /dev/null
+EXIT4OS=$?
+set -e
+PATH="$CLAUDE_AUDIT_OLD_PATH"
+export PATH
+if [[ "$CLAUDE_AUDIT_HAD_REF" -eq 1 ]]; then
+    export APORT_AUDIT_LOG="$CLAUDE_AUDIT_OLD_REF"
+else
+    unset APORT_AUDIT_LOG
+fi
+if [[ "$CLAUDE_AUDIT_HAD_OPENCLAW_REF" -eq 1 ]]; then
+    export OPENCLAW_AUDIT_LOG="$CLAUDE_AUDIT_OLD_OPENCLAW_REF"
+else
+    unset OPENCLAW_AUDIT_LOG
+fi
+[[ "$EXIT4OS" -eq 0 ]] || {
+    echo "FAIL: expected structured deny with exit 0 for stalled Claude audit writer, got $EXIT4OS" >&2
+    cat "$OUT4OS" >&2 || true
+    exit 1
+}
+jq -e '
+  .hookSpecificOutput.permissionDecision == "deny"
+  and (.hookSpecificOutput.permissionDecisionReason | contains("oap.audit_unavailable"))
+' "$OUT4OS" > /dev/null || {
+    echo "FAIL: Claude observe mode should deny when synthetic audit writer stalls" >&2
+    cat "$OUT4OS" >&2
+    exit 1
+}
+echo "  ✅ Claude observe mode bounds stalled synthetic audit writer"
+
 cat > "$MODE_FILE" << 'EOF'
 APORT_GUARDRAIL_MODE=local
 EOF
@@ -956,6 +1123,69 @@ grep -q 'oap.missing_required_context' "$OUT10B" || {
     exit 1
 }
 echo "  ✅ Agent tool_input active_session_count is not trusted"
+
+echo "  Test: Agent malformed nested arguments -> deny..."
+OUT10C="$TEST_DIR/claude-deny-agent-malformed-nested-arguments.txt"
+set +e
+echo '{"tool_name":"Agent","active_session_count":0,"tool_input":{"description":"explore repo","arguments":"not-json"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10C" 2> /dev/null
+EXIT10C=$?
+set -e
+[[ "$EXIT10C" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for malformed Agent arguments, got $EXIT10C" >&2
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT10C" || {
+    echo "FAIL: expected structured deny payload for malformed Agent arguments" >&2
+    cat "$OUT10C" >&2
+    exit 1
+}
+grep -q 'oap.invalid_tool_arguments' "$OUT10C" || {
+    echo "FAIL: expected invalid tool arguments reason for malformed Agent arguments" >&2
+    cat "$OUT10C" >&2
+    exit 1
+}
+echo "  ✅ Agent malformed nested arguments fails closed"
+
+echo "  Test: Skill scalar args -> allow..."
+OUT10D="$TEST_DIR/claude-allow-skill-scalar-args.txt"
+set +e
+echo '{"tool_name":"Skill","active_session_count":0,"tool_input":{"skill":"review-pr","args":"--base main"}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10D" 2> /dev/null
+EXIT10D=$?
+set -e
+[[ "$EXIT10D" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 for Skill scalar args, got $EXIT10D" >&2
+    cat "$OUT10D" >&2 || true
+    exit 1
+}
+if grep -q 'oap.invalid_tool_arguments' "$OUT10D"; then
+    echo "FAIL: Skill scalar args should not be treated as malformed nested argument containers" >&2
+    cat "$OUT10D" >&2
+    exit 1
+fi
+echo "  ✅ Skill scalar args are allowed"
+
+echo "  Test: Skill non-string args -> deny..."
+OUT10E="$TEST_DIR/claude-deny-skill-object-args.txt"
+set +e
+echo '{"tool_name":"Skill","active_session_count":0,"tool_input":{"skill":"review-pr","args":{"session_type":"batch"}}}' | OPENCLAW_CONFIG_DIR="$TEST_DIR" "$HOOK_SCRIPT" > "$OUT10E" 2> /dev/null
+EXIT10E=$?
+set -e
+[[ "$EXIT10E" -eq 0 ]] || {
+    echo "FAIL: expected exit 0 with structured deny for Skill object args, got $EXIT10E" >&2
+    cat "$OUT10E" >&2 || true
+    exit 1
+}
+grep -q 'permissionDecision.*deny' "$OUT10E" || {
+    echo "FAIL: expected structured deny payload for Skill object args" >&2
+    cat "$OUT10E" >&2
+    exit 1
+}
+grep -q 'oap.invalid_tool_arguments' "$OUT10E" || {
+    echo "FAIL: expected invalid tool arguments reason for Skill object args" >&2
+    cat "$OUT10E" >&2
+    exit 1
+}
+echo "  ✅ Skill non-string args fail closed"
 
 echo "  Test: Agent tool -> allow..."
 rm -f "$TEST_DIR/aport/session-decisions.jsonl"

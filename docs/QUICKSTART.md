@@ -133,7 +133,10 @@ completed policy denials allow with warnings, while unknown tools and APort
 runtime/API failures still block. Use `observe` for adoption-first rollout:
 policy denials, mapping gaps, and non-mandatory APort verifier/runtime failures
 allow with warnings so developers are not blocked while you tune passports and
-mappings. Mandatory prerequisites such as missing `jq` still block.
+mappings. Mandatory prerequisites such as missing `jq` still block. Audit
+entries require `python3`; unsafe or unavailable audit paths still
+block with `oap.audit_unavailable` because APort will not allow a tool call
+without its audit record.
 
 ```bash
 npx @aporthq/aport-agent-guardrails mode claude-code --enforcement=warn

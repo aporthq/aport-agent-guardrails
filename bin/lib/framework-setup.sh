@@ -69,6 +69,14 @@ warn_if_framework_command_missing() {
     log_warn "$command_name CLI was not found on PATH. APort setup will still write hook/config files, but the guardrail only runs after the host is installed and restarted. $install_hint"
 }
 
+warn_if_safe_audit_writer_missing() {
+    if command -v python3 > /dev/null 2>&1; then
+        return 0
+    fi
+
+    log_warn "APort audit entries require python3 on the PATH used by the host so audit logs can be appended without following symlinks. Without it, APort denies with oap.missing_dependency instead of allowing without an audit record."
+}
+
 refuse_symlink_path() {
     local path="${1/#\~/$HOME}"
     [[ "$path" = /* ]] || path="$PWD/$path"
@@ -97,4 +105,4 @@ refuse_symlink_path() {
     done
 }
 
-export -f ensure_aport_dir_secure resolve_hook_script_path initialize_framework_audit_log secure_framework_passport_file_if_present warn_if_framework_command_missing refuse_symlink_path
+export -f ensure_aport_dir_secure resolve_hook_script_path initialize_framework_audit_log secure_framework_passport_file_if_present warn_if_framework_command_missing warn_if_safe_audit_writer_missing refuse_symlink_path

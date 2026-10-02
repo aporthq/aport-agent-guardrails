@@ -19,14 +19,14 @@ Use `--global` if you want the hook in `~/.codex/hooks.json` instead of the curr
 npx @aporthq/aport-agent-guardrails codex --global
 ```
 
-**Prerequisites:** `jq` on the PATH Codex uses. The hook denies every tool call with `oap.missing_dependency` when `jq` is missing in enforce, warn and observe modes because the hook cannot safely parse or evaluate the payload. Install `jq` before setup.
+**Prerequisites:** `jq` on the PATH Codex uses. The hook denies every tool call with `oap.missing_dependency` when `jq` is missing in enforce, warn and observe modes because the hook cannot safely parse or evaluate the payload. Install `jq` before setup. Audit entries also require `python3` on the PATH Codex uses; without it, APort denies with `oap.missing_dependency` instead of allowing without an audit record. If the configured audit log cannot be safely appended as a regular non-symlink, non-hardlinked file, the hook denies with `oap.audit_unavailable`.
 
 **Beta limits, stated plainly.** The Codex hook denies two things Codex does routinely, and warn mode does not lift either of them because they are hook-level denials, not policy denials:
 
 - `apply_patch` calls that touch more than one file (`oap.multi_path_write_unsupported`). Ask Codex to split patches so each call edits one file.
 - `Glob`, `List`, `LS` and `LSP` calls, with or without a path (`oap.metadata_enumeration_unsupported`, or `oap.missing_file_path` when no target is given). Directory listings therefore have to come from shell commands such as `ls`, which the command policy judges.
 
-`--enforcement=warn` still helps with everything else: policy denials such as a `blocked_patterns` hit or a path outside `allowed_paths` are recorded and allowed while you tune the passport. `--enforcement=observe` is the adoption-first mode: Codex continues with a warning for policy denials, unmapped tools, non-mandatory hook-level denials, and hosted verifier/runtime failures while you collect evidence. Mandatory prerequisites such as missing `jq` still block.
+`--enforcement=warn` still helps with everything else: policy denials such as a `blocked_patterns` hit or a path outside `allowed_paths` are recorded and allowed while you tune the passport. `--enforcement=observe` is the adoption-first mode: Codex continues with a warning for policy denials, unmapped tools, non-mandatory hook-level denials, and hosted verifier/runtime failures while you collect evidence. Mandatory prerequisites such as missing `jq` still block. Audit entries require `python3`; unsafe or unavailable audit paths still block with `oap.audit_unavailable` because APort will not allow a tool call without its audit record.
 
 Hosted passport setup is the recommended path for signed decisions and centralized audit:
 

@@ -141,7 +141,20 @@ if [ -f "$DECISION_FILE" ]; then
     AUDIT_FRAMEWORK="$(printf '%s' "${APORT_HOOK_FRAMEWORK:-}" | LC_ALL=C tr -cd 'A-Za-z0-9._-' | head -c 40)"
     AUDIT_LINE="[$(date -u +%Y-%m-%d\ %H:%M:%S)] tool=$TOOL_NAME${AUDIT_FRAMEWORK:+ framework=$AUDIT_FRAMEWORK} decision_id=$DECISION_ID allow=$ALLOW policy=$POLICY_ID code=$DENY_CODE"
     [ -n "$DENY_MSG" ] && AUDIT_LINE="${AUDIT_LINE} reason=\"$DENY_MSG\""
-    echo "$AUDIT_LINE" >> "$AUDIT_LOG" 2> /dev/null || true
+    AUDIT_STATUS=0
+    aport_hook_append_audit_line "$AUDIT_LOG" "$AUDIT_LINE" || AUDIT_STATUS=$?
+    if [ "$AUDIT_STATUS" -ne 0 ]; then
+        if [ "$AUDIT_STATUS" -eq 127 ]; then
+            AUDIT_CODE="oap.missing_dependency"
+            AUDIT_MSG="No safe audit writer runtime is available; install python3 so APort can append audit entries without following symlinks."
+        else
+            AUDIT_CODE="oap.audit_unavailable"
+            AUDIT_MSG="APort could not safely append the configured audit log; check the audit path is a writable regular file and not a symlink or hard link."
+        fi
+        aport_hook_write_audit_unavailable_decision "$DECISION_FILE" "$AUDIT_CODE" "$AUDIT_MSG" "hook.audit"
+        echo "APort deny (${AUDIT_CODE}): ${AUDIT_MSG}" >&2
+        exit 1
+    fi
 fi
 
 # Surface the deny reason on stderr so the caller hook can include it in the
