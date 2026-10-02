@@ -54,6 +54,7 @@ run_setup() {
 
     warn_if_framework_command_missing "goose" "Install Goose and restart it after setup so it discovers the APort Open Plugin."
     log_info "Setting up APort guardrails for Goose..."
+    warn_if_safe_audit_writer_missing
     config_dir="$(ensure_aport_dir_secure goose)"
     export APORT_FRAMEWORK=goose
 

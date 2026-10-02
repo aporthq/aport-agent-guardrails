@@ -77,6 +77,42 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_se
 printf '%s' "$out" | jq -e '.session_type == "batch" and (. | has("invalid_session_type") | not)' > /dev/null \
     || fail "session context must preserve explicit valid session_type: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"batch work","arguments":"{\"session_type\":\"batch\"}"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "batch" and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "session context must parse valid JSON-string nested argument containers: $out"
+
+aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Agent(Explore)","tool_input":{"arguments":"not-json"}}' \
+    || fail "malformed nested argument containers must be detected"
+
+if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Agent(Explore)","tool_input":{"arguments":"{\"session_type\":\"batch\"}"}}'; then
+    fail "valid JSON-string nested argument containers must not be rejected"
+fi
+
+if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","args":"--base main"}}' "Skill"; then
+    fail "Skill scalar args must not be treated as malformed session argument containers"
+fi
+
+if aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","input":{"skill":"review-pr","args":"--base main"}}' "Skill"; then
+    fail "Skill scalar input.args must not be treated as malformed session argument containers"
+fi
+
+aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","args":{"session_type":"batch"}}}' "Skill" \
+    || fail "Skill object args must be rejected instead of treated as structured session evidence"
+
+aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","args":["--base","main"]}}' "Skill" \
+    || fail "Skill array args must be rejected instead of silently dropped"
+
+aport_hook_payload_has_malformed_nested_argument_containers '{"tool_name":"Skill","tool_input":{"skill":"review-pr","arguments":"not-json"}}' "Skill" \
+    || fail "Skill malformed arguments container must still be detected"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Skill","active_session_count":0,"tool_input":{"skill":"review-pr","args":"{\"session_type\":\"batch\",\"duration_seconds\":3600}"}}' session 'Skill' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "interactive" and (. | has("requested_duration") | not) and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "Skill args must remain opaque session arguments, not structured session evidence: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Skill","active_session_count":0,"tool_input":{"skill":"review-pr","arguments":"{\"session_type\":\"batch\",\"duration_seconds\":3600}"}}' session 'Skill' claude-code)"
+printf '%s' "$out" | jq -e '.session_type == "batch" and .requested_duration == 3600 and (. | has("invalid_session_type") | not)' > /dev/null \
+    || fail "Skill arguments must remain a structured session evidence container: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"bad type","session_type":"root"}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
     || fail "session context must flag invalid explicit session_type: $out"
@@ -93,6 +129,10 @@ out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_se
 printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
     || fail "session context must reject conflicting session_type aliases: $out"
 
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting nested type","session_type":"batch"},"args":{"session_type":"interactive"}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_type == true' > /dev/null \
+    || fail "session context must reject conflicting session_type evidence across containers: $out"
+
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"explore repo","duration_ms":30000}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e 'has("requested_duration") | not' > /dev/null \
     || fail "session context must not emit schema-invalid requested_duration values: $out"
@@ -104,6 +144,10 @@ printf '%s' "$out" | jq -e '.session_operation == "list" and (. | has("requested
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting duration","duration_seconds":60,"duration_ms":172800000}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
     || fail "session context must flag conflicting duration aliases: $out"
+
+out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"tool_input":{"description":"conflicting nested duration","duration_seconds":60},"args":{"duration_seconds":3600}}' session 'Agent(Explore)' claude-code)"
+printf '%s' "$out" | jq -e '.invalid_session_duration == true' > /dev/null \
+    || fail "session context must reject conflicting requested durations across containers: $out"
 
 out="$(aport_hook_context_from_payload '{"tool_name":"Agent(Explore)","active_session_count":0,"current_active_sessions":10,"tool_input":{"description":"conflicting count"}}' session 'Agent(Explore)' claude-code)"
 printf '%s' "$out" | jq -e '.invalid_session_count == true and .active_session_count == null and .current_active_sessions == null' > /dev/null \
