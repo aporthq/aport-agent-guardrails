@@ -10,14 +10,20 @@ The checker in `scripts/framework-drift-check.mjs` reads one watchlist covering:
 - OpenClaw plugin hooks
 - Cursor hooks
 - Claude Code hooks
+- Gemini CLI hooks
+- Goose Open Plugin hooks
 - LangChain / LangGraph middleware
 - CrewAI tool and MCP events
 - DeerFlow 2.x harness docs
 - n8n AI Agent and preview Agents docs
+- opencode plugin API docs while support remains gated
 - GitHub Actions workflow/OIDC docs
 
 For each upstream source it verifies required markers and compares the current
 source signature or latest tag against `docs/framework-drift-baseline.json`.
+Codex provider tool names are checked separately by
+`scripts/check-codex-provider-tool-surface.sh`, which extracts names from the
+upstream `openai/codex` source and fails CI/pre-push on unmapped tools.
 
 ## Weekly Workflow
 

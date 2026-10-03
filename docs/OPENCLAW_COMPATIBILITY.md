@@ -1,18 +1,18 @@
 # OpenClaw Compatibility
 
-**Last reviewed:** 2026-09-24, against the OpenClaw v2026.9.5 source (`src/plugins/hook-types.ts`, `src/plugins/hook-before-tool-call-result.ts`, `src/plugins/hooks.ts`), the live [tool policy hooks doc](https://docs.openclaw.ai/plugins/hooks/tool-policy), the [plugin manifest reference](https://docs.openclaw.ai/plugins/manifest), and the release notes for 2026.8.1 through 2026.9.6. Trigger: framework drift report issue #107.
+**Last reviewed:** 2026-10-03, against the OpenClaw v2026.9.8 source (`src/plugins/hook-types.ts`, `src/plugins/hook-before-tool-call-result.ts`, `src/plugins/hooks.ts`), the live [tool policy hooks doc](https://docs.openclaw.ai/plugins/hooks/tool-policy), the [plugin manifest reference](https://docs.openclaw.ai/plugins/manifest), and the release notes for 2026.8.1 through 2026.9.8. Trigger: framework drift report issue #111.
 
 **Plugin:** `@aporthq/openclaw-aport` ([extensions/openclaw-aport](../extensions/openclaw-aport)).
 **Minimum host:** OpenClaw `>=2026.4.11` (`openclaw.install.minHostVersion` and `openclaw.compat.pluginApi` in `extensions/openclaw-aport/package.json`).
-**Latest upstream tag at review time:** v2026.9.6 (npm/Gateway package; the macOS app build of 2026.9.6 was withdrawn for a launch crash, which does not affect the plugin).
+**Latest upstream tag at review time:** v2026.9.8 (npm/Gateway package).
 
 `tests/unit/test-openclaw-plugin-contract.sh` pins the plugin to the contract described in section 1 and checks that the badge, manifest, package metadata, and this doc agree.
 
 ---
 
-## 1. Hook contract: what the plugin uses vs. what v2026.9.5 ships
+## 1. Hook contract: what the plugin uses vs. what v2026.9.8 ships
 
-| Surface | OpenClaw v2026.9.5 | APort plugin | Status |
+| Surface | OpenClaw v2026.9.8 | APort plugin | Status |
 |---------|--------------------|--------------|--------|
 | Registration | Typed hook: `api.on("before_tool_call", handler, { matcher?, priority? })`. `api.registerHook(...)` with an underscore name such as `before_tool_call` logs a warning and is never invoked by the typed runner. | `api.on("before_tool_call", handler)` with no matcher, so every tool call is evaluated. | OK |
 | Entry point | `definePluginEntry` from `openclaw/plugin-sdk/plugin-entry`. | Same import. | OK |
@@ -46,11 +46,11 @@
 
 | Requirement | Value | Notes |
 |-------------|-------|-------|
-| OpenClaw | `>=2026.4.11` | Floor at which the `block`/`blockReason` return shape and `api.pluginConfig` were verified. Nothing added between 2026.4.11 and 2026.9.6 is required by the plugin. |
+| OpenClaw | `>=2026.4.11` | Floor at which the `block`/`blockReason` return shape and `api.pluginConfig` were verified. Nothing added between 2026.4.11 and 2026.9.8 is required by the plugin. |
 | Node (host) | 24.16.0+ on 24.x, or 26.1.0+ | Breaking change in OpenClaw 2026.9.3: Node 22, Node 25, and earlier 24.x/26.x builds are no longer supported by the host. Upgrade Node before OpenClaw. |
 | Node (plugin) | `engines.node >=22` | The plugin code itself runs on Node 22+, which keeps it installable on 2026.4.x through 2026.9.2 hosts. The host requirement above wins on newer releases. |
 
-## 4. Upstream changes reviewed, 2026.8.1 through 2026.9.6
+## 4. Upstream changes reviewed, 2026.8.1 through 2026.9.8
 
 | Release | Change | Impact on APort |
 |---------|--------|-----------------|
@@ -63,6 +63,8 @@
 | 2026.9.4 | Hooks documentation split into task pages, including the tool-policy page the drift checker watches. Plugin manifest and registry types shared. | The watched page changed; the required markers (`before_tool_call`, `matcher`, `timeoutMs`, `block: true`) are all still present. |
 | 2026.9.5 | Synchronous plugin storage deprecated in favor of awaited APIs. Plugin manifest hash and permission fixes in builds. | None. The plugin does not use host storage. |
 | 2026.9.6 | Code Mode executes plain JavaScript only. Deprecated `channel-message` exports preserved with their existing deadline. Late native hook responses now time out. | None for the hook contract. See section 6 for Code Mode `exec`. |
+| 2026.9.7 | Setup, update, long-conversation, and OpenAI provider/auth improvements, including Agents API and Sign in with ChatGPT beta. | None for the hook contract. Release notes did not describe a rename or removal of `before_tool_call`, `block`, `blockReason`, `toolCallId`, plugin config, or manifest fields used by APort. |
+| 2026.9.8 | GPT-6.1 Sol model selection, update recovery, delegated result attachment, memory-use reductions, and Windows/macOS startup/update fixes. | None for the hook contract. Plugin allowlist/update preservation is host update behavior, not a change to APort's hook registration or result shape. |
 
 The tool-policy page itself now documents `toolKind`, `toolInputKind`, `derivedPaths`, `ctx.requester`, the 15 s timeout, the trusted policy tier, and the `resolve_exec_env` and transcript persistence hooks. None of those rename or remove anything the plugin depends on.
 
@@ -119,6 +121,6 @@ Our policy tool names (`system.command.execute`, `messaging.message.send`, and s
 - Manifest vs package.json (`minHostVersion`, `compat.pluginApi`): https://docs.openclaw.ai/plugins/manifest/package-json
 - SDK removal timeline: https://docs.openclaw.ai/plugins/sdk-migration/removal-timeline
 - Releases: https://github.com/openclaw/openclaw/releases
-- Hook types at v2026.9.5: https://github.com/openclaw/openclaw/blob/v2026.9.5/src/plugins/hook-types.ts
+- Hook types at v2026.9.8: https://github.com/openclaw/openclaw/blob/v2026.9.8/src/plugins/hook-types.ts
 - Plugin: [extensions/openclaw-aport/README.md](../extensions/openclaw-aport/README.md)
 - Drift process: [FRAMEWORK_DRIFT_WATCH.md](FRAMEWORK_DRIFT_WATCH.md)

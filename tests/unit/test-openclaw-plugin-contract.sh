@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pin the OpenClaw plugin to the before_tool_call contract reviewed against OpenClaw v2026.9.5
+# Pin the OpenClaw plugin to the before_tool_call contract reviewed against OpenClaw v2026.9.8
 # (docs/OPENCLAW_COMPATIBILITY.md) and keep the README badge, manifest, package metadata,
 # compatibility doc, and drift baseline in agreement.
 
@@ -123,7 +123,7 @@ if (registrations[0].options !== undefined) {
 }
 const beforeToolCall = registrations[0].handler;
 
-// 5. Return contract against a v2026.9.5-shaped event and context.
+// 5. Return contract against a v2026.9.8-shaped event and context.
 await mkdir(path.join(testDir, "aport"), { recursive: true });
 await writeFile(
   path.join(testDir, "aport", "passport.json"),
