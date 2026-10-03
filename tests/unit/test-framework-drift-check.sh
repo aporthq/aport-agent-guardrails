@@ -24,16 +24,34 @@ node -e "
   const fs = require('node:fs');
   const report = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
   const ids = report.frameworks.map((item) => item.id);
-  for (const id of ['openclaw', 'cursor', 'claude-code', 'langchain', 'crewai', 'deerflow', 'n8n', 'github']) {
+  for (const id of ['openclaw', 'cursor', 'claude-code', 'gemini-cli', 'goose', 'langchain', 'crewai', 'deerflow', 'n8n', 'opencode', 'github']) {
     if (!ids.includes(id)) throw new Error('missing framework ' + id);
   }
-  if (report.summary.frameworks !== 8) throw new Error('unexpected framework count');
+  if (report.summary.frameworks !== 11) throw new Error('unexpected framework count');
   if (report.summary.driftCount !== 0) throw new Error('offline mode should not report drift');
 " "$JSON_OUT"
+
+node -e "
+  const fs = require('node:fs');
+  const report = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  const config = fs.readFileSync(process.argv[2], 'utf8');
+  const match = config.match(/APORT_SUPPORTED_FRAMEWORKS=\\(([^)]*)\\)/);
+  if (!match) throw new Error('missing APORT_SUPPORTED_FRAMEWORKS');
+  const watched = new Set(report.frameworks.map((item) => item.id));
+  const separatelyCovered = new Set(['codex']);
+  for (const id of match[1].trim().split(/\\s+/).filter(Boolean)) {
+    if (separatelyCovered.has(id)) continue;
+    if (!watched.has(id)) throw new Error('supported framework missing drift watch: ' + id);
+  }
+" "$JSON_OUT" "$REPO_ROOT/bin/lib/config.sh"
 
 grep -q "APort Framework Drift Report" "$MD_OUT"
 grep -q "OpenClaw" "$MD_OUT"
 grep -q "Tool call policy hooks doc" "$MD_OUT"
+grep -q "Gemini CLI" "$MD_OUT"
+grep -q "Goose" "$MD_OUT"
+grep -q "opencode" "$MD_OUT"
+grep -q "Plugin API hooks reference" "$MD_OUT"
 grep -q "GitHub Repository Guard" "$MD_OUT"
 
 if node "$REPO_ROOT/scripts/framework-drift-check.mjs" \
