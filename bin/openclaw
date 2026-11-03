@@ -33,6 +33,8 @@ source "$SCRIPT_DIR/lib/guardrail-mode.sh"
 source "$SCRIPT_DIR/lib/config.sh"
 # shellcheck source=lib/quick-hosted.sh
 source "$SCRIPT_DIR/lib/quick-hosted.sh"
+# shellcheck source=lib/framework-setup.sh
+source "$SCRIPT_DIR/lib/framework-setup.sh"
 
 APORT_PLUGIN_PATH="$REPO_ROOT/extensions/openclaw-aport"
 DEFAULT_CONFIG="$(get_config_dir openclaw)"
@@ -189,6 +191,17 @@ if echo "$CONFIG_DIR" | grep -q '/Users/'; then
 elif echo "$CONFIG_DIR" | grep -q '/home/'; then
 	CONFIG_DIR=$(echo "$CONFIG_DIR" | sed 's|.*/home/|/home/|')
 fi
+for setup_target in \
+	"$CONFIG_DIR" "$CONFIG_DIR/aport" "$CONFIG_DIR/config.yaml" "$CONFIG_DIR/openclaw.json" "$CONFIG_DIR/openclaw.json.bak" \
+	"$CONFIG_DIR/aport/guardrail-mode.env" "$CONFIG_DIR/aport/passport.json" "$CONFIG_DIR/aport/passport.json.tmp" "$CONFIG_DIR/aport/passport.json.bak" \
+	"$CONFIG_DIR/passport.json" "$CONFIG_DIR/passport.json.tmp" "$CONFIG_DIR/passport.json.bak" "$CONFIG_DIR/.aport-repo" \
+	"$CONFIG_DIR/.skills" "$CONFIG_DIR/.skills/aport-guardrail.sh" "$CONFIG_DIR/.skills/aport-guardrail-bash.sh" \
+	"$CONFIG_DIR/.skills/aport-guardrail-api.sh" "$CONFIG_DIR/.skills/aport-guardrail-v2.sh" \
+	"$CONFIG_DIR/.skills/aport-create-passport.sh" "$CONFIG_DIR/.skills/aport-status.sh" \
+	"$CONFIG_DIR/skills/aport-guardrail/SKILL.md" "$CONFIG_DIR/workspace/AGENTS.md" "$CONFIG_DIR/logs/gateway.log" \
+	"$CONFIG_DIR/aport-plugin-config.snippet.yaml"; do
+	refuse_symlink_path "$setup_target" || exit 1
+done
 mkdir -p "$CONFIG_DIR"
 CONFIG_DIR="$(cd "$CONFIG_DIR" && pwd)"
 
@@ -266,6 +279,8 @@ echo "    ⚠️  Not deterministic"
 echo ""
 
 PLUGIN_INSTALLED=false
+PLUGIN_VERIFIED=false
+PLUGIN_CONFIGURED=false
 if true; then
 	# Check if openclaw CLI is available
 	if ! command -v openclaw &>/dev/null; then
@@ -308,6 +323,7 @@ if true; then
 		# Verify installation
 		if [ "$PLUGIN_INSTALLED" = true ]; then
 			if openclaw plugins list 2>/dev/null | grep -q "openclaw-aport"; then
+				PLUGIN_VERIFIED=true
 				echo "  ✅ Plugin verified in plugins list"
 			else
 				echo "  ⚠️  Plugin installed but not showing in 'openclaw plugins list'"
@@ -450,6 +466,7 @@ YAML
         allowUnmappedTools: $ALLOW_UNMAPPED
 YAML
 
+		PLUGIN_CONFIGURED=true
 		echo "  ✅ Created $CONFIG_YAML"
 	else
 		# Config exists - check if plugin section already present
@@ -530,6 +547,7 @@ if (mapExecToPolicy) {
 lines.splice(start, end - start, ...block);
 fs.writeFileSync(file, lines.join("\n"), "utf8");
 NODE
+				PLUGIN_CONFIGURED=true
 				echo "  ✅ Updated plugin configuration in $CONFIG_YAML"
 			else
 				echo "  ⚠️  Plugin configuration already present in $CONFIG_YAML, but automatic update failed."
@@ -589,6 +607,7 @@ NODE
 			echo "        failClosed: true" >>"$CONFIG_YAML"
 			echo "        enforcementMode: $PLUGIN_ENFORCEMENT" >>"$CONFIG_YAML"
 			echo "        allowUnmappedTools: $ALLOW_UNMAPPED" >>"$CONFIG_YAML"
+			PLUGIN_CONFIGURED=true
 			echo "  ✅ Appended plugin configuration to $CONFIG_YAML"
 		fi
 	fi
@@ -601,8 +620,13 @@ NODE
 
 	# So the default config (openclaw.json) has plugin mode/apiUrl - gateway often loads it, not config.yaml
 	OPENCLAW_JSON="$CONFIG_DIR/openclaw.json"
+	if [ -f "$OPENCLAW_JSON" ]; then
+		# The host normally prefers this file, so YAML alone is not sufficient.
+		PLUGIN_CONFIGURED=false
+	fi
 	if [ -f "$OPENCLAW_JSON" ] && command -v jq &>/dev/null; then
 		api_url_val="${api_url:-$CONFIGURED_API_URL}"
+		OPENCLAW_JSON_TMP="$(mktemp "${OPENCLAW_JSON}.XXXXXX")"
 
 		if [ "$USE_HOSTED_PASSPORT" = true ]; then
 			# Hosted passport config (agentId only)
@@ -634,16 +658,19 @@ NODE
             del(.plugins.installs["openclaw-aport"]) |
             .plugins.load = (.plugins.load // {}) |
             .plugins.load.paths = ((.plugins.load.paths // []) | map(select((type == "string" and contains("/openclaw-aport")) | not)))
-        ' "$OPENCLAW_JSON" >"$OPENCLAW_JSON.tmp" 2>/dev/null && {
-			backup_file "$OPENCLAW_JSON"
-			mv "$OPENCLAW_JSON.tmp" "$OPENCLAW_JSON"
+        ' "$OPENCLAW_JSON" >"$OPENCLAW_JSON_TMP" 2>/dev/null && {
+			backup_file "$OPENCLAW_JSON" && mv "$OPENCLAW_JSON_TMP" "$OPENCLAW_JSON"
 		}; then
+			PLUGIN_CONFIGURED=true
 			if [ "$USE_HOSTED_PASSPORT" = true ]; then
 				echo "  ✅ Merged plugin config into $OPENCLAW_JSON (mode=$PLUGIN_MODE, hosted passport, allowUnmappedTools=$ALLOW_UNMAPPED)"
 			else
 				echo "  ✅ Merged plugin config into $OPENCLAW_JSON (mode=$PLUGIN_MODE, allowUnmappedTools=$ALLOW_UNMAPPED)"
 			fi
 			echo "  ✅ Removed stale source-linked OpenClaw plugin paths from $OPENCLAW_JSON"
+		else
+			rm -f "$OPENCLAW_JSON_TMP"
+			echo "  ⚠️  Could not safely update OpenClaw JSON configuration."
 		fi
 	fi
 	chmod 600 "$CONFIG_YAML" 2>/dev/null || true
@@ -952,9 +979,11 @@ fi
 echo ""
 echo "  View status: $CONFIG_DIR/.skills/aport-status.sh"
 echo ""
+REPORTING_SMOKE_OK=false
 if [ "$USE_HOSTED_PASSPORT" = true ]; then
 	echo "  Running smoke test: $(describe_smoke_guardrail_mode)..."
 	if run_smoke_guardrail_check >/dev/null 2>&1; then
+		REPORTING_SMOKE_OK=true
 		echo "  ✅ Smoke test passed (hosted passport, exit 0 = ALLOW)"
 	else
 		echo "  ⚠️  Smoke test skipped or failed (hosted). Ensure API is reachable; plugin will use agentId on each tool call."
@@ -966,6 +995,25 @@ else
 	else
 		echo "  ⚠️  Smoke test denied or failed. Plugin install and config are still complete."
 		echo "     Check passport limits, API reachability, or run: $CONFIG_DIR/.skills/aport-status.sh"
+	fi
+fi
+if [ -n "${APORT_INSTALLATION_HANDOFF_FILE:-}" ]; then
+	if [ "$USE_HOSTED_PASSPORT" = true ] && [ "$PLUGIN_MODE" = "api" ] && [ "$PLUGIN_VERIFIED" = true ] && [ "$PLUGIN_CONFIGURED" = true ] && [ "$REPORTING_SMOKE_OK" = true ]; then
+		if APORT_INSTALLATION_PASSPORT_ID="$HOSTED_AGENT_ID" APORT_INSTALLATION_API_URL="${api_url:-$CONFIGURED_API_URL}" \
+			node "$REPO_ROOT/src/installation-reporting/bind-openclaw.js"; then
+			:
+		else
+			echo "  Reporting connection remains unresolved; setup remains complete."
+		fi
+	else
+		echo "  Installation handoff was not consumed: hosted mode, verified and configured plugin, and a successful smoke check are required."
+	fi
+else
+	if [ "$USE_HOSTED_PASSPORT" = true ] && [ "$PLUGIN_MODE" = "api" ]; then
+		APORT_INSTALLATION_PASSPORT_ID="$HOSTED_AGENT_ID" APORT_INSTALLATION_API_URL="${api_url:-$CONFIGURED_API_URL}" \
+			node "$REPO_ROOT/src/installation-reporting/status-openclaw.js" || echo "  Reporting connection: unresolved."
+	else
+		echo "  Reporting connection: not configured in local mode."
 	fi
 fi
 echo ""
