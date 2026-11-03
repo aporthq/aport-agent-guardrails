@@ -21,3 +21,11 @@ and the plugin, other adapters, mode changes, resets, and enterprise scripts do
 not yet report installation evidence. Setup reports a valid existing binding as
 unverified, an absent binding as not configured, and unsafe or unreadable state
 as unresolved. Do not use the stored binding as proof of a connected installation.
+
+OpenClaw 2026.4.11 exposes an `after_tool_call` hook in its agent runner, but
+its HTTP tool-invocation handler returns after invoking the tool without calling
+that hook. In that host path the plugin cannot establish the actual disposition
+from a post-call event. An upstream completion callback or another supported
+host-provided completion signal must cover successful and blocked calls, carry a
+stable call identifier, and distinguish an enforced block from a tool execution
+failure. A pre-call hook result alone is not evidence that the host enforced it.

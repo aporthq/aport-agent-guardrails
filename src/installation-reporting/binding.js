@@ -38,7 +38,9 @@ function readRecord(file) {
   return record;
 }
 function identityName(framework, passportId, origin) {
-  if (framework !== 'openclaw' || typeof passportId !== 'string' || passportId.match(/^ap_[A-Za-z0-9_-]{1,125}$/)?.[0] !== passportId || typeof origin !== 'string') invalid();
+  // Keep this compatibility check aligned with is_aport_hosted_agent_id in
+  // bin/lib/guardrail-mode.sh, which also accepts legacy hosted IDs.
+  if (framework !== 'openclaw' || typeof passportId !== 'string' || passportId.match(/^(?:ap|apt|agt_inst|agt_tmpl)_[A-Za-z0-9_-]+$/)?.[0] !== passportId || typeof origin !== 'string') invalid();
   const url = new URL(origin);
   if (url.protocol !== 'https:' || url.origin !== origin || url.username || url.password || url.pathname !== '/' || url.search || url.hash) invalid();
   const identity = createHash('sha256').update(JSON.stringify(['installation-binding/v1', framework, passportId, origin])).digest('hex');

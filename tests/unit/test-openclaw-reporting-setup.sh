@@ -27,12 +27,12 @@ process.stdout.write(JSON.stringify({schema_version:'agent-installation-handoff/
   token_presentation:'Authorization: Bearer <reporter_token>',reporter_token:`air1.${token}.${'A'.repeat(43)}`}));
 NODE
 run_setup() {
-    local name="$1" allowed="$2" verified="$3" handoff="${4-$TEST_ROOT/handoff.json}"
+    local name="$1" allowed="$2" verified="$3" handoff="${4-$TEST_ROOT/handoff.json}" passport_id="${5-ap_fixture}"
     PATH="$TEST_ROOT/bin:$PATH" OPENCLAW_HOME="$TEST_ROOT/$name" APORT_NONINTERACTIVE=1 \
         APORT_API_URL=https://sandbox.aport.io APORT_API_KEY=fixture \
         APORT_INSTALLATION_HANDOFF_FILE="$handoff" \
         MOCK_VERIFY_ALLOW="$allowed" MOCK_PLUGIN_VERIFIED="$verified" NODE_OPTIONS="--require=$TEST_ROOT/fetch-mock.js" \
-        "$REPO_ROOT/bin/openclaw" ap_fixture > "$TEST_ROOT/$name.log" 2>&1
+        "$REPO_ROOT/bin/openclaw" "$passport_id" > "$TEST_ROOT/$name.log" 2>&1
 }
 for target in config.yaml openclaw.json openclaw.json.bak aport/passport.json.bak .skills/aport-status.sh workspace/AGENTS.md; do
     name="symlink-${target//\//-}"
@@ -107,6 +107,16 @@ files=("$TEST_ROOT"/verified/aport/installation-v1-*.json)
 }
 jq -e 'keys == ["installation_id", "reporter_token"] and .installation_id == "ai_fixture"' "${files[0]}" > /dev/null
 grep -q 'reporting connection is unverified' "$TEST_ROOT/verified.log"
+for passport_id in apt_fixture agt_inst_fixture agt_tmpl_fixture; do
+    run_setup "format-$passport_id" 1 1 "$TEST_ROOT/handoff.json" "$passport_id"
+    files_for_format=("$TEST_ROOT/format-$passport_id"/aport/installation-v1-*.json)
+    [[ -f "${files_for_format[0]}" ]] || {
+        echo "FAIL: verified setup did not store the handoff for $passport_id" >&2
+        exit 1
+    }
+    run_setup "format-$passport_id" 1 1 '' "$passport_id"
+    grep -q 'Reporting connection: unverified' "$TEST_ROOT/format-$passport_id.log"
+done
 if grep -q 'air1\.' "$TEST_ROOT/verified.log"; then
     echo 'FAIL: setup logged reporter credential' >&2
     exit 1
