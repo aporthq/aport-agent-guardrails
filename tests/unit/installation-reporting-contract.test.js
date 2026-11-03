@@ -51,3 +51,29 @@ test('invalid metadata, sparse batches and accessors are rejected locally', () =
   assert.throws(() => serializeReport({ ...report, reports: [{ get kind() { throw Error('getter invoked'); } }] }), /Invalid installation reporting metadata/);
   assert.throws(() => serializeTestResult({ ...result, challenge: 'secret' }));
 });
+
+test('declared coverage accepts only sorted unique normalized IDs and a digest', () => {
+  const coverage = { kind: 'declared_coverage', source: 'declared_config', manifest_digest: 'b'.repeat(64), tool_ids: ['alpha', 'mcp.tool-1', 'z_2'] };
+  const value = { ...report, reports: [{ kind: 'heartbeat' }, coverage] };
+  assert.deepEqual(JSON.parse(serializeReport(value)), value);
+  assert.deepEqual(JSON.parse(serializeReport({ ...report, reports: [{ ...coverage, tool_ids: [] }] })).reports[0].tool_ids, []);
+  for (const invalidIds of [ ['z', 'a'], ['a', 'a'], ['A'], ['a/url'], ['a\n'], Array(1), Array(201).fill('a') ]) {
+    assert.throws(() => serializeReport({ ...report, reports: [{ ...coverage, tool_ids: invalidIds }] }), /Invalid installation reporting metadata/);
+  }
+  for (const invalidCoverage of [
+    { ...coverage, source: 'observed' }, { ...coverage, manifest_digest: 'invalid' },
+    { ...coverage, description: 'private text' }, { ...coverage, tool_ids: ['x'.repeat(129)] }
+  ]) assert.throws(() => serializeReport({ ...report, reports: [invalidCoverage] }));
+  assert.throws(() => serializeReport({ ...report, reports: [coverage, coverage] }));
+  const accessorIds = ['safe'];
+  Object.defineProperty(accessorIds, '0', { get() { throw Error('getter invoked'); } });
+  assert.throws(() => serializeReport({ ...report, reports: [{ ...coverage, tool_ids: accessorIds }] }), /Invalid installation reporting metadata/);
+});
+
+test('removal is the only event in its batch', () => {
+  const removal = { kind: 'lifecycle', state: 'removed' };
+  assert.deepEqual(JSON.parse(serializeReport({ ...report, reports: [removal] })).reports, [removal]);
+  for (const invalidReports of [
+    [removal, { kind: 'heartbeat' }], [{ ...removal, state: 'suspended' }], [{ ...removal, path: '/private' }]
+  ]) assert.throws(() => serializeReport({ ...report, reports: invalidReports }), /Invalid installation reporting metadata/);
+});
