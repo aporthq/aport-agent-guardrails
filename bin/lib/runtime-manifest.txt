@@ -27,6 +27,11 @@ file bin/lib/tool-mapping.sh
 file bin/lib/validation.sh
 file python/aport_guardrails/core/tool-pack-mapping.json
 file src/evaluator.js
+file src/installation-reporting/contract.js
+file src/installation-reporting/reporter.js
+file src/installation-reporting/binding.js
+file src/installation-reporting/bind-openclaw.js
+file src/installation-reporting/status-openclaw.js
 tree external/aport-policies
 file external/aport-spec/oap/passport-schema.json
 mkdir local-overrides/policies
