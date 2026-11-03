@@ -53,6 +53,27 @@ test('changed identities cannot reuse an installation and existing identities ca
   assert.equal(bindHandoff({ ...f.args, passportId: 'ap_other' }), 'bound');
 });
 
+test('binding and status accept every hosted ID format supported by setup', t => {
+  const supported = ['ap_example', 'apt_example', 'agt_inst_example', 'agt_tmpl_example'];
+  const invalid = ['agt_other_example', 'ap_', 'apt_example\n', 'ap_example/other'];
+  const modeHelper = path.resolve(__dirname, '../../bin/lib/guardrail-mode.sh');
+  const shellAccepts = passportId => spawnSync('bash', ['-c', 'source "$1"; is_aport_hosted_agent_id "$2"', 'test', modeHelper, passportId]).status === 0;
+  for (const passportId of supported) {
+    assert.equal(shellAccepts(passportId), true, 'the setup helper accepts this format');
+    const f = fixture(t);
+    const args = { ...f.args, passportId };
+    assert.equal(bindHandoff(args), 'bound', passportId);
+    assert.equal(bindingStatus(args), 'unverified', passportId);
+    assert.equal(bindHandoff(args), 'reused', passportId);
+  }
+  const f = fixture(t);
+  for (const passportId of invalid) {
+    assert.equal(shellAccepts(passportId), false, 'the setup helper rejects this format');
+    assert.throws(() => bindHandoff({ ...f.args, passportId }), /could not be bound safely/);
+    assert.equal(bindingStatus({ ...f.args, passportId }), 'unresolved');
+  }
+});
+
 test('unsafe paths, permissive or corrupt handoffs, and linked state fail closed', t => {
   const f = fixture(t);
   fs.chmodSync(f.handoffFile, 0o644);
