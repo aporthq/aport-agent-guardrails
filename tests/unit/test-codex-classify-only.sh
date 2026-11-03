@@ -46,4 +46,16 @@ printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"provider_new_unknown_t
 jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unknown_tool"))' "$unknown_out" > /dev/null \
     || fail "unknown tools must still fail in classify-only mode"
 
+for tool in multi_env_copy_file skills.installations; do
+    for enforcement in enforce warn observe; do
+        for fallback in off on; do
+            out="$TEST_DIR/unrepresentable.json"
+            jq -nc --arg tool "$tool" '{hook_event_name:"PreToolUse",tool_name:$tool,tool_input:{command:"ls",secret:"must_not_be_disclosed"}}' \
+                | APORT_ENFORCEMENT_MODE="$enforcement" APORT_CODEX_TOOL_FALLBACK="$fallback" "$REPO_ROOT/bin/aport-codex-hook.sh" > "$out"
+            jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("oap.unrepresentable_tool")) and ((.hookSpecificOutput.permissionDecisionReason | contains("must_not_be_disclosed")) | not)' "$out" > /dev/null \
+                || fail "$tool must fail closed with $enforcement mode and fallback $fallback"
+        done
+    done
+done
+
 echo "PASS: Codex classify-only mode checks mapping without policy evaluation"

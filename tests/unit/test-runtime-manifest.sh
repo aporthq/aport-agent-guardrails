@@ -36,6 +36,12 @@ source "$REPO_ROOT/bin/lib/runtime.sh"
 CONFIG_DIR="$TEST_DIR/runtime-config"
 install_runtime_tree "$CONFIG_DIR"
 RUNTIME_DIR="$CONFIG_DIR/aport/runtime"
+for reporting_file in contract.js reporter.js binding.js bind-openclaw.js status-openclaw.js; do
+    cmp "$REPO_ROOT/src/installation-reporting/$reporting_file" "$RUNTIME_DIR/src/installation-reporting/$reporting_file" > /dev/null \
+        || fail "installed runtime must include the shared reporting owner: $reporting_file"
+done
+node -e 'const r = require(process.argv[1]); if (typeof r.InstallationReporter !== "function") process.exit(1)' \
+    "$RUNTIME_DIR/src/installation-reporting/reporter.js" || fail "installed shared reporting owner must load"
 [ -f "$RUNTIME_DIR/local-overrides/policies/media.image.generate.v1.json" ] || fail "installed runtime missing media.image.generate policy"
 jq -e '.requires_capabilities[] == "media.image.generate"' "$RUNTIME_DIR/local-overrides/policies/media.image.generate.v1.json" > /dev/null \
     || fail "installed media.image.generate policy must require media.image.generate"

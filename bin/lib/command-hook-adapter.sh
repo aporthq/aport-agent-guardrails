@@ -1064,6 +1064,11 @@ case "$FRAMEWORK" in
             memories.add_ad_hoc_note)
                 emit_response "deny" "hook.tool.map" "oap.unrepresentable_tool" "Codex persistent memory writes are not representable by the current APort hook policy"
                 ;;
+            multi_env_copy_file | skills.installations)
+                # Provider names observed by the drift gate have no captured hook payloads.
+                # Do not infer their effects from argument shape, including in observe mode.
+                emit_response "deny" "hook.tool.map" "oap.unrepresentable_tool" "Codex tool is not representable without a reviewed hook payload" "mandatory"
+                ;;
             todoread | toolsearch | tool_search | toolsearchtool | tool_search_tool | tool_search.tool_search_tool | updateplan | update_plan | requestuserinput | request_user_input | requestuserinputasync | request_user_input_async | sendmessagetouserasync | send_message_to_user_async | requestpermissions | request_permissions | wait | waitforenvironment | wait_for_environment | getcontextremaining | get_context_remaining | newcontext | new_context | clock.curr_time | clock.sleep | currtime | curr_time | sleep | getgoal | get_goal | creategoal | create_goal | updategoal | update_goal | memories.list | memories.read | memories.search | memory_read | memory_list | memory_search | skills.list | skills.read | listavailablepluginstoinstall | list_available_plugins_to_install | memoryoperators | memory_operators)
                 # Session bookkeeping, plan/user prompts, provider-owned metadata, and bounded memory/skill
                 # reads do not expose host file contents or perform external side effects through this hook.
