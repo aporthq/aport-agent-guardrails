@@ -10,6 +10,7 @@ const SHORT_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const DECISION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
+const TOOL_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const DISPOSITIONS = new Set(['allowed', 'blocked', 'continued_after_warning', 'continued_after_observation', 'not_reported']);
 const MODES = new Set(['enforce', 'warn', 'observe']);
 
@@ -35,6 +36,12 @@ function timestamp(value) {
   return value;
 }
 function disposition(value) { if (!DISPOSITIONS.has(value)) invalid(); return value; }
+function array(value, min, max) {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length < min || value.length > max ||
+      Reflect.ownKeys(value).length !== value.length + 1 ||
+      Array.from({ length: value.length }, (_, i) => Object.getOwnPropertyDescriptor(value, String(i)))
+        .some(descriptor => !descriptor || !('value' in descriptor))) invalid();
+}
 
 function validateHandoff(value, configuredOrigin) {
   object(value, ['schema_version', 'installation_id', 'reporter_endpoint', 'test_result_endpoint', 'token_presentation', 'reporter_token']);
@@ -61,15 +68,31 @@ function serializeReport(value) {
   if (value.schema_version !== 'agent-installation-report/v1') invalid();
   string(value.event_id, SHORT_ID); timestamp(value.timestamp); string(value.source_id, INSTALLATION_ID);
   string(value.config_digest, DIGEST); string(value.adapter_version, VERSION);
-  if (!MODES.has(value.mode) || !Array.isArray(value.reports) || Object.getPrototypeOf(value.reports) !== Array.prototype || value.reports.length < 1 || value.reports.length > 20) invalid();
-  if (Reflect.ownKeys(value.reports).length !== value.reports.length + 1 ||
-      Array.from({ length: value.reports.length }, (_, i) => Object.getOwnPropertyDescriptor(value.reports, String(i)))
-        .some(descriptor => !descriptor || !('value' in descriptor))) invalid();
+  if (!MODES.has(value.mode)) invalid();
+  array(value.reports, 1, 20);
+  let hasCoverage = false;
   const reports = value.reports.map(item => {
     if (!item || typeof item !== 'object') invalid();
     const kind = Object.getOwnPropertyDescriptor(item, 'kind');
     if (!kind || !('value' in kind)) invalid();
     if (kind.value === 'heartbeat') { object(item, ['kind']); return { kind: 'heartbeat' }; }
+    // Additive v1 variants described by Agent Passport PR #456. The merged
+    // server and OpenAPI digests must be pinned before enabling reporting.
+    if (kind.value === 'declared_coverage') {
+      object(item, ['kind', 'source', 'manifest_digest', 'tool_ids']);
+      if (hasCoverage || item.source !== 'declared_config') invalid();
+      hasCoverage = true;
+      string(item.manifest_digest, DIGEST);
+      array(item.tool_ids, 0, 200);
+      const toolIds = item.tool_ids.map(id => string(id, TOOL_ID));
+      if (toolIds.some((id, i) => i > 0 && id <= toolIds[i - 1])) invalid();
+      return { kind: 'declared_coverage', source: 'declared_config', manifest_digest: item.manifest_digest, tool_ids: toolIds };
+    }
+    if (kind.value === 'lifecycle') {
+      object(item, ['kind', 'state']);
+      if (value.reports.length !== 1 || item.state !== 'removed') invalid();
+      return { kind: 'lifecycle', state: 'removed' };
+    }
     object(item, ['kind', 'decision_id', 'host_disposition']);
     if (item.kind !== 'decision') invalid();
     return { kind: 'decision', decision_id: string(item.decision_id, DECISION_ID), host_disposition: disposition(item.host_disposition) };
