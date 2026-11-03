@@ -1,10 +1,10 @@
 'use strict';
 
-// Agent Passport commit 79140fc6e1f3ac81b020e41217602257b090bf37.
+// Agent Passport staging merge 6425f967f928f66202cc33489c350d1b99952dc0.
 // handoff schema SHA-256: 8698089f04abf76a797a9a2c45308798600de22637ecce6efcee36ae1759c815
 // server contract.ts SHA-256: 6f9c8cc5848e05950728a4a08dc37795ff9affc192540ade70d2418372a40e23
-// server api.ts SHA-256: deb2036868794c6eaf70cb37da41ee919c9183ef7c59e60d13dea96065ee6234
-// OpenAPI SHA-256: 99165af7e48d6ed9f5f938d7b91664d146bf170a4ff0775bea25a4d39904610b
+// server api.ts SHA-256: eed0448380d43eb56d02717159ce69543453a9be6b5432da9a7e135014668491
+// OpenAPI SHA-256: 775903af487a8f80eeaf27b216c237fefb7232742a591ddebbd4e8c16a041976
 const INSTALLATION_ID = /^ai_[A-Za-z0-9_-]{1,100}$/;
 const SHORT_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const DECISION_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -76,8 +76,7 @@ function serializeReport(value) {
     const kind = Object.getOwnPropertyDescriptor(item, 'kind');
     if (!kind || !('value' in kind)) invalid();
     if (kind.value === 'heartbeat') { object(item, ['kind']); return { kind: 'heartbeat' }; }
-    // Additive v1 variants described by Agent Passport PR #456. The merged
-    // server and OpenAPI digests must be pinned before enabling reporting.
+    // Additive v1 variants in the pinned Agent Passport contract.
     if (kind.value === 'declared_coverage') {
       object(item, ['kind', 'source', 'manifest_digest', 'tool_ids']);
       if (hasCoverage || item.source !== 'declared_config') invalid();

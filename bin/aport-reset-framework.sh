@@ -178,8 +178,8 @@ backup_file() {
 remove_dir_if_exists() {
     local dir="$1"
     if [[ -d "$dir" ]]; then
-        refuse_symlink_path "$dir"
-        rm -rf "$dir"
+        refuse_symlink_path "$dir" || return 1
+        rm -rf "$dir" || return 1
         echo "  ✅ Removed $dir"
     fi
 }
@@ -654,7 +654,19 @@ cleanup_command_hook_state() {
 
 cleanup_openclaw() {
     local openclaw_json="$config_dir/openclaw.json"
-    remove_dir_if_exists "$config_dir/aport"
+    local binding_lock=""
+    if [[ -e "$config_dir/aport" || -L "$config_dir/aport" ]]; then
+        refuse_symlink_path "$config_dir/aport" || return 1
+        binding_lock="$config_dir/aport/.installation-binding.lock"
+        if ! mkdir "$binding_lock" 2> /dev/null; then
+            log_error "Cannot reset while installation binding is locked; resolve the lock before retrying."
+            return 1
+        fi
+    fi
+    if ! remove_dir_if_exists "$config_dir/aport"; then
+        [[ -z "$binding_lock" ]] || rmdir "$binding_lock" 2> /dev/null || true
+        return 1
+    fi
     remove_dir_if_exists "$config_dir/extensions/openclaw-aport"
     remove_dir_if_exists "$config_dir/skills/aport-guardrail"
     remove_file_if_exists "$config_dir/.aport-repo"

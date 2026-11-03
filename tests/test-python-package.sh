@@ -112,6 +112,8 @@ assert (site_pkg / "runtime-bundle" / "bin" / "lib" / "command-hook-adapter.sh")
 assert (site_pkg / "runtime-bundle" / "bin" / "lib" / "framework-hook-paths.sh").is_file(), "framework hook paths helper missing from wheel"
 assert (site_pkg / "runtime-bundle" / "bin" / "lib" / "guardrail-mode.sh").is_file(), "guardrail mode helper missing from wheel"
 assert (site_pkg / "runtime-bundle" / "bin" / "lib" / "hook-runtime.sh").is_file(), "hook runtime helper missing from wheel"
+assert (site_pkg / "runtime-bundle" / "src" / "installation-reporting" / "contract.js").is_file(), "shared reporting schema missing from wheel"
+assert (site_pkg / "runtime-bundle" / "src" / "installation-reporting" / "reporter.js").is_file(), "shared reporting transport missing from wheel"
 assert (site_pkg / "runtime-bundle" / "external" / "aport-policies").is_dir(), "policy bundle missing from wheel"
 
 provider = OAPGuardrailProvider(
