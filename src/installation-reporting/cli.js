@@ -28,9 +28,9 @@ async function main() {
       break;
     }
     case 'status': process.stdout.write(JSON.stringify(runtime.statuses(options.configDir)) + '\n'); break;
-    case 'mode': runtime.lifecycle(options.configDir, options.framework, options.mode, false,
+    case 'mode': await runtime.lifecycle(options.configDir, options.framework, options.mode, false,
       require('node:path').basename(runtime.location(options).dir), process.env.APORT_INSTALLATION_AUTH_MODE || options.authMode); break;
-    case 'removed': runtime.lifecycle(options.configDir, options.framework, undefined, true); break;
+    case 'removed': await runtime.lifecycle(options.configDir, options.framework, undefined, true); break;
     default: throw Error('Unknown reporting operation');
   }
 }

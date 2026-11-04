@@ -85,14 +85,15 @@ function connectionStatus(options) {
     return spool.status(dir);
   } catch { return { state: 'unresolved', queued: null, dropped: null }; }
 }
-function lifecycle(configDir, framework, mode, removed = false, selector, authMode = 'api') {
+async function lifecycle(configDir, framework, mode, removed = false, selector, authMode = 'api') {
   const disabled = process.env.APORT_REPORTING_DISABLED === '1';
   if (disabled && !removed) return;
-  if (removed) {
+  function removalBlocked() {
+    if (!removed) return false;
     // Public CLI callers cannot announce removal while authorization state is
     // still installed or preserved for another hook. Broken links also count.
-    try { fs.lstatSync(path.join(configDir, 'aport')); return; }
-    catch (e) { if (e.code !== 'ENOENT') return; }
+    try { fs.lstatSync(path.join(configDir, 'aport')); return true; }
+    catch (e) { if (e.code !== 'ENOENT') throw e; return false; }
   }
   // This lives outside aport/ so committed reset can still report removal.
   const root = path.join(configDir, '.aport-reporting');
@@ -100,18 +101,20 @@ function lifecycle(configDir, framework, mode, removed = false, selector, authMo
     spool.directory(root);
     const entries = fs.readdirSync(root);
     if (entries.length > 512) return;
+    const deadline = Date.now() + spool.LIMITS.lockWaitMs;
     for (const entry of entries) {
       if (!/^installation-v1-[a-f0-9]{64}$/.test(entry)) continue;
       if (!removed && entry !== selector) continue;
       try {
-        const dir = path.join(root, entry), a = spool.authority(dir);
-        if (a.framework !== framework) continue;
-        if (disabled) { spool.forgetCredential(dir); continue; }
-        let effectiveMode = mode;
-        if (!effectiveMode) {
-          effectiveMode = spool.currentMode(dir);
-        }
-        spool.enqueue(dir, envelope(a, effectiveMode, removed ? [{ kind: 'lifecycle', state: 'removed' }] : [{ kind: 'heartbeat' }], authMode));
+        await spool.retryQueueLock(() => {
+          // A reinstall during a contention wait must preserve its authority.
+          if (removalBlocked()) return;
+          const dir = path.join(root, entry), a = spool.authority(dir);
+          if (a.framework !== framework) return;
+          if (disabled) { spool.forgetCredential(dir); return; }
+          const effectiveMode = mode || spool.currentMode(dir);
+          spool.enqueue(dir, envelope(a, effectiveMode, removed ? [{ kind: 'lifecycle', state: 'removed' }] : [{ kind: 'heartbeat' }], authMode));
+        }, deadline);
       } catch { /* Failure cannot roll back a committed local change. */ }
     }
   } catch { /* No binding or unsafe state. */ }

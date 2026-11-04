@@ -55,10 +55,10 @@ function locked(dir, fn) {
     return fn();
   } finally { fs.rmdirSync(lock); }
 }
-// Producers remain nonblocking. Only the detached worker waits for a current
-// lock holder, with a fixed deadline; it never removes or steals that lock.
-async function retryQueueLock(operation) {
-  const deadline = Date.now() + LIMITS.lockWaitMs;
+// Authorization producers remain nonblocking. Workers and committed lifecycle
+// changes may wait for a current holder; neither removes nor steals its lock.
+// Lifecycle callers share one deadline across all installation scopes.
+async function retryQueueLock(operation, deadline = Date.now() + LIMITS.lockWaitMs) {
   for (;;) {
     try { return operation(); }
     catch (e) {
@@ -257,4 +257,4 @@ function correlation(dir, key, value) {
   });
 }
 function currentMode(dir) { return state(dir, authority(dir).binding.installation_id).mode; }
-module.exports = { LIMITS, directory, provision, enqueue, status, workerStatus, startWorker, drain, authority, correlation, currentMode, forgetCredential };
+module.exports = { LIMITS, directory, provision, enqueue, status, workerStatus, startWorker, drain, authority, correlation, currentMode, forgetCredential, retryQueueLock };

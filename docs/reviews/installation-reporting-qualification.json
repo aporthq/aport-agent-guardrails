@@ -11,7 +11,7 @@
       "package": "@aporthq/aport-agent-guardrails",
       "version": "1.0.37",
       "filename": "aporthq-aport-agent-guardrails-1.0.37.tgz",
-      "sha256": "5203cb72d55ece67a97d8ba03b3bdd7521f636d83998122b5b24f6b7dfb21dda",
+      "sha256": "1c27df6478b94f3e5170e9efcdf45f7613b4e18584cf32c747fc9d4bc3b73c83",
       "reporter_files": [
         "package/extensions/openclaw-aport/installation-reporting/bind-openclaw.js",
         "package/extensions/openclaw-aport/installation-reporting/binding.js",
@@ -41,7 +41,7 @@
       "package": "@aporthq/aport-agent-guardrails-core",
       "version": "1.0.37",
       "filename": "aporthq-aport-agent-guardrails-core-1.0.37.tgz",
-      "sha256": "0ed8625b333b151c776bbdde18e4a64e577509f3062de45effedad426e70d461",
+      "sha256": "285ac49ed05dfcf0a59acbdaa8b4689e470b4a68aafd4f7b10fbc911c93c7202",
       "reporter_files": [
         "package/dist/installation-reporting/bind-openclaw.js",
         "package/dist/installation-reporting/binding.js",
@@ -61,7 +61,7 @@
       "package": "@aporthq/openclaw-aport",
       "version": "1.0.37",
       "filename": "aporthq-openclaw-aport-1.0.37.tgz",
-      "sha256": "384c2031d61cb360eb7b3db9ec5f6dae872a0c3c046809b1fc2019be5bde88fd",
+      "sha256": "3a771e7d97a9c37dae6d03233c2daffbf4efac3f62d4ec664aa31723ba602761",
       "reporter_files": [
         "package/installation-reporting/bind-openclaw.js",
         "package/installation-reporting/binding.js",
@@ -90,7 +90,7 @@
       "package": "aport-agent-guardrails",
       "version": "1.0.37",
       "filename": "aport_agent_guardrails-1.0.37-py3-none-any.whl",
-      "sha256": "8dc1349ee18f52ee7162aa049c6016cb4b0c05c49140e40fb447cb98f954224c",
+      "sha256": "f5dbce7df0b89ff5718dff7b03fc4b697ca59ae6f1bfb52ec78239a67ee746a0",
       "reporter_files": [
         "aport_guardrails/runtime-bundle/src/installation-reporting/bind-openclaw.js",
         "aport_guardrails/runtime-bundle/src/installation-reporting/binding.js",
@@ -110,7 +110,7 @@
       "package": "aport-agent-guardrails-langchain",
       "version": "1.0.37",
       "filename": "aport_agent_guardrails_langchain-1.0.37-py3-none-any.whl",
-      "sha256": "2a370f4cf705cc0d43d0eb5bab75c3bf0b8a2fce78a0edc0e4b6e786bc45dfa9",
+      "sha256": "bbc24b978c410c935c6552264a26533ded7a1a92dbc950d869337c4208d36277",
       "reporter_files": [],
       "source_bytes_match": true,
       "runtime_unsafe_write_permissions": false
@@ -224,7 +224,7 @@
     {
       "command": "node --test tests/unit/installation-reporting-integration.test.js",
       "exit": 0,
-      "tests": 44
+      "tests": 54
     },
     {
       "command": "PYTHONPATH=python:python/langchain_adapter python3 -m pytest python/aport_guardrails/tests python/langchain_adapter/tests -q",
@@ -303,6 +303,31 @@
         "supplied and file passports",
         "differing or absent environment identity",
         "repeated and ambiguous completion correlation"
+      ]
+    },
+    {
+      "finding": "Lifecycle producer contention after committed reset",
+      "owner": "src/installation-reporting/runtime.js; src/installation-reporting/cli.js; src/installation-reporting/spool.js",
+      "test": "tests/unit/installation-reporting-integration.test.js",
+      "before_fix": {
+        "assertion": "CONTENDED_RESET_ENQUEUES_REMOVAL",
+        "exit": 1
+      },
+      "assertions": [
+        "RESET_COMMITS_BEFORE_REPORTING_RETRY",
+        "CONTENDED_RESET_ENQUEUES_REMOVAL",
+        "CONTENDED_RESET_MARKS_RETIREMENT",
+        "CONTENDED_RESET_DELIVERS_REMOVAL",
+        "CONTENDED_RESET_RETIRES_CREDENTIAL",
+        "CONTENDED_DISABLED_RESET_ERASES_CREDENTIAL",
+        "CONTENDED_MODE_REPORTS_COMMITTED_MODE",
+        "LIFECYCLE_ONE_BOUNDED_DEADLINE",
+        "LIFECYCLE_DOES_NOT_STEAL_QUEUE_LOCK",
+        "LIFECYCLE_PRESERVES_PERSISTENT_LOCK",
+        "CONTENTION_NEVER_ROLLS_BACK_RESET",
+        "UNSAFE_LIFECYCLE_LOCK_NOT_RETRIED",
+        "REINSTALL_PRESERVES_CREDENTIAL",
+        "REINSTALL_SUPPRESSES_STALE_REMOVAL"
       ]
     }
   ]

@@ -58,15 +58,25 @@ counts when corrupt/locked state prevents trustworthy counting.
 
 Locks are never stolen. The detached worker retries a protected, contended queue
 lock every 25 ms for at most one second per queue operation, including its final
-queue check after releasing the worker lock. Producers do not wait for locks;
-unsafe lock paths fail immediately. A killed process or ambiguous lock leaves unresolved
-state; an operator must establish that no worker is active before removing a
-stale lock. Reporting must not repair ambiguous state on the authorization path.
+queue check after releasing the worker lock. Authorization producers do not wait
+for locks. After local changes commit, mode/reset lifecycle producers use the
+same retries with one second total across all installation scopes, including
+credential erasure when reporting is disabled. Every removal retry checks that
+authorization state has not been reinstalled. Unsafe lock paths fail immediately.
+A killed process or a lock that outlasts this bound leaves unresolved state; an
+operator must establish that no worker is active before removing a stale lock.
+Reporting must not repair ambiguous state on the authorization path.
 Reset leaves the bounded delivery spool so removal can be sent after cleanup.
 On completed delivery or bounded retry exhaustion, the worker removes the
-delivery credential and retains sanitized final status. A killed worker may
-leave the credential pending operator recovery; reset never claims its remote
+delivery credential and retains sanitized final status. A killed worker or
+exhausted lifecycle contention may leave the credential pending operator recovery;
+reset never claims its remote
 receipt succeeded merely because local cleanup succeeded.
+
+The real reset regression `CONTENDED_RESET_ENQUEUES_REMOVAL` failed before the
+lifecycle retry fix. It now checks post-cleanup enqueue, delivery and credential
+retirement; sibling tests cover disabled reset, committed mode, a shared retry
+deadline, unsafe locks and concurrent reinstall without replacing reporter logic.
 
 Use `aport-agent-guardrails reporting status <framework>` with the same active
 config override as the installed hooks to inspect reporting. Setup/mode commands
