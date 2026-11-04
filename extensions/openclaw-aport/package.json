@@ -15,10 +15,12 @@
     "openclaw.plugin.json",
     "README.md",
     "MIGRATION.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "installation-reporting/"
   ],
   "scripts": {
-    "test": "node ../../tests/extensions/openclaw-aport.test.js"
+    "test": "node ../../tests/extensions/openclaw-aport.test.js",
+    "build": "node ../../scripts/build-installation-reporter.cjs"
   },
   "keywords": [
     "openclaw",

@@ -36,3 +36,9 @@ tree external/aport-policies
 file external/aport-spec/oap/passport-schema.json
 mkdir local-overrides/policies
 file local-overrides/policies/media.image.generate.v1.json
+file src/installation-reporting/transport.js
+file src/installation-reporting/spool.js
+file src/installation-reporting/worker.js
+file src/installation-reporting/runtime.js
+file src/installation-reporting/cli.js
+file bin/lib/installation-reporting.sh

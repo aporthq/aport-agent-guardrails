@@ -6,6 +6,9 @@
  * Uses a built-in JS local evaluator for offline mode and direct API calls for hosted mode.
  */
 
+import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -17,6 +20,12 @@ import { normalizeEnforcementMode, shouldAllowDeniedDecision } from "./enforceme
 import { evaluateLocalDecision } from "./local-evaluator.js";
 import { mapToolToPolicy, normalizePolicyContext } from "./tool-mapping.js";
 import { verifyViaApi } from "./api-client.js";
+
+const require = createRequire(import.meta.url);
+const packagedReporter = fileURLToPath(new URL('./installation-reporting/runtime.js', import.meta.url));
+let installationReporting;
+try { installationReporting = require(existsSync(packagedReporter) ? packagedReporter : '../../src/installation-reporting/runtime.js'); }
+catch { installationReporting = { report() { return false; } }; }
 
 export { canonicalize, mapToolToPolicy, verifyDecisionIntegrity };
 
@@ -57,6 +66,7 @@ export default definePluginEntry({
 
     api.on("before_tool_call", async (event, hookContext = {}) => {
       const { toolName, params } = event;
+      let reportingDecisionId;
 
       try {
         const policyName =
@@ -191,6 +201,8 @@ export default definePluginEntry({
           };
         }
 
+        reportingDecisionId = decision.decision_id;
+
         logAuditEntry(auditLogPath, {
           tool: effectiveToolName,
           decisionId: decision.decision_id,
@@ -249,6 +261,11 @@ export default definePluginEntry({
           `[APort] ${failureAllowMessage(enforcement, "Allowing tool despite policy evaluation error because failClosed is disabled.")} ${notice}`,
         );
         return {};
+      } finally {
+        installationReporting.report({
+          configDir: process.env.APORT_OPENCLAW_CONFIG_DIR || process.env.OPENCLAW_CONFIG_DIR || process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME || process.env.APORT_CONFIG_DIR || join(homedir(), '.openclaw'),
+          framework: 'openclaw', passportId: agentId, apiUrl, authMode: mode, mode: enforcement,
+        }, reportingDecisionId);
       }
     });
 

@@ -97,6 +97,8 @@ run_setup() {
     : >> "$config_dir/aport/audit.log"
     chmod 600 "$config_dir/aport/audit.log" 2> /dev/null || true
 
+    (source "$LIB/installation-reporting.sh" && aport_reporting_setup "$config_dir" "claude-code" "$hosted_agent_id") || true
+
     echo ""
     echo "  Next steps (Claude Code):"
     echo "  ─────────────────────────"

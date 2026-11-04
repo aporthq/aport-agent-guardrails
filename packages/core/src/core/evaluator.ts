@@ -35,11 +35,22 @@ export interface ToolContext {
 }
 
 export interface Decision {
+  decision_id?: string;
   allow: boolean;
   reasons?: Array<{ code?: string; message?: string }>;
 }
 
+function reportingDecision(value: Decision, id: unknown): Decision {
+  // Preserve the public authorization JSON while retaining the server join key.
+  if (typeof id === 'string') Object.defineProperty(value, 'decision_id', { value: id, enumerable: false });
+  return value;
+}
+
 type RuntimeEnforcementMode = 'enforce' | 'warn' | 'observe';
+interface ReportingScope {
+  configDir: string; framework: string; passportId: string; apiUrl: string;
+  authMode: string; mode: RuntimeEnforcementMode;
+}
 
 interface RuntimeMetadata {
   enforcement_mode: RuntimeEnforcementMode;
@@ -143,10 +154,10 @@ function runGuardrailSync(
     if (fs.existsSync(decisionPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(decisionPath, 'utf8'));
-        return {
+        return reportingDecision({
           allow: Boolean(data.allow),
           reasons: data.reasons ?? [{ message: 'Policy evaluation failed' }],
-        };
+        }, data.decision_id);
       } catch {
         /* malformed decision; fall through to deny with script exit reason */
       }
@@ -283,10 +294,10 @@ async function callApi(
       return failOpenAllow('oap.api_error', 'Invalid JSON response from API');
     }
     const decision = (data.decision as Record<string, unknown>) ?? data;
-    return {
+    return reportingDecision({
       allow: Boolean((decision as Record<string, unknown>).allow),
       reasons: (decision.reasons as Decision['reasons']) ?? [{ message: 'API response' }],
-    };
+    }, decision.decision_id);
   } catch (e) {
     // Network errors, timeouts, DNS failures — infrastructure, not policy
     return failOpenAllow('oap.api_error', String(e));
@@ -298,6 +309,8 @@ export class Evaluator {
   private framework: string;
   private runtimeOptions: EvaluatorRuntimeOptions;
   private cachedConfig: Config | null = null;
+  private reportingDecisions = new WeakMap<Decision, ReportingScope>();
+  private reportingCalls = new Map<string, { created: number; scope?: ReportingScope }>();
 
   constructor(
     configPath?: string | null,
@@ -315,8 +328,57 @@ export class Evaluator {
     return findConfigPath(this.framework);
   }
 
+  private installationReporter() {
+    const reporterPath = path.join(__dirname, '../installation-reporting/runtime.js');
+    return require(fs.existsSync(reporterPath) ? reporterPath : '../../../../src/installation-reporting/runtime.js');
+  }
+
+  private reportingCallKey(runId: string): string | undefined {
+    if (typeof runId !== 'string' || !runId || runId.length > 256) return;
+    for (const [key, value] of this.reportingCalls) {
+      if (Date.now() - value.created >= 60000) this.reportingCalls.delete(key);
+    }
+    return crypto.createHash('sha256').update(runId).digest('hex');
+  }
+
+  /** Metadata-only correlation used by a host's successful tool-end callback. */
+  trackToolCall(runId: string, decision: Decision): void {
+    try {
+      const key = this.reportingCallKey(runId), scope = this.reportingDecisions.get(decision);
+      if (!key) return;
+      const previous = this.reportingCalls.get(key);
+      if (previous) { previous.scope = undefined; return; } // Ambiguous across installations, too.
+      if (!scope) return;
+      if (this.reportingCalls.size >= 100) this.reportingCalls.delete(this.reportingCalls.keys().next().value!);
+      this.reportingCalls.set(key, { created: Date.now(), scope });
+      this.installationReporter().remember(scope, { decision_id: decision.decision_id, allow: decision.allow, call_key: key });
+    } catch { /* Reporting is optional. */ }
+  }
+
+  completeToolCall(runId: string): void {
+    try {
+      const key = this.reportingCallKey(runId);
+      if (!key) return;
+      const pending = this.reportingCalls.get(key), scope = pending?.scope;
+      if (!pending || !scope) return;
+      pending.scope = undefined; // Keep a bounded tombstone against repeated callbacks.
+      this.installationReporter().postAction(scope, key);
+    } catch { /* Reporting is optional. */ }
+  }
+
   /** Best-effort audit log write. Never throws, never blocks for allow decisions. */
-  private auditLog(config: Config, toolName: string, packId: string, decision: Decision, context: ToolContext): void {
+  private auditLog(config: Config, toolName: string, packId: string, decision: Decision, context: ToolContext,
+    passportId?: string, apiUrl?: string): void {
+    try {
+      // Capture the request's resolved identity and origin, never a second
+      // config/environment selection. Completion keeps this same scope.
+      if (config.mode === 'api' && passportId && apiUrl) {
+        const scope: ReportingScope = { configDir: path.dirname(this.resolvedConfigPath() || ''),
+          framework: this.framework, passportId, apiUrl, authMode: 'api',
+          mode: resolveRuntimeEnforcementMode(config, this.runtimeOptions.enforcementMode) };
+        if (this.installationReporter().report(scope, decision.decision_id)) this.reportingDecisions.set(decision, scope);
+      }
+    } catch { /* Optional reporting must never change authorization. */ }
     try {
       const auditLogPath = resolveAuditLogPath(
         config.audit_log,
@@ -391,7 +453,7 @@ export class Evaluator {
       );
       if (agentId) {
         const decision = await callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey, verifySsl: verifySslOverride, failOpenOnApiError, runtime });
-        this.auditLog(config, toolName, packId, decision, ctx);
+        this.auditLog(config, toolName, packId, decision, ctx, agentId, apiUrl);
         return decision;
       }
       if (passportBody) {
@@ -403,7 +465,7 @@ export class Evaluator {
           failOpenOnApiError,
           runtime,
         });
-        this.auditLog(config, toolName, packId, decision, ctx);
+        this.auditLog(config, toolName, packId, decision, ctx, passportBody.agent_id, apiUrl);
         return decision;
       }
     }
@@ -514,10 +576,10 @@ export class Evaluator {
               syncDecision = apiErrorDecision(String(data.error));
             } else {
               const decision = (data.decision as Record<string, unknown>) ?? data;
-              syncDecision = {
+              syncDecision = reportingDecision({
                 allow: Boolean((decision as Record<string, unknown>).allow),
                 reasons: (decision.reasons as Decision['reasons']) ?? [{ message: 'API response' }],
-              };
+              }, decision.decision_id);
             }
           }
         } catch (e) {
@@ -545,7 +607,11 @@ export class Evaluator {
             /* best-effort */
           }
         }
-        this.auditLog(config, toolName, packId, syncDecision, ctx);
+        // A legacy sync request may include both selectors. Differing identities
+        // cannot establish one installation, so leave reporting unbound.
+        const reportingId = !agentId || !passportBody || passportBody.agent_id === agentId
+          ? agentId || passportBody?.agent_id : undefined;
+        this.auditLog(config, toolName, packId, syncDecision, ctx, reportingId, apiUrl);
         return syncDecision;
       }
     }

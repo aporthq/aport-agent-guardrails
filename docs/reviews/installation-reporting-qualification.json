@@ -1,0 +1,334 @@
+{
+  "candidate_version": "1.0.37",
+  "release_preparation": {
+    "command": "npm run version",
+    "isolated_copy": true,
+    "exit": 0,
+    "published": false
+  },
+  "artifacts": [
+    {
+      "package": "@aporthq/aport-agent-guardrails",
+      "version": "1.0.37",
+      "filename": "aporthq-aport-agent-guardrails-1.0.37.tgz",
+      "sha256": "1c27df6478b94f3e5170e9efcdf45f7613b4e18584cf32c747fc9d4bc3b73c83",
+      "reporter_files": [
+        "package/extensions/openclaw-aport/installation-reporting/bind-openclaw.js",
+        "package/extensions/openclaw-aport/installation-reporting/binding.js",
+        "package/extensions/openclaw-aport/installation-reporting/cli.js",
+        "package/extensions/openclaw-aport/installation-reporting/contract.js",
+        "package/extensions/openclaw-aport/installation-reporting/reporter.js",
+        "package/extensions/openclaw-aport/installation-reporting/runtime.js",
+        "package/extensions/openclaw-aport/installation-reporting/spool.js",
+        "package/extensions/openclaw-aport/installation-reporting/status-openclaw.js",
+        "package/extensions/openclaw-aport/installation-reporting/transport.js",
+        "package/extensions/openclaw-aport/installation-reporting/worker.js",
+        "package/src/installation-reporting/bind-openclaw.js",
+        "package/src/installation-reporting/binding.js",
+        "package/src/installation-reporting/cli.js",
+        "package/src/installation-reporting/contract.js",
+        "package/src/installation-reporting/reporter.js",
+        "package/src/installation-reporting/runtime.js",
+        "package/src/installation-reporting/spool.js",
+        "package/src/installation-reporting/status-openclaw.js",
+        "package/src/installation-reporting/transport.js",
+        "package/src/installation-reporting/worker.js"
+      ],
+      "source_bytes_match": true,
+      "runtime_unsafe_write_permissions": false
+    },
+    {
+      "package": "@aporthq/aport-agent-guardrails-core",
+      "version": "1.0.37",
+      "filename": "aporthq-aport-agent-guardrails-core-1.0.37.tgz",
+      "sha256": "285ac49ed05dfcf0a59acbdaa8b4689e470b4a68aafd4f7b10fbc911c93c7202",
+      "reporter_files": [
+        "package/dist/installation-reporting/bind-openclaw.js",
+        "package/dist/installation-reporting/binding.js",
+        "package/dist/installation-reporting/cli.js",
+        "package/dist/installation-reporting/contract.js",
+        "package/dist/installation-reporting/reporter.js",
+        "package/dist/installation-reporting/runtime.js",
+        "package/dist/installation-reporting/spool.js",
+        "package/dist/installation-reporting/status-openclaw.js",
+        "package/dist/installation-reporting/transport.js",
+        "package/dist/installation-reporting/worker.js"
+      ],
+      "source_bytes_match": true,
+      "runtime_unsafe_write_permissions": false
+    },
+    {
+      "package": "@aporthq/openclaw-aport",
+      "version": "1.0.37",
+      "filename": "aporthq-openclaw-aport-1.0.37.tgz",
+      "sha256": "3a771e7d97a9c37dae6d03233c2daffbf4efac3f62d4ec664aa31723ba602761",
+      "reporter_files": [
+        "package/installation-reporting/bind-openclaw.js",
+        "package/installation-reporting/binding.js",
+        "package/installation-reporting/cli.js",
+        "package/installation-reporting/contract.js",
+        "package/installation-reporting/reporter.js",
+        "package/installation-reporting/runtime.js",
+        "package/installation-reporting/spool.js",
+        "package/installation-reporting/status-openclaw.js",
+        "package/installation-reporting/transport.js",
+        "package/installation-reporting/worker.js"
+      ],
+      "source_bytes_match": true,
+      "runtime_unsafe_write_permissions": false
+    },
+    {
+      "package": "@aporthq/aport-agent-guardrails-langchain",
+      "version": "1.0.37",
+      "filename": "aporthq-aport-agent-guardrails-langchain-1.0.37.tgz",
+      "sha256": "308c2211e996c3f7089f96430315c1d4027d3172fafa543fbfc16fd3a0b6240b",
+      "reporter_files": [],
+      "source_bytes_match": true,
+      "runtime_unsafe_write_permissions": false
+    },
+    {
+      "package": "aport-agent-guardrails",
+      "version": "1.0.37",
+      "filename": "aport_agent_guardrails-1.0.37-py3-none-any.whl",
+      "sha256": "f5dbce7df0b89ff5718dff7b03fc4b697ca59ae6f1bfb52ec78239a67ee746a0",
+      "reporter_files": [
+        "aport_guardrails/runtime-bundle/src/installation-reporting/bind-openclaw.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/binding.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/cli.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/contract.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/reporter.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/runtime.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/spool.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/status-openclaw.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/transport.js",
+        "aport_guardrails/runtime-bundle/src/installation-reporting/worker.js"
+      ],
+      "source_bytes_match": true,
+      "runtime_unsafe_write_permissions": false
+    },
+    {
+      "package": "aport-agent-guardrails-langchain",
+      "version": "1.0.37",
+      "filename": "aport_agent_guardrails_langchain-1.0.37-py3-none-any.whl",
+      "sha256": "bbc24b978c410c935c6552264a26533ded7a1a92dbc950d869337c4208d36277",
+      "reporter_files": [],
+      "source_bytes_match": true,
+      "runtime_unsafe_write_permissions": false
+    }
+  ],
+  "mutation_checks": [
+    {
+      "mutation": "serializer",
+      "owner": "src/installation-reporting/contract.js",
+      "assertion": "SERIALIZER_REJECTS_URL",
+      "exit": 1,
+      "restored": true
+    },
+    {
+      "mutation": "redaction",
+      "owner": "src/installation-reporting/cli.js",
+      "assertion": "CLI_REDACTION",
+      "exit": 1,
+      "restored": true
+    },
+    {
+      "mutation": "spool-permissions",
+      "owner": "src/installation-reporting/binding.js",
+      "assertion": "PROTECTED_SPOOL_permissions",
+      "exit": 1,
+      "restored": true
+    },
+    {
+      "mutation": "disposition",
+      "owner": "src/installation-reporting/runtime.js",
+      "assertion": "SHELL_PRE_NOT_EXECUTION",
+      "exit": 1,
+      "restored": true
+    }
+  ],
+  "live_sandbox": {
+    "qualified": false,
+    "deployment": null,
+    "handoff_configured": false,
+    "unverified_outcomes": [
+      "install",
+      "ALLOW",
+      "DENY",
+      "unavailable",
+      "mode-change",
+      "rotation",
+      "uninstall",
+      "dropped-queue",
+      "no-handoff"
+    ],
+    "unavailable_host_disposition": "not_reported"
+  },
+  "wheel_runtime_smoke": {
+    "version": "1.0.37",
+    "runtime_root": "runtime-bundle",
+    "operation": "status without handoff",
+    "exit": 0
+  },
+  "enterprise_bundle": {
+    "version": "1.0.37",
+    "files": [
+      {
+        "filename": "aport-device-core.mjs",
+        "sha256": "653005f8e2dcb313e477d17e93ed6c97a105909ac2534fbd4cd9ca5eea07a410"
+      },
+      {
+        "filename": "aport-device-deploy.bundled.sh",
+        "sha256": "0a115eefa6cf18643fab80fbe910f351e110afac67717807cf24f9883b34b2c7"
+      },
+      {
+        "filename": "aport-device-enforce.bundled.sh",
+        "sha256": "ad9c8544b475bf0824c906e4630fa0adbba432049575f2d2e8118eff157909f9"
+      },
+      {
+        "filename": "aport-device-uninstall.bundled.sh",
+        "sha256": "1d5af7f479dadf634c5494f98450ae305f46f9a07bea2aa9ac91866fcea2e047"
+      },
+      {
+        "filename": "aport-device-deploy.bundled.ps1",
+        "sha256": "cb5125f8333be5aaaa351b207bf51917be044d1280159bc97ec5758f5dc34022"
+      },
+      {
+        "filename": "aport-device-enforce.bundled.ps1",
+        "sha256": "e448694f1bd1a042f4b93d27bf08131a2b794302ed7207c1ecf1d4be757740d0"
+      },
+      {
+        "filename": "aport-device-uninstall.bundled.ps1",
+        "sha256": "ebce064696f59d10c59203185d351ba4f93df6b521e1fba08325792d8218d5a9"
+      }
+    ]
+  },
+  "verification": [
+    {
+      "command": "npm test",
+      "exit": 0,
+      "result": "All 74 collected test suites passed"
+    },
+    {
+      "command": "npm run prepush:check",
+      "exit": 0,
+      "result": "Fast pre-push checks passed; 47 upstream Codex tools classified"
+    },
+    {
+      "command": "npm run build",
+      "exit": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    },
+    {
+      "command": "node --test tests/unit/installation-reporting-integration.test.js",
+      "exit": 0,
+      "tests": 54
+    },
+    {
+      "command": "PYTHONPATH=python:python/langchain_adapter python3 -m pytest python/aport_guardrails/tests python/langchain_adapter/tests -q",
+      "exit": 0,
+      "tests": 106
+    },
+    {
+      "command": "npm test -w @aporthq/aport-agent-guardrails-core -w @aporthq/aport-agent-guardrails-langchain",
+      "exit": 0,
+      "tests": 43
+    },
+    {
+      "command": "npm test -w @aporthq/openclaw-aport",
+      "exit": 0,
+      "tests": 49
+    },
+    {
+      "command": "bash tests/unit/test-openclaw-reporting-setup.sh",
+      "exit": 0,
+      "assertion": "OPENCLAW_SETUP_COMMITTED_MODE and OPENCLAW_SETUP_MODE_DIGEST: warn and observe, initial handoff and existing-binding setup; disabled reporting neither stores nor claims a handoff"
+    }
+  ],
+  "remaining_criteria": {
+    "ac-2": "Windows protected-spool ACL ownership validation is unavailable; Windows reporting fails closed as unresolved.",
+    "ac-5": "Pinned v1 server contract has no unsigned adapter_failure/unavailable outcome receipt; these calls can only report heartbeat.",
+    "ac-13": "No owner-created sandbox handoff or exact Agent Passport deployment identifier was supplied; all listed live outcomes remain unverified."
+  },
+  "review_regressions": [
+    {
+      "finding": "Worker queue-lock contention",
+      "owner": "src/installation-reporting/spool.js; src/installation-reporting/worker.js",
+      "test": "tests/unit/installation-reporting-integration.test.js",
+      "assertions": [
+        "WORKER_RECOVERS_TRANSIENT_CONTENTION",
+        "CONTENDED_UNINSTALL_RETIRES_CREDENTIAL",
+        "WORKER_DOES_NOT_STEAL_QUEUE_LOCK",
+        "WORKER_LOCK_RETRY_BOUNDED",
+        "UNSAFE_QUEUE_LOCK_NOT_RETRIED",
+        "RELEASED_QUEUE_LOCK_IS_RETRIED",
+        "CONTENDED_ACK_IS_NOT_REDELIVERED",
+        "WORKER_EXIT_RECHECK_DOES_NOT_STRAND_RECEIPT"
+      ]
+    },
+    {
+      "finding": "OpenClaw committed setup mode",
+      "owner": "bin/openclaw",
+      "test": "tests/unit/test-openclaw-reporting-setup.sh",
+      "assertions": [
+        "OPENCLAW_SETUP_COMMITTED_MODE",
+        "OPENCLAW_SETUP_MODE_DIGEST"
+      ],
+      "modes": [
+        "warn",
+        "observe"
+      ],
+      "paths": [
+        "initial handoff",
+        "existing binding"
+      ]
+    },
+    {
+      "finding": "Evaluated passport identity and completion scope",
+      "owner": "packages/core/src/core/evaluator.ts; python/aport_guardrails/core/evaluator.py; python/aport_guardrails/core/installation_reporting.py",
+      "test": "tests/unit/installation-reporting-integration.test.js",
+      "assertions": [
+        "NODE_EVALUATED_ID",
+        "PYTHON_EVALUATED_ID",
+        "UNEVALUATED_INSTALLATION_UNTOUCHED",
+        "EVALUATED_INSTALLATION_PRE_AND_POST",
+        "EVALUATED_SCOPE_CORRELATION",
+        "CONFLICTING_REQUEST_HAS_NO_REPORTING_IDENTITY"
+      ],
+      "matrix": [
+        "Node and Python",
+        "sync and async",
+        "supplied and file passports",
+        "differing or absent environment identity",
+        "repeated and ambiguous completion correlation"
+      ]
+    },
+    {
+      "finding": "Lifecycle producer contention after committed reset",
+      "owner": "src/installation-reporting/runtime.js; src/installation-reporting/cli.js; src/installation-reporting/spool.js",
+      "test": "tests/unit/installation-reporting-integration.test.js",
+      "before_fix": {
+        "assertion": "CONTENDED_RESET_ENQUEUES_REMOVAL",
+        "exit": 1
+      },
+      "assertions": [
+        "RESET_COMMITS_BEFORE_REPORTING_RETRY",
+        "CONTENDED_RESET_ENQUEUES_REMOVAL",
+        "CONTENDED_RESET_MARKS_RETIREMENT",
+        "CONTENDED_RESET_DELIVERS_REMOVAL",
+        "CONTENDED_RESET_RETIRES_CREDENTIAL",
+        "CONTENDED_DISABLED_RESET_ERASES_CREDENTIAL",
+        "CONTENDED_MODE_REPORTS_COMMITTED_MODE",
+        "LIFECYCLE_ONE_BOUNDED_DEADLINE",
+        "LIFECYCLE_DOES_NOT_STEAL_QUEUE_LOCK",
+        "LIFECYCLE_PRESERVES_PERSISTENT_LOCK",
+        "CONTENTION_NEVER_ROLLS_BACK_RESET",
+        "UNSAFE_LIFECYCLE_LOCK_NOT_RETRIED",
+        "REINSTALL_PRESERVES_CREDENTIAL",
+        "REINSTALL_SUPPRESSES_STALE_REMOVAL"
+      ]
+    }
+  ]
+}

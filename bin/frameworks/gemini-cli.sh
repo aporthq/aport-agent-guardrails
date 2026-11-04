@@ -101,6 +101,8 @@ run_setup() {
     mkdir -p "$config_dir/aport"
     initialize_framework_audit_log "$config_dir"
 
+    (source "$LIB/installation-reporting.sh" && aport_reporting_setup "$config_dir" "gemini-cli" "$hosted_agent_id") || true
+
     echo ""
     echo "  Next steps (Gemini CLI):"
     echo "  ────────────────────────"

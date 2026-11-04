@@ -52,3 +52,6 @@ coverage/
 # local-overrides/
 
 docs/launch/
+
+# Shared reporter copied by package builds
+extensions/openclaw-aport/installation-reporting/
