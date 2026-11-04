@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && cp src/core/tool-pack-mapping.json src/core/default-passport-paths.json dist/core/",
+    "build": "tsc && cp src/core/tool-pack-mapping.json src/core/default-passport-paths.json dist/core/ && node ../../scripts/build-installation-reporter.cjs",
     "clean": "rm -rf dist",
     "test": "jest"
   },

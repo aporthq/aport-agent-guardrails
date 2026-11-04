@@ -91,6 +91,8 @@ class APortCallback(AsyncCallbackHandler):
             {"capability": pack_id},
             tool_ctx,
         )
+        if kwargs.get("run_id") is not None:
+            self.evaluator.track_tool_call(kwargs["run_id"], decision)
         if not decision.get("allow", False):
             reasons = decision.get("reasons") or [{}]
             msg = reasons[0].get("message", "APort denied") if reasons else "APort denied"
@@ -109,3 +111,7 @@ class APortCallback(AsyncCallbackHandler):
                 )
                 return
             raise GuardrailViolation(msg, code=code, reasons=reasons)
+
+    async def on_tool_end(self, output: Any, **kwargs: object) -> None:
+        if kwargs.get("run_id") is not None:
+            self.evaluator.complete_tool_call(kwargs["run_id"])

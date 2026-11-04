@@ -382,6 +382,9 @@ apply_codex_post_tool_session_lifecycle() {
 }
 
 if [ "$FRAMEWORK" = "codex" ] && [ "$HOOK_EVENT" = "PostToolUse" ]; then
+    if [ -f "$ROOT_DIR/bin/lib/installation-reporting.sh" ]; then
+        (source "$ROOT_DIR/bin/lib/installation-reporting.sh" && aport_report_post_action) > /dev/null 2>&1 || true
+    fi
     CODEX_LIFECYCLE_REASON_CODE=""
     CODEX_LIFECYCLE_REASON_MESSAGE=""
     if ! apply_codex_post_tool_session_lifecycle; then

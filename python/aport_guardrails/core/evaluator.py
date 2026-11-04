@@ -547,6 +547,12 @@ class Evaluator:
     def _audit_log(self, config: dict[str, Any], tool_name: str, pack_id: str, decision: Decision, context: dict[str, Any]) -> None:
         """Best-effort audit log write. Never raises."""
         try:
+            from .installation_reporting import report_decision
+            report_decision(config, self._resolved_config_path(), self._framework, decision,
+                            _runtime_metadata(config, self._framework, enforcement_mode=self._runtime_enforcement_mode)["enforcement_mode"])
+        except Exception:
+            pass
+        try:
             audit_log_path = _resolve_audit_log_path(config, self._resolved_config_path(), self._framework)
             if not audit_log_path:
                 return
@@ -561,6 +567,21 @@ class Evaluator:
                 agent_id=config.get("agent_id"),
                 context_summary=_extract_context_summary(context),
             )
+        except Exception:
+            pass
+
+    def track_tool_call(self, run_id, decision):
+        self._report_completion(run_id, decision)
+
+    def complete_tool_call(self, run_id):
+        self._report_completion(run_id)
+
+    def _report_completion(self, run_id, decision=None):
+        try:
+            from .installation_reporting import report_completion
+            config = self._load_config()
+            report_completion(config, self._resolved_config_path(), self._framework, run_id,
+                              _runtime_metadata(config, self._framework, enforcement_mode=self._runtime_enforcement_mode)["enforcement_mode"], decision)
         except Exception:
             pass
 

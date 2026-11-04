@@ -463,6 +463,8 @@ default_passport_file="$config_dir/aport/passport.json"
 local_passport_file="$(expand_user_path "${existing_config_passport_file:-$default_passport_file}")"
 guardrail_script="$SCRIPT_DIR/aport-guardrail-bash.sh"
 
+reporting_agent_id="$existing_agent_id"
+reporting_api_url="$selected_api_url"
 if [[ "$selected_mode" == "local" ]]; then
     if [[ -n "${APORT_HOSTED_AGENT_ID_CLI:-}" ]]; then
         log_error "--mode=local cannot be combined with a hosted passport ID."
@@ -716,6 +718,14 @@ case "$framework" in
 esac
 
 write_guardrail_mode_file "$config_dir" "$selected_mode" "$selected_api_url" "$existing_agent_id" "$selected_enforcement" > /dev/null
+
+# Only report after all local config writes have committed.
+if command -v node > /dev/null 2>&1; then
+    APORT_CONFIG_DIR="$config_dir" APORT_HOOK_FRAMEWORK="$framework" APORT_ENFORCEMENT_MODE="$selected_enforcement" \
+        APORT_AGENT_ID="$reporting_agent_id" APORT_API_URL="$reporting_api_url" \
+        APORT_INSTALLATION_AUTH_MODE="$selected_mode" \
+        node "$SCRIPT_DIR/../src/installation-reporting/cli.js" mode > /dev/null 2>&1 || true
+fi
 
 log_info "Updated APort guardrail settings for $framework"
 echo "  Config dir:  $config_dir"

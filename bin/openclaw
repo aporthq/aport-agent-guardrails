@@ -1010,6 +1010,10 @@ if [ -n "${APORT_INSTALLATION_HANDOFF_FILE:-}" ]; then
 	fi
 else
 	if [ "$USE_HOSTED_PASSPORT" = true ] && [ "$PLUGIN_MODE" = "api" ]; then
+		if [ "$PLUGIN_VERIFIED" = true ] && [ "$PLUGIN_CONFIGURED" = true ] && [ "$REPORTING_SMOKE_OK" = true ] && { [ -d "$CONFIG_DIR/.aport-reporting" ] || compgen -G "$CONFIG_DIR/aport/installation-v1-*.json" >/dev/null; }; then
+			APORT_INSTALLATION_PASSPORT_ID="$HOSTED_AGENT_ID" APORT_INSTALLATION_API_URL="${api_url:-$CONFIGURED_API_URL}" \
+				node "$REPO_ROOT/src/installation-reporting/bind-openclaw.js" || echo "  Reporting connection remains unresolved; setup remains complete."
+		fi
 		APORT_INSTALLATION_PASSPORT_ID="$HOSTED_AGENT_ID" APORT_INSTALLATION_API_URL="${api_url:-$CONFIGURED_API_URL}" \
 			node "$REPO_ROOT/src/installation-reporting/status-openclaw.js" || echo "  Reporting connection: unresolved."
 	else

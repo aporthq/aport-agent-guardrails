@@ -87,7 +87,8 @@
     "docs/operations/",
     "docs/reviews/",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "extensions/openclaw-aport/installation-reporting/"
   ],
   "engines": {
     "node": ">=18.0.0"
