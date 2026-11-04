@@ -555,6 +555,13 @@ function isRoot() {
   }
 }
 
+function reportingSudoArgs(user, args) {
+  const keys = ['APORT_INSTALLATION_HANDOFF_FILE', 'APORT_INSTALLATION_ROTATE',
+    'APORT_INSTALLATION_COVERAGE_FILE', 'APORT_REPORT_DECLARED_COVERAGE', 'APORT_REPORTING_DISABLED']
+    .filter(key => process.env[key] !== undefined);
+  return ['-u', user, '-H', ...(keys.length ? [`--preserve-env=${keys.join(',')}`] : []), ...args];
+}
+
 function npxInstall(cfg, user, home, agentId, runtimeCredential) {
   const args = [
     '--yes',
@@ -576,7 +583,7 @@ function npxInstall(cfg, user, home, agentId, runtimeCredential) {
   };
 
   if (!cfg.skipUserSwitch && isRoot() && !isWin()) {
-    const result = spawnSync('sudo', ['-u', user, '-H', 'npx', ...args], {
+    const result = spawnSync('sudo', reportingSudoArgs(user, ['npx', ...args]), {
       stdio: 'inherit',
       env: { ...envVars, HOME: home, USER: user, LOGNAME: user },
     });
@@ -603,6 +610,16 @@ function writeRuntimeConfig(cfg, user, home, agentId, runtimeCredential) {
 
   if (isRoot() && !isWin()) {
     spawnSync('chown', ['-R', user, aportDir], { stdio: 'ignore' });
+  }
+  // Reuse the installed CLI protocol after the local state commits. No device
+  // identifiers, enrollment key or verification key enter the reporter.
+  if (fs.existsSync(path.join(configDir, '.aport-reporting'))) {
+    const args = ['--yes', cfg.npxPackage, 'reporting', 'mode', cfg.framework];
+    const options = { stdio: 'ignore', env: { ...process.env, HOME: home }, shell: false };
+    try {
+      if (!cfg.skipUserSwitch && isRoot() && !isWin()) spawnSync('sudo', reportingSudoArgs(user, ['npx', ...args]), options);
+      else spawnSync('npx', args, options);
+    } catch { /* Reporting failure cannot undo the committed runtime config. */ }
   }
 }
 
@@ -742,7 +759,7 @@ function uninstallAction(cfg) {
   const envVars = { ...process.env, HOME: home, APORT_NONINTERACTIVE: '1', CI: '1' };
 
   if (!cfg.skipUserSwitch && isRoot() && !isWin()) {
-    const result = spawnSync('sudo', ['-u', user, '-H', 'npx', ...args], {
+    const result = spawnSync('sudo', reportingSudoArgs(user, ['npx', ...args]), {
       stdio: 'inherit',
       env: { ...envVars, HOME: home, USER: user, LOGNAME: user },
     });

@@ -35,8 +35,15 @@ export interface ToolContext {
 }
 
 export interface Decision {
+  decision_id?: string;
   allow: boolean;
   reasons?: Array<{ code?: string; message?: string }>;
+}
+
+function reportingDecision(value: Decision, id: unknown): Decision {
+  // Preserve the public authorization JSON while retaining the server join key.
+  if (typeof id === 'string') Object.defineProperty(value, 'decision_id', { value: id, enumerable: false });
+  return value;
 }
 
 type RuntimeEnforcementMode = 'enforce' | 'warn' | 'observe';
@@ -143,10 +150,10 @@ function runGuardrailSync(
     if (fs.existsSync(decisionPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(decisionPath, 'utf8'));
-        return {
+        return reportingDecision({
           allow: Boolean(data.allow),
           reasons: data.reasons ?? [{ message: 'Policy evaluation failed' }],
-        };
+        }, data.decision_id);
       } catch {
         /* malformed decision; fall through to deny with script exit reason */
       }
@@ -283,10 +290,10 @@ async function callApi(
       return failOpenAllow('oap.api_error', 'Invalid JSON response from API');
     }
     const decision = (data.decision as Record<string, unknown>) ?? data;
-    return {
+    return reportingDecision({
       allow: Boolean((decision as Record<string, unknown>).allow),
       reasons: (decision.reasons as Decision['reasons']) ?? [{ message: 'API response' }],
-    };
+    }, decision.decision_id);
   } catch (e) {
     // Network errors, timeouts, DNS failures — infrastructure, not policy
     return failOpenAllow('oap.api_error', String(e));
@@ -315,8 +322,40 @@ export class Evaluator {
     return findConfigPath(this.framework);
   }
 
+  private installationReporter(config: Config) {
+    const reporterPath = path.join(__dirname, '../installation-reporting/runtime.js');
+    const reporter = require(fs.existsSync(reporterPath) ? reporterPath : '../../../../src/installation-reporting/runtime.js');
+    const options = { configDir: path.dirname(this.resolvedConfigPath() || ''), framework: this.framework,
+      passportId: config.agent_id || process.env.APORT_AGENT_ID,
+      apiUrl: config.api_url || process.env.APORT_API_URL || 'https://api.aport.io',
+      authMode: config.mode || 'local', mode: resolveRuntimeEnforcementMode(config, this.runtimeOptions.enforcementMode) };
+    return { reporter, options };
+  }
+
+  /** Metadata-only correlation used by a host's successful tool-end callback. */
+  trackToolCall(runId: string, decision: Decision): void {
+    try {
+      if (typeof runId !== 'string' || !runId || runId.length > 256) return;
+      const { reporter, options } = this.installationReporter(this.loadConfig());
+      reporter.remember(options, { decision_id: decision.decision_id, allow: decision.allow,
+        call_key: crypto.createHash('sha256').update(runId).digest('hex') });
+    } catch { /* Reporting is optional. */ }
+  }
+
+  completeToolCall(runId: string): void {
+    try {
+      if (typeof runId !== 'string' || !runId || runId.length > 256) return;
+      const { reporter, options } = this.installationReporter(this.loadConfig());
+      reporter.postAction(options, crypto.createHash('sha256').update(runId).digest('hex'));
+    } catch { /* Reporting is optional. */ }
+  }
+
   /** Best-effort audit log write. Never throws, never blocks for allow decisions. */
   private auditLog(config: Config, toolName: string, packId: string, decision: Decision, context: ToolContext): void {
+    try {
+      const { reporter, options } = this.installationReporter(config);
+      reporter.report(options, decision.decision_id);
+    } catch { /* Optional reporting must never change authorization. */ }
     try {
       const auditLogPath = resolveAuditLogPath(
         config.audit_log,
@@ -514,10 +553,10 @@ export class Evaluator {
               syncDecision = apiErrorDecision(String(data.error));
             } else {
               const decision = (data.decision as Record<string, unknown>) ?? data;
-              syncDecision = {
+              syncDecision = reportingDecision({
                 allow: Boolean((decision as Record<string, unknown>).allow),
                 reasons: (decision.reasons as Decision['reasons']) ?? [{ message: 'API response' }],
-              };
+              }, decision.decision_id);
             }
           }
         } catch (e) {

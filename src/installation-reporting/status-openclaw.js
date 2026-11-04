@@ -1,10 +1,5 @@
 'use strict';
-const { bindingStatus } = require('./binding');
-try {
-  const { APORT_CONFIG_DIR: configDir, APORT_INSTALLATION_PASSPORT_ID: passportId, APORT_INSTALLATION_API_URL: apiUrl } = process.env;
-  const origin = new URL(apiUrl).origin;
-  const state = bindingStatus({ stateDir: require('node:path').join(configDir, 'aport'), framework: 'openclaw', passportId, origin });
-  process.stdout.write(`Reporting connection: ${state}.\n`);
-} catch {
-  process.stdout.write('Reporting connection: unresolved.\n');
-}
+const { connectionStatus } = require('./runtime');
+const status = connectionStatus({ configDir: process.env.APORT_CONFIG_DIR, framework: 'openclaw',
+  passportId: process.env.APORT_INSTALLATION_PASSPORT_ID, apiUrl: process.env.APORT_INSTALLATION_API_URL, authMode: 'api' });
+process.stdout.write(`Reporting connection: ${status.state}. Queued: ${status.queued}; dropped: ${status.dropped}.\n`);

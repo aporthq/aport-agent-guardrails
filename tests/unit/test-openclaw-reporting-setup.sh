@@ -15,6 +15,15 @@ esac
 MOCK
 chmod +x "$TEST_ROOT/bin/openclaw"
 cat > "$TEST_ROOT/fetch-mock.js" << 'MOCK'
+// Keep this setup fixture offline; production workers deliberately discard NODE_OPTIONS.
+const cp = require('node:child_process');
+const originalSpawn = cp.spawn;
+cp.spawn = function(command, args, options) {
+  if (args?.[0]?.endsWith('/installation-reporting/worker.js')) {
+    return { once() {}, unref() {} };
+  }
+  return originalSpawn.apply(this, arguments);
+};
 global.fetch = async () => ({ ok: true, json: async () => ({ decision_id: 'decision_1', reasons: [], allow: process.env.MOCK_VERIFY_ALLOW === '1' }) });
 MOCK
 umask 077
@@ -31,6 +40,7 @@ run_setup() {
     PATH="$TEST_ROOT/bin:$PATH" OPENCLAW_HOME="$TEST_ROOT/$name" APORT_NONINTERACTIVE=1 \
         APORT_API_URL=https://sandbox.aport.io APORT_API_KEY=fixture \
         APORT_INSTALLATION_HANDOFF_FILE="$handoff" \
+        APORT_REPORTING_DISABLED="${6:-0}" \
         MOCK_VERIFY_ALLOW="$allowed" MOCK_PLUGIN_VERIFIED="$verified" NODE_OPTIONS="--require=$TEST_ROOT/fetch-mock.js" \
         "$REPO_ROOT/bin/openclaw" "$passport_id" > "$TEST_ROOT/$name.log" 2>&1
 }
@@ -125,6 +135,14 @@ run_setup verified 1 1 ''
 grep -q 'Reporting connection: unverified' "$TEST_ROOT/verified.log"
 run_setup no-handoff 1 1 ''
 grep -q 'Reporting connection: not configured' "$TEST_ROOT/no-handoff.log"
+run_setup disabled 1 1 "$TEST_ROOT/handoff.json" ap_fixture 1
+grep -q 'Reporting connection: not configured' "$TEST_ROOT/disabled.log"
+if compgen -G "$TEST_ROOT/disabled/aport/installation-v1-*.json" > /dev/null \
+    || [[ -e "$TEST_ROOT/disabled/.aport-reporting" ]] \
+    || grep -q 'Installation handoff stored' "$TEST_ROOT/disabled.log"; then
+    echo 'FAIL: disabled reporting stored or claimed a handoff' >&2
+    exit 1
+fi
 mkdir "$TEST_ROOT/verified/aport/.installation-binding.lock"
 if APORT_OPENCLAW_CONFIG_DIR="$TEST_ROOT/verified" "$REPO_ROOT/bin/agent-guardrails" reset openclaw --yes > "$TEST_ROOT/reset-locked.log" 2>&1; then
     echo 'FAIL: reset must refuse a locked installation binding' >&2

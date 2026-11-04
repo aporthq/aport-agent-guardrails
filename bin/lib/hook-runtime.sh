@@ -756,6 +756,11 @@ aport_append_local_session_decision() {
     [ -n "$decision_file" ] && [ -f "$decision_file" ] || return 0
     command -v jq > /dev/null 2>&1 || return 0
 
+    # The reporting bridge is optional; a missing reporter never changes authorization.
+    if [ -f "${BASH_SOURCE[0]%/*}/installation-reporting.sh" ]; then
+        (source "${BASH_SOURCE[0]%/*}/installation-reporting.sh" && aport_report_decision "$decision_file" "$framework") > /dev/null 2>&1 || true
+    fi
+
     local data_dir jsonl session_id now tmp persisted_context
     data_dir="$(dirname "$decision_file")"
     jsonl="${APORT_SESSION_DECISIONS_FILE:-$data_dir/session-decisions.jsonl}"

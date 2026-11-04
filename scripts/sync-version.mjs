@@ -263,3 +263,6 @@ updateTextFile(join(root, "docs", "RELEASE.md"), (content) =>
 promoteRootChangelog(join(root, "CHANGELOG.md"));
 
 console.log("sync-version: done.");
+
+const reporterRuntime = join(root, "src/installation-reporting/runtime.js");
+writeFileSync(reporterRuntime, readFileSync(reporterRuntime, "utf8").replace(/const VERSION = '[^']+';/, `const VERSION = '${version}';`));

@@ -145,6 +145,8 @@ run_setup() {
     fi
     chmod 600 "$CURSOR_HOOKS_FILE"
 
+    (source "$LIB/installation-reporting.sh" && aport_reporting_setup "$config_dir" "cursor" "$hosted_agent_id") || true
+
     echo ""
     echo "  Next steps (Cursor):"
     echo "  ────────────────────"
