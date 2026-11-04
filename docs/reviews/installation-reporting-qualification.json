@@ -11,7 +11,7 @@
       "package": "@aporthq/aport-agent-guardrails",
       "version": "1.0.37",
       "filename": "aporthq-aport-agent-guardrails-1.0.37.tgz",
-      "sha256": "29ff545df2d33c091d1807884d5be854ac222b6d7e420192c01fb85608045383",
+      "sha256": "5203cb72d55ece67a97d8ba03b3bdd7521f636d83998122b5b24f6b7dfb21dda",
       "reporter_files": [
         "package/extensions/openclaw-aport/installation-reporting/bind-openclaw.js",
         "package/extensions/openclaw-aport/installation-reporting/binding.js",
@@ -41,7 +41,7 @@
       "package": "@aporthq/aport-agent-guardrails-core",
       "version": "1.0.37",
       "filename": "aporthq-aport-agent-guardrails-core-1.0.37.tgz",
-      "sha256": "7e5abc79f95a0650820a34efa036df4c85c0981f8135213c2c52045bf248bc48",
+      "sha256": "0ed8625b333b151c776bbdde18e4a64e577509f3062de45effedad426e70d461",
       "reporter_files": [
         "package/dist/installation-reporting/bind-openclaw.js",
         "package/dist/installation-reporting/binding.js",
@@ -61,7 +61,7 @@
       "package": "@aporthq/openclaw-aport",
       "version": "1.0.37",
       "filename": "aporthq-openclaw-aport-1.0.37.tgz",
-      "sha256": "2c3560b7907c23d8abc490a7655aa72168a82a49348490ba2a19486ae99bc618",
+      "sha256": "384c2031d61cb360eb7b3db9ec5f6dae872a0c3c046809b1fc2019be5bde88fd",
       "reporter_files": [
         "package/installation-reporting/bind-openclaw.js",
         "package/installation-reporting/binding.js",
@@ -90,7 +90,7 @@
       "package": "aport-agent-guardrails",
       "version": "1.0.37",
       "filename": "aport_agent_guardrails-1.0.37-py3-none-any.whl",
-      "sha256": "aba2cb19dbc19e95b6a5d358f44579396bd84da4aab6eb266398efc617ffa3e1",
+      "sha256": "8dc1349ee18f52ee7162aa049c6016cb4b0c05c49140e40fb447cb98f954224c",
       "reporter_files": [
         "aport_guardrails/runtime-bundle/src/installation-reporting/bind-openclaw.js",
         "aport_guardrails/runtime-bundle/src/installation-reporting/binding.js",
@@ -110,7 +110,7 @@
       "package": "aport-agent-guardrails-langchain",
       "version": "1.0.37",
       "filename": "aport_agent_guardrails_langchain-1.0.37-py3-none-any.whl",
-      "sha256": "09b2c322d031949b5e8c94b3877930062818ff5b856e87938827fa7a94b1c881",
+      "sha256": "2a370f4cf705cc0d43d0eb5bab75c3bf0b8a2fce78a0edc0e4b6e786bc45dfa9",
       "reporter_files": [],
       "source_bytes_match": true,
       "runtime_unsafe_write_permissions": false
@@ -224,7 +224,7 @@
     {
       "command": "node --test tests/unit/installation-reporting-integration.test.js",
       "exit": 0,
-      "tests": 20
+      "tests": 44
     },
     {
       "command": "PYTHONPATH=python:python/langchain_adapter python3 -m pytest python/aport_guardrails/tests python/langchain_adapter/tests -q",
@@ -244,12 +244,66 @@
     {
       "command": "bash tests/unit/test-openclaw-reporting-setup.sh",
       "exit": 0,
-      "assertion": "disabled reporting neither stores nor claims a handoff"
+      "assertion": "OPENCLAW_SETUP_COMMITTED_MODE and OPENCLAW_SETUP_MODE_DIGEST: warn and observe, initial handoff and existing-binding setup; disabled reporting neither stores nor claims a handoff"
     }
   ],
   "remaining_criteria": {
     "ac-2": "Windows protected-spool ACL ownership validation is unavailable; Windows reporting fails closed as unresolved.",
     "ac-5": "Pinned v1 server contract has no unsigned adapter_failure/unavailable outcome receipt; these calls can only report heartbeat.",
     "ac-13": "No owner-created sandbox handoff or exact Agent Passport deployment identifier was supplied; all listed live outcomes remain unverified."
-  }
+  },
+  "review_regressions": [
+    {
+      "finding": "Worker queue-lock contention",
+      "owner": "src/installation-reporting/spool.js; src/installation-reporting/worker.js",
+      "test": "tests/unit/installation-reporting-integration.test.js",
+      "assertions": [
+        "WORKER_RECOVERS_TRANSIENT_CONTENTION",
+        "CONTENDED_UNINSTALL_RETIRES_CREDENTIAL",
+        "WORKER_DOES_NOT_STEAL_QUEUE_LOCK",
+        "WORKER_LOCK_RETRY_BOUNDED",
+        "UNSAFE_QUEUE_LOCK_NOT_RETRIED",
+        "RELEASED_QUEUE_LOCK_IS_RETRIED",
+        "CONTENDED_ACK_IS_NOT_REDELIVERED",
+        "WORKER_EXIT_RECHECK_DOES_NOT_STRAND_RECEIPT"
+      ]
+    },
+    {
+      "finding": "OpenClaw committed setup mode",
+      "owner": "bin/openclaw",
+      "test": "tests/unit/test-openclaw-reporting-setup.sh",
+      "assertions": [
+        "OPENCLAW_SETUP_COMMITTED_MODE",
+        "OPENCLAW_SETUP_MODE_DIGEST"
+      ],
+      "modes": [
+        "warn",
+        "observe"
+      ],
+      "paths": [
+        "initial handoff",
+        "existing binding"
+      ]
+    },
+    {
+      "finding": "Evaluated passport identity and completion scope",
+      "owner": "packages/core/src/core/evaluator.ts; python/aport_guardrails/core/evaluator.py; python/aport_guardrails/core/installation_reporting.py",
+      "test": "tests/unit/installation-reporting-integration.test.js",
+      "assertions": [
+        "NODE_EVALUATED_ID",
+        "PYTHON_EVALUATED_ID",
+        "UNEVALUATED_INSTALLATION_UNTOUCHED",
+        "EVALUATED_INSTALLATION_PRE_AND_POST",
+        "EVALUATED_SCOPE_CORRELATION",
+        "CONFLICTING_REQUEST_HAS_NO_REPORTING_IDENTITY"
+      ],
+      "matrix": [
+        "Node and Python",
+        "sync and async",
+        "supplied and file passports",
+        "differing or absent environment identity",
+        "repeated and ambiguous completion correlation"
+      ]
+    }
+  ]
 }

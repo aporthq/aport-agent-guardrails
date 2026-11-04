@@ -47,6 +47,10 @@ function reportingDecision(value: Decision, id: unknown): Decision {
 }
 
 type RuntimeEnforcementMode = 'enforce' | 'warn' | 'observe';
+interface ReportingScope {
+  configDir: string; framework: string; passportId: string; apiUrl: string;
+  authMode: string; mode: RuntimeEnforcementMode;
+}
 
 interface RuntimeMetadata {
   enforcement_mode: RuntimeEnforcementMode;
@@ -305,6 +309,8 @@ export class Evaluator {
   private framework: string;
   private runtimeOptions: EvaluatorRuntimeOptions;
   private cachedConfig: Config | null = null;
+  private reportingDecisions = new WeakMap<Decision, ReportingScope>();
+  private reportingCalls = new Map<string, { created: number; scope?: ReportingScope }>();
 
   constructor(
     configPath?: string | null,
@@ -322,39 +328,56 @@ export class Evaluator {
     return findConfigPath(this.framework);
   }
 
-  private installationReporter(config: Config) {
+  private installationReporter() {
     const reporterPath = path.join(__dirname, '../installation-reporting/runtime.js');
-    const reporter = require(fs.existsSync(reporterPath) ? reporterPath : '../../../../src/installation-reporting/runtime.js');
-    const options = { configDir: path.dirname(this.resolvedConfigPath() || ''), framework: this.framework,
-      passportId: config.agent_id || process.env.APORT_AGENT_ID,
-      apiUrl: config.api_url || process.env.APORT_API_URL || 'https://api.aport.io',
-      authMode: config.mode || 'local', mode: resolveRuntimeEnforcementMode(config, this.runtimeOptions.enforcementMode) };
-    return { reporter, options };
+    return require(fs.existsSync(reporterPath) ? reporterPath : '../../../../src/installation-reporting/runtime.js');
+  }
+
+  private reportingCallKey(runId: string): string | undefined {
+    if (typeof runId !== 'string' || !runId || runId.length > 256) return;
+    for (const [key, value] of this.reportingCalls) {
+      if (Date.now() - value.created >= 60000) this.reportingCalls.delete(key);
+    }
+    return crypto.createHash('sha256').update(runId).digest('hex');
   }
 
   /** Metadata-only correlation used by a host's successful tool-end callback. */
   trackToolCall(runId: string, decision: Decision): void {
     try {
-      if (typeof runId !== 'string' || !runId || runId.length > 256) return;
-      const { reporter, options } = this.installationReporter(this.loadConfig());
-      reporter.remember(options, { decision_id: decision.decision_id, allow: decision.allow,
-        call_key: crypto.createHash('sha256').update(runId).digest('hex') });
+      const key = this.reportingCallKey(runId), scope = this.reportingDecisions.get(decision);
+      if (!key) return;
+      const previous = this.reportingCalls.get(key);
+      if (previous) { previous.scope = undefined; return; } // Ambiguous across installations, too.
+      if (!scope) return;
+      if (this.reportingCalls.size >= 100) this.reportingCalls.delete(this.reportingCalls.keys().next().value!);
+      this.reportingCalls.set(key, { created: Date.now(), scope });
+      this.installationReporter().remember(scope, { decision_id: decision.decision_id, allow: decision.allow, call_key: key });
     } catch { /* Reporting is optional. */ }
   }
 
   completeToolCall(runId: string): void {
     try {
-      if (typeof runId !== 'string' || !runId || runId.length > 256) return;
-      const { reporter, options } = this.installationReporter(this.loadConfig());
-      reporter.postAction(options, crypto.createHash('sha256').update(runId).digest('hex'));
+      const key = this.reportingCallKey(runId);
+      if (!key) return;
+      const pending = this.reportingCalls.get(key), scope = pending?.scope;
+      if (!pending || !scope) return;
+      pending.scope = undefined; // Keep a bounded tombstone against repeated callbacks.
+      this.installationReporter().postAction(scope, key);
     } catch { /* Reporting is optional. */ }
   }
 
   /** Best-effort audit log write. Never throws, never blocks for allow decisions. */
-  private auditLog(config: Config, toolName: string, packId: string, decision: Decision, context: ToolContext): void {
+  private auditLog(config: Config, toolName: string, packId: string, decision: Decision, context: ToolContext,
+    passportId?: string, apiUrl?: string): void {
     try {
-      const { reporter, options } = this.installationReporter(config);
-      reporter.report(options, decision.decision_id);
+      // Capture the request's resolved identity and origin, never a second
+      // config/environment selection. Completion keeps this same scope.
+      if (config.mode === 'api' && passportId && apiUrl) {
+        const scope: ReportingScope = { configDir: path.dirname(this.resolvedConfigPath() || ''),
+          framework: this.framework, passportId, apiUrl, authMode: 'api',
+          mode: resolveRuntimeEnforcementMode(config, this.runtimeOptions.enforcementMode) };
+        if (this.installationReporter().report(scope, decision.decision_id)) this.reportingDecisions.set(decision, scope);
+      }
     } catch { /* Optional reporting must never change authorization. */ }
     try {
       const auditLogPath = resolveAuditLogPath(
@@ -430,7 +453,7 @@ export class Evaluator {
       );
       if (agentId) {
         const decision = await callApi(apiUrl, packId, ctx, { agentId, policyPack: isFullPolicyPack(policy) ? policy : undefined, apiKey, verifySsl: verifySslOverride, failOpenOnApiError, runtime });
-        this.auditLog(config, toolName, packId, decision, ctx);
+        this.auditLog(config, toolName, packId, decision, ctx, agentId, apiUrl);
         return decision;
       }
       if (passportBody) {
@@ -442,7 +465,7 @@ export class Evaluator {
           failOpenOnApiError,
           runtime,
         });
-        this.auditLog(config, toolName, packId, decision, ctx);
+        this.auditLog(config, toolName, packId, decision, ctx, passportBody.agent_id, apiUrl);
         return decision;
       }
     }
@@ -584,7 +607,11 @@ export class Evaluator {
             /* best-effort */
           }
         }
-        this.auditLog(config, toolName, packId, syncDecision, ctx);
+        // A legacy sync request may include both selectors. Differing identities
+        // cannot establish one installation, so leave reporting unbound.
+        const reportingId = !agentId || !passportBody || passportBody.agent_id === agentId
+          ? agentId || passportBody?.agent_id : undefined;
+        this.auditLog(config, toolName, packId, syncDecision, ctx, reportingId, apiUrl);
         return syncDecision;
       }
     }
