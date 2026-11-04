@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const runtime = require('../../src/installation-reporting/runtime');
 const spool = require('../../src/installation-reporting/spool');
@@ -38,6 +38,106 @@ function cli(f, command, value) {
   return spawnSync(process.execPath, [path.join(root, 'src/installation-reporting/cli.js'), command],
     { env: f.env, encoding: 'utf8', input: value === undefined ? '' : JSON.stringify(value), timeout: 5000 });
 }
+function workerExit(t, f, extraArgs = []) {
+  const worker = spawn(process.execPath, [...extraArgs, path.join(root, 'src/installation-reporting/worker.js'), f.loc.dir],
+    { env: { PATH: process.env.PATH }, stdio: 'ignore' });
+  t.after(() => { if (worker.exitCode === null) worker.kill(); });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { worker.kill(); reject(Error('Worker did not finish')); }, 15000);
+    worker.once('error', e => { clearTimeout(timer); reject(e); });
+    worker.once('exit', code => { clearTimeout(timer); resolve(code); });
+  });
+}
+test('real worker retries a competing queue lock and retires an uninstall receipt', async t => {
+  const f = fixture(t);
+  fs.rmSync(path.join(f.options.configDir, 'aport'), { recursive: true });
+  assert.equal(cli(f, 'removed').status, 0);
+  const lock = path.join(f.loc.dir, 'queue.lock'); fs.mkdirSync(lock, { mode: 0o700 });
+  const inode = fs.statSync(lock).ino;
+  const exited = workerExit(t, f);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(fs.statSync(lock).ino, inode, 'WORKER_DOES_NOT_STEAL_QUEUE_LOCK');
+  fs.rmdirSync(lock);
+  assert.equal(await exited, 0, 'WORKER_RECOVERS_TRANSIENT_CONTENTION');
+  assert.deepEqual(spool.status(f.loc.dir), { state: 'unresolved', queued: 0, dropped: 1 });
+  assert.ok(!fs.existsSync(path.join(f.loc.dir, 'authority.json')), 'CONTENDED_UNINSTALL_RETIRES_CREDENTIAL');
+});
+test('worker contention retries stay bounded and preserve a persistent lock', async t => {
+  const f = fixture(t);
+  cli(f, 'decision', { decision_id: 'persistent_lock' });
+  const lock = path.join(f.loc.dir, 'queue.lock'); fs.mkdirSync(lock, { mode: 0o700 });
+  const inode = fs.statSync(lock).ino, start = Date.now();
+  assert.equal(await workerExit(t, f), 1);
+  assert.ok(Date.now() - start < 5000, 'WORKER_LOCK_RETRY_BOUNDED');
+  assert.equal(fs.statSync(lock).ino, inode);
+  assert.equal(f.queue().items.length, 1);
+  assert.ok(fs.existsSync(path.join(f.loc.dir, 'authority.json')));
+});
+test('worker refuses an unsafe queue lock without treating it as contention', async t => {
+  const f = fixture(t); cli(f, 'decision', { decision_id: 'unsafe_lock' });
+  const target = path.join(f.base, 'lock-target'); fs.mkdirSync(target, { mode: 0o700 });
+  const lock = path.join(f.loc.dir, 'queue.lock'); fs.symlinkSync(target, lock);
+  assert.equal(await workerExit(t, f), 1);
+  assert.ok(fs.lstatSync(lock).isSymbolicLink(), 'UNSAFE_QUEUE_LOCK_NOT_REMOVED');
+  assert.equal(f.queue().items[0].attempts, 0, 'UNSAFE_QUEUE_LOCK_NOT_RETRIED');
+  assert.deepEqual(spool.status(f.loc.dir), { state: 'unresolved', queued: null, dropped: null });
+});
+test('worker recovers when a competing lock disappears before validation', async t => {
+  const f = fixture(t); cli(f, 'decision', { decision_id: 'released_lock' });
+  const preload = path.join(f.base, 'released-lock.cjs');
+  fs.writeFileSync(preload, `
+    const fs = require('node:fs'), path = require('node:path');
+    const mkdir = fs.mkdirSync; let first = true;
+    fs.mkdirSync = function(target, ...args) {
+      if (first && path.basename(target) === 'queue.lock') {
+        first = false; throw Object.assign(Error('Competing lock already released'), {code:'EEXIST'});
+      }
+      return mkdir.call(this, target, ...args);
+    };
+    global.fetch = async (_url, init) => { const b = JSON.parse(init.body); return new Response(JSON.stringify({event_id:b.event_id,accepted:b.reports.length})); };
+  `);
+  assert.equal(await workerExit(t, f, ['--require', preload]), 0, 'RELEASED_QUEUE_LOCK_IS_RETRIED');
+  assert.deepEqual(spool.status(f.loc.dir), { state:'connected', queued:0, dropped:0 });
+});
+test('worker retries acknowledgment contention without redelivering the receipt', async t => {
+  const f = fixture(t); cli(f, 'decision', { decision_id: 'ack_lock' });
+  let delivered = 0;
+  await spool.drain(f.loc.dir, { fetch: async (_url, init) => {
+    delivered++;
+    const lock = path.join(f.loc.dir, 'queue.lock'); fs.mkdirSync(lock, { mode: 0o700 });
+    setTimeout(() => fs.rmdirSync(lock), 100);
+    const body = JSON.parse(init.body);
+    return new Response(JSON.stringify({ event_id: body.event_id, accepted: body.reports.length }));
+  } });
+  assert.equal(delivered, 1, 'CONTENDED_ACK_IS_NOT_REDELIVERED');
+  assert.deepEqual(spool.status(f.loc.dir), { state: 'connected', queued: 0, dropped: 0 });
+});
+test('real worker final check recovers a receipt queued during worker exit contention', async t => {
+  const f = fixture(t); cli(f, 'decision', { decision_id: 'first' });
+  const next = f.queue().items[0].receipt;
+  next.event_id = 'event_during_exit'; next.reports[0].decision_id = 'during_exit';
+  const preload = path.join(f.base, 'exit-contention.cjs');
+  fs.writeFileSync(preload, `
+    const fs = require('node:fs'), path = require('node:path');
+    const spool = require(${JSON.stringify(path.join(root, 'src/installation-reporting/spool.js'))});
+    global.fetch = async (_url, init) => { const b = JSON.parse(init.body); return new Response(JSON.stringify({event_id:b.event_id, accepted:b.reports.length})); };
+    const original = fs.rmdirSync;
+    fs.rmdirSync = function(target, ...args) {
+      const result = original.call(this, target, ...args);
+      if (path.basename(target) === 'worker.lock') {
+        const dir = path.dirname(target), lock = path.join(dir, 'queue.lock');
+        spool.enqueue(dir, ${JSON.stringify(next)}, {launch:false});
+        fs.mkdirSync(lock, {mode:0o700});
+        setTimeout(() => original(lock), 150);
+      }
+      return result;
+    };
+  `);
+  assert.equal(await workerExit(t, f, ['--require', preload]), 0);
+  for (let i = 0; i < 100 && f.queue().items.length; i++) await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(f.queue().items.length, 0, 'WORKER_EXIT_RECHECK_DOES_NOT_STRAND_RECEIPT');
+  assert.equal(spool.status(f.loc.dir).dropped, 1);
+});
 test('real metadata CLI rejects prohibited fields and preserves pre-action disposition', t => {
   const f = fixture(t);
   assert.equal(cli(f, 'pre', { decision_id: 'decision_allow', allow: true, call_key: hash('call') }).status, 0);
@@ -235,6 +335,103 @@ with patch('aport_guardrails.core.evaluator._call_api_sync', return_value={'allo
   assert.equal(py.status, 0, py.stderr);
   assert.equal(f.queue().items.at(-1).receipt.reports[0].decision_id, 'python_allow', 'PYTHON_SHARED_REPORTER');
   assert.ok(!JSON.stringify(f.queue()).includes('PRIVATE_'), 'ADAPTER_REDACTION');
+});
+test('Node and Python sync and async reporting retain the evaluated passport through completion', async t => {
+  for (const language of ['node', 'python']) for (const method of ['sync', 'async']) for (const source of ['supplied', 'file']) for (const inherited of ['ap_reporting', '']) {
+    await t.test(`${language} ${method} ${source} inherited=${inherited || 'absent'}`, async t => {
+      const f = fixture(t, 'langchain'), config = path.join(f.options.configDir, 'config.yaml');
+      const passportFile = path.join(f.options.configDir, 'passport.json');
+      fs.writeFileSync(passportFile, JSON.stringify({agent_id:'ap_fixture'}), {mode:0o600});
+      fs.writeFileSync(config, `mode: api\napi_url: ${f.options.apiUrl}\nenforcement_mode: warn\n${source === 'file' ? `passport_path: ${passportFile}\n` : ''}`);
+      const otherOptions = { ...f.options, passportId: 'ap_reporting' }, otherLoc = runtime.location(otherOptions);
+      const claims = Buffer.from(JSON.stringify({ v: 1, owner_id: 'ap_user_fixture', region: 'US', installation_id: 'ai_other' })).toString('base64url');
+      const otherBinding = { installation_id: 'ai_other', reporter_token: `air1.${claims}.${'A'.repeat(43)}` };
+      const handoff = { ...f.handoff, ...otherBinding,
+        reporter_endpoint: `${f.options.apiUrl}/api/agent-installations/ai_other/reports`,
+        test_result_endpoint: `${f.options.apiUrl}/api/agent-installations/ai_other/tests/{test_id}/results` };
+      const handoffFile = path.join(f.base, 'other-handoff.json'); fs.writeFileSync(handoffFile, JSON.stringify(handoff), { mode: 0o600 });
+      bindHandoff({ ...otherLoc, framework: 'langchain', passportId: 'ap_reporting', handoffFile });
+      spool.provision(otherLoc.dir, { binding: otherBinding, framework: 'langchain', origin: otherLoc.origin });
+      fs.mkdirSync(path.join(otherLoc.dir, 'worker.lock'), { mode: 0o700 });
+      const env = { ...f.env, HOME: f.base, APORT_AGENT_ID: inherited, OPENCLAW_PASSPORT_FILE: '' };
+      let result;
+      if (language === 'node') {
+        const preload = path.join(f.base, 'api.cjs');
+        fs.writeFileSync(preload, `
+          global.fetch = async (_url, init) => {
+            const body = JSON.parse(init.body);
+            require('node:assert/strict').equal(${source === 'file' ? 'body.passport.agent_id' : 'body.context.agent_id'}, 'ap_fixture', 'NODE_EVALUATED_ID');
+            const d = {decision:{allow:false,decision_id:'evaluated_node',reasons:[]}};
+            return {ok:true,text:async()=>JSON.stringify(d),json:async()=>d};
+          };
+        `);
+        result = spawnSync(process.execPath, ['-e', `
+          const assert = require('node:assert/strict'), { Evaluator } = require('./packages/core/dist/core/evaluator.js');
+          (async()=>{
+            const e = new Evaluator(process.argv[1]);
+            const d = ${method === 'sync' ? 'e.verifySync' : 'await e.verify'}(${source === 'file' ? '{}' : "{agent_id:'ap_fixture'}"}, {}, {tool:'exec'});
+            assert.equal(d.decision_id, 'evaluated_node');
+            assert.equal(JSON.stringify(d), '{"allow":false,"reasons":[]}');
+            process.env.APORT_AGENT_ID = 'ap_reporting';
+            e.trackToolCall('effective_identity', d);
+            e.completeToolCall('effective_identity');
+            e.completeToolCall('effective_identity');
+            e.trackToolCall('ambiguous_identity', d);
+            e.trackToolCall('ambiguous_identity', {allow:true});
+            e.completeToolCall('ambiguous_identity');
+          })().catch(e=>{console.error(e);process.exitCode=1;});
+        `, config], { cwd: root, env: { ...env, NODE_OPTIONS: `--require=${preload}` }, encoding: 'utf8', timeout: 10000 });
+      } else {
+        result = spawnSync('python3', ['-c', `
+import asyncio, json, os, sys
+from unittest.mock import patch
+from aport_guardrails.core.evaluator import Evaluator
+def verify(*args, **kwargs):
+    assert ${source === 'file' ? "kwargs['passport']['agent_id']" : "kwargs['agent_id']"} == 'ap_fixture', 'PYTHON_EVALUATED_ID'
+    return {'allow':False,'decision_id':'evaluated_python','reasons':[]}
+async def main():
+    e = Evaluator(sys.argv[1])
+    with patch('aport_guardrails.core.evaluator._call_api_sync', side_effect=verify):
+        d = ${method === 'sync' ? 'e.verify_sync' : 'await e.verify'}(${source === 'file' ? '{}' : "{'agent_id':'ap_fixture'}"}, {}, {'tool':'exec'})
+    assert json.dumps(d) == json.dumps({'allow':False,'decision_id':'evaluated_python','reasons':[]})
+    os.environ['APORT_AGENT_ID'] = 'ap_reporting'
+    e.track_tool_call('effective_identity', d)
+    e.complete_tool_call('effective_identity')
+    e.complete_tool_call('effective_identity')
+    e.track_tool_call('ambiguous_identity', d)
+    e.track_tool_call('ambiguous_identity', {'allow': True})
+    e.complete_tool_call('ambiguous_identity')
+asyncio.run(main())
+`, config], { cwd: root, env: { ...env, PYTHONPATH: path.join(root, 'python') }, encoding: 'utf8', timeout: 10000 });
+      }
+      assert.equal(result.status, 0, result.stderr);
+      assert.ok(!fs.existsSync(path.join(otherLoc.dir, 'queue.json')), 'UNEVALUATED_INSTALLATION_UNTOUCHED');
+      assert.equal(f.queue().items.length, 2, 'EVALUATED_INSTALLATION_PRE_AND_POST');
+      const reports = f.queue().items.map(item => item.receipt.reports[0]);
+      assert.deepEqual(reports.map(r => r.host_disposition), ['not_reported', 'continued_after_warning']);
+      assert.equal(reports[0].decision_id, reports[1].decision_id, 'EVALUATED_SCOPE_CORRELATION');
+    });
+  }
+});
+test('Node sync reporting refuses conflicting request passport selectors', t => {
+  const f = fixture(t, 'langchain'), config = path.join(f.options.configDir, 'config.yaml');
+  const passport = path.join(f.options.configDir, 'passport.json');
+  fs.writeFileSync(passport, JSON.stringify({agent_id:'ap_other'}), {mode:0o600});
+  fs.writeFileSync(config, `mode: api\napi_url: ${f.options.apiUrl}\npassport_path: ${passport}\n`);
+  const preload = path.join(f.base, 'conflicting-api.cjs');
+  fs.writeFileSync(preload, `global.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body), assert = require('node:assert/strict');
+    assert.equal(body.context.agent_id, 'ap_fixture'); assert.equal(body.passport.agent_id, 'ap_other');
+    return {json:async()=>({decision:{allow:true,decision_id:'ambiguous_request',reasons:[]}})};
+  };`);
+  const result = spawnSync(process.execPath, ['-e', `
+    const {Evaluator} = require('./packages/core/dist/core/evaluator.js');
+    const e = new Evaluator(process.argv[1]), d = e.verifySync({agent_id:'ap_fixture'}, {}, {tool:'exec'});
+    require('node:assert/strict').equal(d.decision_id, 'ambiguous_request');
+    e.trackToolCall('ambiguous_request', d); e.completeToolCall('ambiguous_request');
+  `, config], {cwd:root, env:{...f.env, NODE_OPTIONS:`--require=${preload}`}, encoding:'utf8', timeout:10000});
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(!fs.existsSync(path.join(f.loc.dir, 'queue.json')), 'CONFLICTING_REQUEST_HAS_NO_REPORTING_IDENTITY');
 });
 test('real OpenClaw plugin keeps all pre-action results not_reported', async t => {
   const f = fixture(t, 'openclaw');

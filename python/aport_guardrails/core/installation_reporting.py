@@ -7,10 +7,10 @@ from uuid import UUID
 from .runtime_assets import find_runtime_root
 
 
-def _environment(config, config_path, framework, enforcement):
+def _environment(config, config_path, framework, enforcement, passport_id):
     return {"PATH": os.environ.get("PATH", ""),
             "APORT_CONFIG_DIR": str(config_path.parent), "APORT_HOOK_FRAMEWORK": framework,
-            "APORT_AGENT_ID": config.get("agent_id") or os.environ.get("APORT_AGENT_ID", ""),
+            "APORT_AGENT_ID": passport_id if isinstance(passport_id, str) else "",
             "APORT_API_URL": config.get("api_url") or os.environ.get("APORT_API_URL", "https://api.aport.io"),
             "APORT_GUARDRAIL_MODE": "api", "APORT_ENFORCEMENT_MODE": enforcement}
 
@@ -25,7 +25,8 @@ def setup_reporting(config, config_path, framework):
         root = find_runtime_root()
         if not root:
             return
-        env = _environment(config, config_path, framework, normalize_enforcement_mode(config.get("enforcement_mode")))
+        env = _environment(config, config_path, framework, normalize_enforcement_mode(config.get("enforcement_mode")),
+                           config.get("agent_id") or os.environ.get("APORT_AGENT_ID"))
         for key in ("APORT_INSTALLATION_HANDOFF_FILE", "APORT_INSTALLATION_ROTATE", "APORT_REPORT_DECLARED_COVERAGE", "APORT_INSTALLATION_COVERAGE_FILE"):
             if key in os.environ:
                 env[key] = os.environ[key]
@@ -36,14 +37,14 @@ def setup_reporting(config, config_path, framework):
         print("[aport] Reporting connection unresolved.")
 
 
-def report_decision(config, config_path, framework, decision, enforcement):
+def report_decision(config, config_path, framework, decision, enforcement, passport_id=None):
     if config.get("mode", "local") != "api" or os.environ.get("APORT_REPORTING_DISABLED") == "1":
         return
     try:
         root = find_runtime_root()
         if not root or not config_path:
             return
-        env = _environment(config, config_path, framework, enforcement)
+        env = _environment(config, config_path, framework, enforcement, passport_id)
         # Bounded metadata goes over stdin, never a command string or environment.
         metadata = json.dumps({"decision_id": decision.get("decision_id")})
         if len(metadata.encode()) > 2048:
@@ -55,7 +56,7 @@ def report_decision(config, config_path, framework, decision, enforcement):
         pass
 
 
-def report_completion(config, config_path, framework, run_id, enforcement, decision=None):
+def report_completion(config, config_path, framework, run_id, enforcement, decision=None, passport_id=None):
     if config.get("mode", "local") != "api" or os.environ.get("APORT_REPORTING_DISABLED") == "1":
         return
     try:
@@ -71,7 +72,7 @@ def report_completion(config, config_path, framework, run_id, enforcement, decis
         if len(data.encode()) > 2048:
             return
         subprocess.run(["node", str(root / "src/installation-reporting/cli.js"), "remember" if decision is not None else "post"],
-                       input=data, text=True, env=_environment(config, config_path, framework, enforcement),
+                       input=data, text=True, env=_environment(config, config_path, framework, enforcement, passport_id),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1, check=False)
     except Exception:
         pass

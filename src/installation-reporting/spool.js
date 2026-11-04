@@ -8,7 +8,7 @@ const { noSymlinkComponents, readProtected, supportedFramework } = require('./bi
 const { serializeReport, validateHandoff } = require('./contract');
 const { handoffFor, deliver } = require('./transport');
 
-const LIMITS = Object.freeze({ count: 100, bytes: 1048576, receiptBytes: 32768, ageMs: 60000, attempts: 3, timeoutMs: 3000 });
+const LIMITS = Object.freeze({ count: 100, bytes: 1048576, receiptBytes: 32768, ageMs: 60000, attempts: 3, timeoutMs: 3000, lockWaitMs: 1000 });
 const fail = () => { throw Error('Reporting state unresolved'); };
 function directory(dir, create = false) {
   if (create) {
@@ -40,12 +40,32 @@ function atomic(dir, name, value, maxBytes) {
 function locked(dir, fn) {
   const before = directory(dir);
   const lock = path.join(dir, 'queue.lock');
-  fs.mkdirSync(lock, { mode: 0o700 }); // Never wait or steal an ambiguous lock.
+  try { fs.mkdirSync(lock, { mode: 0o700 }); }
+  catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    // A competing holder may release between mkdir and validation. Retry that
+    // race too; every attempt still validates before acquiring its own lock.
+    try { directory(lock); }
+    catch (validation) { if (validation.code !== 'ENOENT') throw validation; }
+    throw Object.assign(Error('Reporting queue busy'), { code: 'APORT_REPORTING_QUEUE_BUSY' });
+  }
   try {
     const after = directory(dir);
     if (before.ino !== after.ino || before.dev !== after.dev) fail();
     return fn();
   } finally { fs.rmdirSync(lock); }
+}
+// Producers remain nonblocking. Only the detached worker waits for a current
+// lock holder, with a fixed deadline; it never removes or steals that lock.
+async function retryQueueLock(operation) {
+  const deadline = Date.now() + LIMITS.lockWaitMs;
+  for (;;) {
+    try { return operation(); }
+    catch (e) {
+      if (e.code !== 'APORT_REPORTING_QUEUE_BUSY' || Date.now() >= deadline) throw e;
+      await new Promise(resolve => setTimeout(resolve, Math.min(25, deadline - Date.now())));
+    }
+  }
 }
 function authority(dir) {
   directory(path.dirname(dir));
@@ -110,26 +130,29 @@ function enqueue(dir, receipt, { launch = true } = {}) {
   });
   if (launch) startWorker(dir);
 }
-function status(dir) {
+function readStatus(dir) {
+  directory(path.dirname(dir)); directory(dir);
   try {
-    directory(path.dirname(dir)); directory(dir);
-    try {
-      const final = JSON.parse(readProtected(path.join(dir, 'final-status.json'), 1024));
-      if (Object.keys(final).sort().join(',') !== 'dropped,queued,state' || final.queued !== 0 ||
-          !['connected', 'unresolved'].includes(final.state) || !Number.isSafeInteger(final.dropped) || final.dropped < 0) fail();
-      return final;
-    } catch (e) { if (e.code !== 'ENOENT') throw e; }
-    const a = authority(dir);
-    return locked(dir, () => {
-      const q = state(dir, a.binding.installation_id);
-      expire(q); atomic(dir, 'queue.json', q, LIMITS.bytes);
-      let stale = false;
-      try { const s = directory(path.join(dir, 'worker.lock')); stale = Date.now() - s.mtimeMs > LIMITS.ageMs + LIMITS.timeoutMs; }
-      catch (e) { if (e.code !== 'ENOENT') stale = true; }
-      return { state: stale || q.dropped ? 'unresolved' : q.state, queued: q.items.length, dropped: q.dropped };
-    });
-  } catch { return { state: 'unresolved', queued: null, dropped: null }; }
+    const final = JSON.parse(readProtected(path.join(dir, 'final-status.json'), 1024));
+    if (Object.keys(final).sort().join(',') !== 'dropped,queued,state' || final.queued !== 0 ||
+        !['connected', 'unresolved'].includes(final.state) || !Number.isSafeInteger(final.dropped) || final.dropped < 0) fail();
+    return final;
+  } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const a = authority(dir);
+  return locked(dir, () => {
+    const q = state(dir, a.binding.installation_id);
+    expire(q); atomic(dir, 'queue.json', q, LIMITS.bytes);
+    let stale = false;
+    try { const s = directory(path.join(dir, 'worker.lock')); stale = Date.now() - s.mtimeMs > LIMITS.ageMs + LIMITS.timeoutMs; }
+    catch (e) { if (e.code !== 'ENOENT') stale = true; }
+    return { state: stale || q.dropped ? 'unresolved' : q.state, queued: q.items.length, dropped: q.dropped };
+  });
 }
+function status(dir) {
+  try { return readStatus(dir); }
+  catch { return { state: 'unresolved', queued: null, dropped: null }; }
+}
+function workerStatus(dir) { return retryQueueLock(() => readStatus(dir)); }
 function startWorker(dir) {
   directory(dir);
   const lock = path.join(dir, 'worker.lock');
@@ -148,16 +171,16 @@ async function drain(dir, options = {}) {
   const deadline = Date.now() + LIMITS.ageMs;
   while (Date.now() < deadline) {
     const a = authority(dir);
-    const item = locked(dir, () => {
+    const item = await retryQueueLock(() => locked(dir, () => {
       const q = state(dir, a.binding.installation_id); expire(q);
       const next = q.items[0];
       if (next) next.attempts++;
       atomic(dir, 'queue.json', q, LIMITS.bytes);
       return next;
-    });
-    if (!item) { retire(dir); return; }
+    }));
+    if (!item) { await retryQueueLock(() => retire(dir)); return; }
     const result = await deliver(a.binding, a.origin, item.receipt, undefined, item.key, { ...options, timeoutMs: LIMITS.timeoutMs });
-    locked(dir, () => {
+    await retryQueueLock(() => locked(dir, () => {
       const q = state(dir, a.binding.installation_id);
       // Pressure may discard an in-flight oldest receipt. Never remove its successor.
       if (q.items[0]?.key === item.key) {
@@ -166,10 +189,10 @@ async function drain(dir, options = {}) {
         else q.state = 'unresolved';
       }
       atomic(dir, 'queue.json', q, LIMITS.bytes);
-    });
+    }));
     if (result.retry) await new Promise(resolve => setTimeout(resolve, 1000 * item.attempts));
   }
-  retire(dir);
+  await retryQueueLock(() => retire(dir));
 }
 function retire(dir) {
   locked(dir, () => {
@@ -234,4 +257,4 @@ function correlation(dir, key, value) {
   });
 }
 function currentMode(dir) { return state(dir, authority(dir).binding.installation_id).mode; }
-module.exports = { LIMITS, directory, provision, enqueue, status, startWorker, drain, authority, correlation, currentMode, forgetCredential };
+module.exports = { LIMITS, directory, provision, enqueue, status, workerStatus, startWorker, drain, authority, correlation, currentMode, forgetCredential };

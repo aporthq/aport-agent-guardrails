@@ -56,7 +56,10 @@ tokens through argv. Queue pressure and expiry discard oldest metadata. Dropped
 counts remain visible after later successful delivery. Status reports `null`
 counts when corrupt/locked state prevents trustworthy counting.
 
-Locks are never stolen. A killed process or ambiguous lock leaves unresolved
+Locks are never stolen. The detached worker retries a protected, contended queue
+lock every 25 ms for at most one second per queue operation, including its final
+queue check after releasing the worker lock. Producers do not wait for locks;
+unsafe lock paths fail immediately. A killed process or ambiguous lock leaves unresolved
 state; an operator must establish that no worker is active before removing a
 stale lock. Reporting must not repair ambiguous state on the authorization path.
 Reset leaves the bounded delivery spool so removal can be sent after cleanup.
@@ -86,6 +89,11 @@ carries mode and host disposition. Codex's existing PostToolUse path and
 Node/Python LangChain successful tool-end callbacks correlate
 opaque call IDs through a SHA-256 key, bounded to 100 entries/60 seconds; missing,
 conflicting, repeated or expired identifiers cannot establish completion. A
+Node/Python decision retains the passport identity and API origin actually sent
+to verification; its completion callback uses that same scope, even if the
+environment changes. Conflicting sync request identities suppress reporting.
+OpenClaw setup reports the enforcement mode committed to the host configuration,
+including warn and observe on both initial handoff and existing-binding setup. A
 pre-action DENY alone never means `blocked`. Unexpected completion after an
 enforce DENY stays `not_reported`. Callback outputs never enter the reporter.
 Signed decisions are never modified.
