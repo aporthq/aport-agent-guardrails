@@ -48,6 +48,146 @@ function workerExit(t, f, extraArgs = []) {
     worker.once('exit', code => { clearTimeout(timer); resolve(code); });
   });
 }
+function managementWithLock(t, f, args, lock) {
+  const marker = path.join(f.base, 'lock-attempts');
+  const preload = path.join(f.base, 'observe-lock.cjs');
+  // Observe actual acquisition attempts without replacing the lock or reporter.
+  fs.writeFileSync(preload, `
+    const fs = require('node:fs'), mkdir = fs.mkdirSync;
+    fs.mkdirSync = function(target, ...args) {
+      if (target === ${JSON.stringify(lock)}) fs.appendFileSync(${JSON.stringify(marker)}, 'x');
+      return mkdir.call(this, target, ...args);
+    };
+  `);
+  fs.writeFileSync(path.join(f.options.configDir, 'openclaw.json'), JSON.stringify({ plugins: { entries: { 'openclaw-aport': {
+    config: { mode: 'api', agentId: f.options.passportId, apiUrl: f.options.apiUrl }
+  } } } }));
+  const child = spawn('bash', [path.join(root, 'bin/agent-guardrails'), ...args], {
+    env: { ...f.env, HOME: f.base, APORT_OPENCLAW_CONFIG_DIR: f.options.configDir, NODE_OPTIONS: `--require=${preload}` },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const exited = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill(); reject(Error('Management command did not finish')); }, 10000);
+    child.once('error', e => { clearTimeout(timer); reject(e); });
+    child.once('exit', code => { clearTimeout(timer); resolve({ code, output }); });
+  });
+  return { exited, marker, async contended() {
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(marker)) {
+      assert.ok(child.exitCode === null && Date.now() < deadline, `Management command never attempted queue lock: ${output}`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  } };
+}
+test('real reset retries producer contention and retires its removal credential', async t => {
+  const f = fixture(t, 'openclaw'); runtime.report(f.options, 'before_reset');
+  const lock = path.join(f.loc.dir, 'queue.lock'); fs.mkdirSync(lock, { mode: 0o700 });
+  const inode = fs.statSync(lock).ino;
+  const command = managementWithLock(t, f, ['reset', 'openclaw', '--yes'], lock);
+  await command.contended();
+  assert.ok(!fs.existsSync(path.join(f.options.configDir, 'aport')), 'RESET_COMMITS_BEFORE_REPORTING_RETRY');
+  await new Promise(resolve => setTimeout(resolve, 75));
+  assert.equal(fs.statSync(lock).ino, inode, 'LIFECYCLE_DOES_NOT_STEAL_QUEUE_LOCK');
+  fs.rmdirSync(lock);
+  const result = await command.exited; assert.equal(result.code, 0, result.output);
+  assert.deepEqual(f.queue().items.at(-1).receipt.reports, [{ kind: 'lifecycle', state: 'removed' }], 'CONTENDED_RESET_ENQUEUES_REMOVAL');
+  assert.ok(fs.existsSync(path.join(f.loc.dir, 'retiring.json')), 'CONTENDED_RESET_MARKS_RETIREMENT');
+  const delivered = [];
+  await spool.drain(f.loc.dir, { fetch: async (_url, init) => {
+    const receipt = JSON.parse(init.body); delivered.push(...receipt.reports);
+    return new Response(JSON.stringify({ event_id: receipt.event_id, accepted: receipt.reports.length }));
+  } });
+  assert.deepEqual(delivered.at(-1), { kind: 'lifecycle', state: 'removed' }, 'CONTENDED_RESET_DELIVERS_REMOVAL');
+  assert.ok(!fs.existsSync(path.join(f.loc.dir, 'authority.json')), 'CONTENDED_RESET_RETIRES_CREDENTIAL');
+});
+test('real disabled reset retries contention before erasing its delivery credential', async t => {
+  const f = fixture(t, 'openclaw'); runtime.report(f.options, 'before_disabled_reset');
+  f.env.APORT_REPORTING_DISABLED = '1';
+  const lock = path.join(f.loc.dir, 'queue.lock'); fs.mkdirSync(lock, { mode: 0o700 });
+  const command = managementWithLock(t, f, ['reset', 'openclaw', '--yes'], lock);
+  await command.contended();
+  assert.ok(!fs.existsSync(path.join(f.options.configDir, 'aport')));
+  await new Promise(resolve => setTimeout(resolve, 75)); fs.rmdirSync(lock);
+  const result = await command.exited; assert.equal(result.code, 0, result.output);
+  assert.ok(!fs.existsSync(path.join(f.loc.dir, 'authority.json')), 'CONTENDED_DISABLED_RESET_ERASES_CREDENTIAL');
+  assert.deepEqual(spool.status(f.loc.dir), { state: 'unresolved', queued: 0, dropped: 1 });
+  assert.ok(!fs.existsSync(path.join(f.loc.dir, 'retiring.json')), 'DISABLED_RESET_DOES_NOT_REPORT');
+});
+test('real mode change retries contention after committing the selected mode', async t => {
+  const f = fixture(t, 'openclaw'); runtime.report(f.options, 'before_mode');
+  const lock = path.join(f.loc.dir, 'queue.lock'); fs.mkdirSync(lock, { mode: 0o700 });
+  const command = managementWithLock(t, f, ['mode', 'openclaw', '--enforcement=observe'], lock);
+  await command.contended();
+  assert.match(fs.readFileSync(path.join(f.options.configDir, 'aport/guardrail-mode.env'), 'utf8'), /observe/, 'MODE_COMMITS_BEFORE_REPORTING_RETRY');
+  await new Promise(resolve => setTimeout(resolve, 75)); fs.rmdirSync(lock);
+  const result = await command.exited; assert.equal(result.code, 0, result.output);
+  const receipt = f.queue().items.at(-1).receipt;
+  assert.equal(receipt.mode, 'observe', 'CONTENDED_MODE_REPORTS_COMMITTED_MODE');
+  assert.deepEqual(receipt.reports, [{ kind: 'heartbeat' }]);
+});
+test('real reset shares one contention deadline across scopes without rolling back cleanup', async t => {
+  const f = fixture(t, 'openclaw'); runtime.report(f.options, 'before_persistent_lock');
+  const dirs = [f.loc.dir];
+  for (let i = 0; i < 3; i++) {
+    const dir = runtime.location({ ...f.options, passportId: `ap_old_${i}` }).dir;
+    spool.provision(dir, spool.authority(f.loc.dir)); dirs.push(dir);
+  }
+  const locks = dirs.map(dir => {
+    const lock = path.join(dir, 'queue.lock'); fs.mkdirSync(lock, { mode: 0o700 });
+    return { lock, inode: fs.statSync(lock).ino };
+  });
+  const start = Date.now();
+  const command = managementWithLock(t, f, ['reset', 'openclaw', '--yes'], locks[0].lock);
+  const result = await command.exited; assert.equal(result.code, 0, result.output);
+  assert.ok(Date.now() - start < 3000, 'LIFECYCLE_ONE_BOUNDED_DEADLINE');
+  assert.ok(!fs.existsSync(path.join(f.options.configDir, 'aport')), 'CONTENTION_NEVER_ROLLS_BACK_RESET');
+  for (const { lock, inode } of locks) assert.equal(fs.statSync(lock).ino, inode, 'LIFECYCLE_PRESERVES_PERSISTENT_LOCK');
+  assert.deepEqual(spool.status(f.loc.dir), { state: 'unresolved', queued: null, dropped: null });
+  assert.ok(fs.existsSync(path.join(f.loc.dir, 'authority.json')), 'PERSISTENT_CONTENTION_REQUIRES_RECOVERY');
+  assert.ok(!fs.existsSync(path.join(f.loc.dir, 'retiring.json')));
+});
+test('real reset rejects unsafe locks immediately without retrying or altering them', async t => {
+  for (const kind of ['symlink', 'permissions']) await t.test(kind, async t => {
+    const f = fixture(t, 'openclaw'); runtime.report(f.options, 'before_unsafe_lock');
+    const lock = path.join(f.loc.dir, 'queue.lock');
+    if (kind === 'symlink') {
+      const target = path.join(f.base, 'lock-target'); fs.mkdirSync(target, { mode: 0o700 }); fs.symlinkSync(target, lock);
+    } else {
+      fs.mkdirSync(lock, { mode: 0o700 }); fs.chmodSync(lock, 0o755);
+    }
+    const before = fs.lstatSync(lock);
+    const command = managementWithLock(t, f, ['reset', 'openclaw', '--yes'], lock);
+    const result = await command.exited; assert.equal(result.code, 0, result.output);
+    assert.equal(fs.readFileSync(command.marker, 'utf8'), 'x', 'UNSAFE_LIFECYCLE_LOCK_NOT_RETRIED');
+    const after = fs.lstatSync(lock);
+    assert.equal(after.ino, before.ino); assert.equal(after.mode, before.mode);
+    assert.ok(!fs.existsSync(path.join(f.options.configDir, 'aport')));
+    assert.equal(f.queue().items.length, 1);
+    assert.deepEqual(spool.status(f.loc.dir), { state: 'unresolved', queued: null, dropped: null });
+  });
+});
+test('real reset preserves a reinstall that appears during lifecycle contention', async t => {
+  for (const disabled of ['0', '1']) await t.test(`reporting disabled=${disabled}`, async t => {
+    const f = fixture(t, 'openclaw'); runtime.report(f.options, 'before_reinstall');
+    f.env.APORT_REPORTING_DISABLED = disabled;
+    const lock = path.join(f.loc.dir, 'queue.lock'); fs.mkdirSync(lock, { mode: 0o700 });
+    const command = managementWithLock(t, f, ['reset', 'openclaw', '--yes'], lock);
+    await command.contended();
+    const installed = path.join(f.options.configDir, 'aport');
+    assert.ok(!fs.existsSync(installed)); fs.mkdirSync(installed, { mode: 0o700 });
+    fs.writeFileSync(path.join(installed, 'new-install'), 'preserve');
+    fs.rmdirSync(lock);
+    const result = await command.exited; assert.equal(result.code, 0, result.output);
+    assert.equal(fs.readFileSync(path.join(installed, 'new-install'), 'utf8'), 'preserve');
+    assert.ok(fs.existsSync(path.join(f.loc.dir, 'authority.json')), 'REINSTALL_PRESERVES_CREDENTIAL');
+    assert.equal(f.queue().items.length, 1, 'REINSTALL_SUPPRESSES_STALE_REMOVAL');
+    assert.ok(!fs.existsSync(path.join(f.loc.dir, 'retiring.json')));
+  });
+});
 test('real worker retries a competing queue lock and retires an uninstall receipt', async t => {
   const f = fixture(t);
   fs.rmSync(path.join(f.options.configDir, 'aport'), { recursive: true });
