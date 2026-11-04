@@ -250,3 +250,4 @@ run_setup() {
 }
 
 run_setup
+(source "$LIB/installation-reporting.sh" && aport_reporting_setup "$(get_config_dir "$framework")" "$framework" "$hosted_agent_id") || true

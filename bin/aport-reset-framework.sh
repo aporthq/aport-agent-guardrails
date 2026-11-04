@@ -722,6 +722,12 @@ case "$framework" in
 esac
 
 echo ""
+# Shared-state preservation is not removal. Keep the bounded delivery spool
+# outside aport/ so reporting survives successful cleanup.
+if [[ ! -e "$config_dir/aport" ]] && command -v node > /dev/null 2>&1; then
+    APORT_CONFIG_DIR="$config_dir" APORT_HOOK_FRAMEWORK="$framework" \
+        node "$LIB/../../src/installation-reporting/cli.js" removed > /dev/null 2>&1 || true
+fi
 echo "  Reset complete for $framework."
 echo "  Re-run the setup command when you want a fresh install."
 echo ""

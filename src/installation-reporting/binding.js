@@ -37,10 +37,13 @@ function readRecord(file) {
       typeof record.reporter_token !== 'string' || record.reporter_token.length > 1024) invalid();
   return record;
 }
+function supportedFramework(framework) {
+  return ['openclaw', 'claude-code', 'cursor', 'codex', 'gemini-cli', 'goose', 'langchain', 'crewai', 'deerflow', 'n8n', 'generic'].includes(framework);
+}
 function identityName(framework, passportId, origin) {
   // Keep this compatibility check aligned with is_aport_hosted_agent_id in
   // bin/lib/guardrail-mode.sh, which also accepts legacy hosted IDs.
-  if (framework !== 'openclaw' || typeof passportId !== 'string' || passportId.match(/^(?:ap|apt|agt_inst|agt_tmpl)_[A-Za-z0-9_-]+$/)?.[0] !== passportId || typeof origin !== 'string') invalid();
+  if (!supportedFramework(framework) || typeof passportId !== 'string' || passportId.match(/^(?:ap|apt|agt_inst|agt_tmpl)_[A-Za-z0-9_-]+$/)?.[0] !== passportId || typeof origin !== 'string') invalid();
   const url = new URL(origin);
   if (url.protocol !== 'https:' || url.origin !== origin || url.username || url.password || url.pathname !== '/' || url.search || url.hash) invalid();
   const identity = createHash('sha256').update(JSON.stringify(['installation-binding/v1', framework, passportId, origin])).digest('hex');
@@ -80,6 +83,11 @@ function bindHandoff({ stateDir, framework, passportId, origin, handoffFile, all
       if (existing && existing.installation_id !== binding.installation_id) invalid();
       if (existing && existing.reporter_token === binding.reporter_token) return 'reused';
       if (existing && allowRotation !== true) invalid();
+      if (existing) {
+        const previous = JSON.parse(Buffer.from(existing.reporter_token.split('.')[1], 'base64url').toString('utf8'));
+        const next = JSON.parse(Buffer.from(binding.reporter_token.split('.')[1], 'base64url').toString('utf8'));
+        if (previous.owner_id !== next.owner_id || previous.region !== next.region || previous.v !== next.v) invalid();
+      }
       const target = path.join(stateDir, basename);
       const tmp = path.join(stateDir, `.installation-${randomUUID()}.tmp`);
       let fd;
@@ -119,4 +127,8 @@ function bindingStatus({ stateDir, framework, passportId, origin }) {
     return 'unverified';
   } catch { return 'unresolved'; }
 }
-module.exports = { bindHandoff, bindingStatus };
+function loadBinding(options) {
+  if (bindingStatus(options) !== 'unverified') invalid();
+  return readRecord(path.join(options.stateDir, identityName(options.framework, options.passportId, options.origin)));
+}
+module.exports = { bindHandoff, bindingStatus, loadBinding, identityName, noSymlinkComponents, readProtected, supportedFramework };

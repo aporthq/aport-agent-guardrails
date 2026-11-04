@@ -9,6 +9,9 @@ import os
 import ssl
 import subprocess
 import threading
+import time
+import hashlib
+from uuid import UUID
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
@@ -495,6 +498,14 @@ def _call_api_sync(
         }
 
 
+class _ReportingDecision(dict):
+    """Keep evaluated scope out of authorization JSON and public dictionary keys."""
+
+    def __init__(self, decision, scope):
+        super().__init__(decision)
+        self._reporting_scope = scope
+
+
 class Evaluator:
     """API or local verification client. Auto-loads config from default paths if config_path not given."""
 
@@ -511,6 +522,8 @@ class Evaluator:
         self._runtime_enforcement_mode = enforcement_mode
         self._runtime_harness = harness
         self._config: dict[str, Any] | None = None
+        self._reporting_calls = {}
+        self._reporting_calls_lock = threading.Lock()
 
     def _load_config(self) -> dict[str, Any]:
         if self._config is not None:
@@ -544,12 +557,25 @@ class Evaluator:
                 }
         return _resolve_passport_path(config, config_path=self._resolved_config_path()), None
 
-    def _audit_log(self, config: dict[str, Any], tool_name: str, pack_id: str, decision: Decision, context: dict[str, Any]) -> None:
+    def _audit_log(self, config: dict[str, Any], tool_name: str, pack_id: str, decision: Decision, context: dict[str, Any],
+                   passport_id=None, api_url=None) -> Decision:
         """Best-effort audit log write. Never raises."""
+        try:
+            from .installation_reporting import report_decision
+            if config.get("mode") == "api" and passport_id and api_url:
+                enforcement = _runtime_metadata(config, self._framework, enforcement_mode=self._runtime_enforcement_mode)["enforcement_mode"]
+                # Capture only request metadata, never credentials or a second
+                # config/environment identity lookup at completion time.
+                reporting_config = {"mode": "api", "agent_id": passport_id, "api_url": api_url}
+                scope = (reporting_config, self._resolved_config_path(), enforcement)
+                decision = _ReportingDecision(decision, scope)
+                report_decision(reporting_config, scope[1], self._framework, decision, enforcement, passport_id)
+        except Exception:
+            pass
         try:
             audit_log_path = _resolve_audit_log_path(config, self._resolved_config_path(), self._framework)
             if not audit_log_path:
-                return
+                return decision
             reasons = decision.get("reasons", [])
             code = reasons[0].get("code") if reasons else None
             _log_decision(
@@ -561,6 +587,42 @@ class Evaluator:
                 agent_id=config.get("agent_id"),
                 context_summary=_extract_context_summary(context),
             )
+        except Exception:
+            pass
+        return decision
+
+    def track_tool_call(self, run_id, decision):
+        self._report_completion(run_id, decision)
+
+    def complete_tool_call(self, run_id):
+        self._report_completion(run_id)
+
+    def _report_completion(self, run_id, decision=None):
+        try:
+            from .installation_reporting import report_completion
+            if not isinstance(run_id, (str, UUID)) or not str(run_id) or len(str(run_id)) > 256:
+                return
+            key, now = hashlib.sha256(str(run_id).encode()).hexdigest(), time.monotonic()
+            with self._reporting_calls_lock:
+                self._reporting_calls = {k: v for k, v in self._reporting_calls.items() if now - v[0] < 60}
+                previous = self._reporting_calls.get(key)
+                if decision is not None:
+                    if previous:
+                        self._reporting_calls[key] = (previous[0], None)
+                        return
+                    if not isinstance(decision, _ReportingDecision):
+                        return
+                    scope = decision._reporting_scope
+                    if len(self._reporting_calls) >= 100:
+                        del self._reporting_calls[next(iter(self._reporting_calls))]
+                    self._reporting_calls[key] = (now, scope)
+                else:
+                    if not previous or previous[1] is None:
+                        return
+                    scope = previous[1]
+                    self._reporting_calls[key] = (previous[0], None)
+            config, config_path, enforcement = scope
+            report_completion(config, config_path, self._framework, run_id, enforcement, decision, config["agent_id"])
         except Exception:
             pass
 
@@ -627,8 +689,7 @@ class Evaluator:
                     verify_ssl=verify_ssl,
                     runtime=runtime,
                 )
-                self._audit_log(config, tool_name, pack_id, decision, ctx)
-                return decision
+                return self._audit_log(config, tool_name, pack_id, decision, ctx, agent_id, api_url)
             if passport_body:
                 decision = await asyncio.to_thread(
                     _call_api_sync,
@@ -641,8 +702,7 @@ class Evaluator:
                     verify_ssl=verify_ssl,
                     runtime=runtime,
                 )
-                self._audit_log(config, tool_name, pack_id, decision, ctx)
-                return decision
+                return self._audit_log(config, tool_name, pack_id, decision, ctx, passport_body.get("agent_id"), api_url)
         # Local mode or fallback
         guardrail_script = _get_guardrail_script_path(config, config_path=self.config_path)
         if not passport_path or not guardrail_script:
@@ -723,14 +783,12 @@ class Evaluator:
                 decision = _call_api_sync(
                     api_url, pack_id, ctx, agent_id=agent_id, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl, runtime=runtime
                 )
-                self._audit_log(config, tool_name, pack_id, decision, ctx)
-                return decision
+                return self._audit_log(config, tool_name, pack_id, decision, ctx, agent_id, api_url)
             if passport_body:
                 decision = _call_api_sync(
                     api_url, pack_id, ctx, passport=passport_body, policy_pack=policy_pack, api_key=api_key, verify_ssl=verify_ssl, runtime=runtime
                 )
-                self._audit_log(config, tool_name, pack_id, decision, ctx)
-                return decision
+                return self._audit_log(config, tool_name, pack_id, decision, ctx, passport_body.get("agent_id"), api_url)
         guardrail_script = _get_guardrail_script_path(config, config_path=self.config_path)
         if not passport_path or not guardrail_script:
             decision: Decision

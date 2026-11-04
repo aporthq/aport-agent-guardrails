@@ -122,6 +122,7 @@ def run_setup(
     else:
         print(f"[aport] Config exists: {config_path}")
 
+    setup_ready = True
     # Run passport wizard (unless CI or --no-wizard)
     if not ci and not no_wizard:
         if run_wizard(framework, agent_id=agent_id, extra_args=wizard_args):
@@ -130,8 +131,14 @@ def run_setup(
             if passport_path.exists():
                 passport_path.chmod(0o600)
         else:
+            setup_ready = False
             print(f"[aport] Passport wizard did not complete.", file=sys.stderr)
             print(f"  Run manually: aport setup --framework {framework}", file=sys.stderr)
+
+    # Report only after the existing local setup/wizard work has committed.
+    from .installation_reporting import setup_reporting
+    if setup_ready:
+        setup_reporting(load_config(config_path), config_path, framework)
 
     # Print next steps
     if next_steps_lines:

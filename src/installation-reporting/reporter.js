@@ -1,10 +1,10 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
+const { deliver } = require('./transport');
 const { validateHandoff, serializeReport, serializeTestResult } = require('./contract');
 
-// In-memory best-effort transport. No framework invokes this yet; callers must
-// retain their existing enforcement result regardless of reporting outcomes.
+// Compatibility in-memory API; adapters use the durable spool instead.
 class InstallationReporter {
   #installationId; #endpoint; #token; #fetch; #queue = []; #dropped = 0;
   #state = 'unverified'; #running = false; #maxQueue; #maxAttempts; #timeoutMs; #maxAgeMs;
@@ -63,43 +63,12 @@ class InstallationReporter {
       const item = this.#queue.shift();
       if (Date.now() - item.created >= this.#maxAgeMs) { this.#dropped++; this.#state = 'unresolved'; continue; }
       item.attempts++;
-      const controller = new AbortController();
-      let timer;
-      try {
-        const timeout = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('timeout')); }, this.#timeoutMs); });
-        const response = await Promise.race([(async () => {
-          const result = await this.#fetch(`${this.#endpoint}${item.path}`, {
-            method: 'POST', redirect: 'error', signal: controller.signal,
-            headers: { Authorization: `Bearer ${this.#token}`, 'Content-Type': 'application/json', 'Idempotency-Key': item.key },
-            body: item.body
-          });
-          if (!result || result.status < 200 || result.status >= 300) {
-            try { if (result?.body) await result.body.cancel(); } catch { /* Ignore response contents. */ }
-            return result;
-          }
-          const reader = result.body?.getReader();
-          if (!reader) throw new Error('invalid response');
-          const chunks = []; let bytes = 0;
-          try {
-            while (true) {
-              const part = await reader.read();
-              if (part.done) break;
-              bytes += part.value.byteLength;
-              if (bytes > 8192) { controller.abort(); throw new Error('response too large'); }
-              chunks.push(Buffer.from(part.value));
-            }
-          } finally { reader.releaseLock(); }
-          const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          if (item.expected.eventId) {
-            if (parsed?.event_id !== item.expected.eventId || parsed.accepted !== item.expected.count) throw new Error('invalid response');
-          } else if (parsed?.test_id !== item.expected.testId || !['passed', 'failed'].includes(parsed.result)) throw new Error('invalid response');
-          return result;
-        })(), timeout]);
-        if (response && response.status >= 200 && response.status < 300) { this.#state = 'connected'; continue; }
-        this.#state = 'unresolved';
-        if (!response || (response.status !== 408 && response.status !== 429 && response.status < 500)) { this.#dropped++; continue; }
-      } catch { this.#state = 'unresolved'; }
-      finally { clearTimeout(timer); }
+      const result = await deliver({ installation_id: this.#installationId, reporter_token: this.#token },
+        this.#endpoint.split('/api/agent-installations/')[0], JSON.parse(item.body), item.expected.testId,
+        item.key, { fetch: this.#fetch, timeoutMs: this.#timeoutMs });
+      if (result.accepted) { this.#state = this.#dropped ? 'unresolved' : 'connected'; continue; }
+      this.#state = 'unresolved';
+      if (!result.retry) { this.#dropped++; continue; }
       if (item.attempts >= this.#maxAttempts || Date.now() - item.created >= this.#maxAgeMs) { this.#dropped++; continue; }
       // Preserve FIFO retry order without blocking the producer or protected call.
       if (this.#queue.length === this.#maxQueue) { this.#dropped++; continue; }

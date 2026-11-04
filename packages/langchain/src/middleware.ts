@@ -95,6 +95,7 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
       { capability: packId },
       { tool: toolName, input, ...params }
     );
+    this.evaluator.trackToolCall?.(_runId, decision);
     if (!decision.allow) {
       const msg =
         decision.reasons?.[0]?.message ?? "APort policy denied tool execution";
@@ -110,6 +111,10 @@ export class APortGuardrailCallback extends BaseCallbackHandler {
       console.warn(`[APort] denied ${safeToolName}. Reason: ${safeCode}. ${safeMessage}`);
       throw new GuardrailViolationError(msg, decision.reasons);
     }
+  }
+
+  async handleToolEnd(_output: unknown, runId: string): Promise<void> {
+    this.evaluator.completeToolCall?.(runId);
   }
 }
 

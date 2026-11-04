@@ -107,6 +107,18 @@ if [[ -n "$noninteractive_requested" ]]; then
   export APORT_NONINTERACTIVE=1
 fi
 
+if [[ -z "$framework" && ${#REST[@]} -eq 3 && "${REST[0]}" == reporting ]]; then
+  operation="${REST[1]}"
+  framework="$(canonical_framework_name "${REST[2]}")"
+  framework_supported "$framework" || exit 1
+  case "$operation" in status|mode|removed) ;; *) exit 1 ;; esac
+  reporting_config_dir="$(get_framework_config_dir_override "$framework")"
+  export APORT_CONFIG_DIR="${reporting_config_dir:-${APORT_CONFIG_DIR:-$(get_config_dir "$framework")}}" APORT_HOOK_FRAMEWORK="$framework"
+  source "$LIB_DIR/guardrail-mode.sh"
+  load_guardrail_mode_for_hooks "$APORT_CONFIG_DIR" || exit 1
+  exec node "$ROOT_DIR/src/installation-reporting/cli.js" "$operation"
+fi
+
 if [[ -z "$framework" ]] && [[ ${#REST[@]} -gt 0 ]] && { [[ "${REST[0]}" == "mode" ]] || [[ "${REST[0]}" == "set-mode" ]]; }; then
   mode_script="$SCRIPT_DIR/aport-set-mode.sh"
   if [[ ! -x "$mode_script" ]]; then
