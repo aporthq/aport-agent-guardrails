@@ -142,3 +142,60 @@ the actual 1.0.37 npm/wheel artifact hashes, byte equality with the shared sourc
 permission checks, installed-wheel runtime smoke, enterprise bundle variants,
 and the named mutation failures. Release preparation ran in an isolated copy;
 the working branch keeps normal pre-release versions and does not publish.
+
+## Staging release blockers: CI bootstrap and unenrolled Python overhead
+
+Two problems blocked promotion of the staging reporting work. The brief is
+[the release-blocker PRD](../prds/staging-ci-reporting-release-blockers.md).
+
+**CI bootstrap order.** The `test` job in `.github/workflows/ci.yml` ran
+`make test` before `actions/setup-node` and `npm ci`, while the collected
+`tests/unit/test-installation-reporting-integration.sh` builds the TypeScript
+workspaces and drives the Python evaluator. A dependency-free checkout failed
+with `tsc: command not found` (exit 127). The job now provisions, in order:
+pinned submodules, Node 22 with `npm ci` and `npm audit signatures`, Python
+3.11 with the declared `[dev]` extras of `python/aport_guardrails` and
+`python/langchain_adapter` plus `build`, and only then `make test`. The same
+single job now runs for pushes and pull requests against both `main` and
+`staging`; `release.yml` is untouched and still publishes only from
+tag or dispatch runs that are reachable from `origin/main`. The wrapper itself
+now names a missing prerequisite (`REPORTING_WRAPPER_NODE_PREREQUISITE`,
+`REPORTING_WRAPPER_PYTHON_PREREQUISITE`) instead of failing inside `tsc`.
+`tests/unit/test-ci-bootstrap-order.sh` is collected by `make test`; it checks
+the step order and triggers, the release boundary, and runs the production
+wrapper in an isolated tracked-file copy without `node_modules` or a global
+`tsc`. Temporarily restoring the old order fails it with
+`CI_BOOTSTRAP_NODE_BEFORE_TESTS`; restoring the old wrapper fails it with
+`REPORTING_WRAPPER_NODE_PREREQUISITE`.
+
+**Unenrolled Python overhead.** `report_decision` and `report_completion` in
+`python/aport_guardrails/core/installation_reporting.py` launched the Node
+reporter for every hosted decision, remember and post call even when no binding
+existed, so each verify/track/complete lifecycle spawned three synchronous Node
+processes. `reporting_state_present` and `reporting_eligible` now own one cheap
+presence check shared by setup, decision, remember and post. It mirrors
+`aport_report_decision` in `bin/lib/installation-reporting.sh`: hosted mode,
+not disabled, and either `<config dir>/.aport-reporting` or a top-level
+`aport/installation-v1-<sha256>.json` binding. It uses `lstat` and a single
+non-recursive `scandir` bounded to 512 entries, never follows symlinks, never
+creates or repairs state, never reads a binding and never shells out. The
+evaluator wraps a decision for later correlation only when the reporter was
+actually invoked, so an unenrolled installation keeps no correlation entries.
+Eligibility is re-evaluated on every call, so later enrollment, disable and
+re-enable, reset and reinstall are seen immediately.
+
+Changed shared owners: `.github/workflows/ci.yml`,
+`tests/unit/test-installation-reporting-integration.sh`,
+`python/aport_guardrails/core/installation_reporting.py`, and the
+`_audit_log` branch of `python/aport_guardrails/core/evaluator.py`.
+
+Unchanged: `src/installation-reporting` (binding, schema, permission and
+identity validation, spool bounds, worker timeouts, transport), the shell and
+Node producers, OpenClaw setup, authorization decisions and audit output,
+enforcement modes, and the existing protected-state rejections. Reporting still
+cannot authorize a call; malformed, symlinked, wrong-identity or inaccessible
+state either skips the reporter or is rejected by the Node runtime as before.
+Regression coverage: `python/aport_guardrails/tests/test_installation_reporting.py`,
+`python/aport_guardrails/tests/test_evaluator_reporting.py` (real sync and
+async verify, track and complete with deterministic subprocess counts), and
+`TestCallbackReportingOverhead` in `python/langchain_adapter/tests/test_callback.py`.

@@ -568,8 +568,10 @@ class Evaluator:
                 # config/environment identity lookup at completion time.
                 reporting_config = {"mode": "api", "agent_id": passport_id, "api_url": api_url}
                 scope = (reporting_config, self._resolved_config_path(), enforcement)
-                decision = _ReportingDecision(decision, scope)
-                report_decision(reporting_config, scope[1], self._framework, decision, enforcement, passport_id)
+                # Only a decision the shared reporter actually received can be
+                # correlated later; unenrolled installations keep no entries.
+                if report_decision(reporting_config, scope[1], self._framework, decision, enforcement, passport_id):
+                    decision = _ReportingDecision(decision, scope)
         except Exception:
             pass
         try:
