@@ -42,7 +42,7 @@ def oap_provider():
     if not GUARDRAIL_SCRIPT.exists():
         pytest.skip("Guardrail script not found")
 
-    test_dir = Path(tempfile.mkdtemp(prefix="aport-", dir="/tmp")) / "test-e2e"
+    test_dir = Path(tempfile.mkdtemp(prefix="aport-")) / "test-e2e"
     test_dir.mkdir(parents=True, exist_ok=True)
     passport_dest = test_dir / "aport" / "passport.json"
     passport_dest.parent.mkdir(parents=True, exist_ok=True)
@@ -109,7 +109,7 @@ class TestLocalModeDeny:
         if not FIXTURE_PASSPORT.exists():
             pytest.skip("Fixture passport not found")
 
-        test_dir = Path(tempfile.mkdtemp(prefix="aport-", dir="/tmp")) / "test-suspended"
+        test_dir = Path(tempfile.mkdtemp(prefix="aport-")) / "test-suspended"
         test_dir.mkdir(parents=True, exist_ok=True)
         passport_data = json.loads(FIXTURE_PASSPORT.read_text())
         passport_data["status"] = "suspended"
