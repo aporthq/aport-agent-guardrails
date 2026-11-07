@@ -10,7 +10,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned to release commits. Bump each SHA and its comment together.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
 
@@ -28,7 +29,7 @@ jobs:
       # `make test` builds the TypeScript workspaces and drives the Python
       # evaluator, so Node and Python prerequisites must already be installed.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: "npm"
