@@ -40,7 +40,8 @@ jobs:
         run: npm audit signatures
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        # Pinned to the v5.6.0 release commit. Bump the SHA and the comment together.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
 
