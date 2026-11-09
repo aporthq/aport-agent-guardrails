@@ -117,6 +117,12 @@ but those files are not successful release evidence.
 including a temporary runtime with installation-scope checks removed. The
 rotation fixture requires the foreign enqueue to reject and send zero requests;
 the rotated token for the same installation must actually deliver successfully.
+The shell no-binding fixture enables API reporting, supplies a synthetic
+decision, and checks an instrumented positive control so an early return cannot
+masquerade as binding enforcement. Queue-pressure evidence waits for an actual
+503 before recovery, then checks delivery and retry identity. A delivery timeout
+fails validation instead of allowing a previous scenario's receipt to count.
+Enterprise delegation in this matrix is static inspection, not a device run.
 
 The record keeps only
 bounded allowlisted metadata: identifiers, digests, counts, booleans, and
