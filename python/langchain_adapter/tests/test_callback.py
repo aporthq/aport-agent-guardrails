@@ -179,3 +179,41 @@ class TestAPortCallback:
         assert "run_command : :error: :fake" in captured.out
         assert "\n::error::fake" not in captured.out
         assert "Review:" in captured.out
+
+
+class TestCallbackReportingOverhead:
+    """Real callback lifecycle in hosted mode without enrollment launches no reporter."""
+
+    @pytest.mark.asyncio
+    async def test_unenrolled_hosted_callbacks_launch_no_subprocess(self, tmp_path, monkeypatch):
+        import subprocess
+        from unittest.mock import patch
+        from aport_guardrails.core import installation_reporting as reporting
+
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("APORT_REPORTING_DISABLED", raising=False)
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(
+            "mode: api\nagent_id: ap_fixture\napi_url: https://127.0.0.1:1\nenforcement_mode: warn\n"
+            f"audit_log: {config_dir / 'audit.log'}\n"
+        )
+        spawns = []
+
+        def fake_run(argv, **kwargs):
+            spawns.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0)
+
+        monkeypatch.setattr(reporting.subprocess, "run", fake_run)
+        callback = APortCallback(config_path=str(config_path))
+        denied = {"allow": False, "decision_id": "callback_decision", "reasons": [{"code": "oap.denied", "message": "no"}]}
+        with patch("aport_guardrails.core.evaluator._call_api_sync", return_value=dict(denied)):
+            await callback.on_tool_start({"name": "exec"}, "PRIVATE_INPUT", run_id="run_1")
+            await callback.on_tool_end("PRIVATE_RESULT", run_id="run_1")
+
+        assert spawns == []
+        assert callback.evaluator._reporting_calls == {}
+        assert sorted(p.name for p in config_dir.iterdir()) == ["audit.log", "config.yaml"]
+        entry = (config_dir / "audit.log").read_text().splitlines()[0]
+        assert "tool=exec allow=false policy=system.command.execute.v1 code=oap.denied agent_id=ap_fixture" in entry
