@@ -122,7 +122,11 @@ function fixtureServer(url, init) {
   return new Response(JSON.stringify({ test_id: testId, result: "passed" }), { status: 200 });
 }
 
-const fixtureFetch = async (url, init) => fixtureServer(url, init);
+const fixtureFetch = async (url, init) => {
+  const response = fixtureServer(url, init);
+  received[received.length - 1].response_status = response.status;
+  return response;
+};
 
 // --- Outcome recording --------------------------------------------------------------------------------------
 const outcomes = [];
@@ -157,16 +161,21 @@ function newReporter(extra = {}) {
   return new InstallationReporter(syntheticHandoff(origin), origin, { fetch: fixtureFetch, ...extra });
 }
 
-// Delivery is scheduled on the event loop and never blocks the producer, so there is no flush() to await.
-// Settle by polling the reporter's own status until its queue drains or it reports an unresolved outcome.
-async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
+async function waitUntil(predicate, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
-  const before = received.length;
   while (Date.now() < deadline) {
-    const status = reporter.status();
-    const sawExpected = received.length - before >= expectRequests;
-    if (status.queued === 0 && sawExpected) return status;
+    if (predicate()) return true;
     await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return false;
+}
+
+// Delivery is scheduled on the event loop and never blocks the producer, so there is no flush() to await.
+async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
+  const before = received.length;
+  const settled = await waitUntil(() => reporter.status().queued === 0 && received.length - before >= expectRequests, timeoutMs);
+  if (!settled) {
+    violations.push(`delivery_settle: queue did not drain with ${expectRequests} expected new request(s)`);
   }
   return reporter.status();
 }
@@ -264,6 +273,7 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
 // 5. reporting unavailability — an injected retryable 503. The outcome must stay unresolved, never ALLOW/DENY.
 {
   serverMode = "unavailable";
+  const before = received.length;
   const reporter = newReporter({ maxAttempts: 1 });
   reporter.enqueueReport(report([{ kind: "decision", decision_id: "dec_unavailable", host_disposition: "allowed" }]));
   await settle(reporter, { expectRequests: 1 });
@@ -275,10 +285,13 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     fixture_id: "local-v1-unavailable",
     reported_state: status.state,
     queued_after_failure: status.queued,
+    response_statuses: received.slice(before).map((entry) => entry.response_status),
     forged_allow_or_deny: false,
     note: "the pinned v1 contract has no unsigned adapter_failure/unavailable receipt; the outcome stays unresolved",
   }, {
     reported_state: "unresolved",
+    queued_after_failure: 0,
+    response_statuses: [503],
     forged_allow_or_deny: false,
   });
 }
@@ -286,6 +299,7 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
 // 6. verification unavailability — a server that predates this contract rejects the schema outright.
 {
   serverMode = "old_server";
+  const before = received.length;
   const reporter = newReporter({ maxAttempts: 1 });
   reporter.enqueueReport(report([{ kind: "heartbeat" }]));
   await settle(reporter, { expectRequests: 1 });
@@ -296,11 +310,14 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     injected_fault: "server rejects the pinned schema version with 400",
     fixture_id: "local-v1-old-server",
     reported_state: status.state,
-    retried: status.queued === 0,
+    retried: received.length - before > 1,
+    response_statuses: received.slice(before).map((entry) => entry.response_status),
     forged_allow_or_deny: false,
     note: "a non-retryable rejection is not reported as a policy outcome",
   }, {
     reported_state: "unresolved",
+    retried: false,
+    response_statuses: [400],
     forged_allow_or_deny: false,
   });
 }
@@ -399,29 +416,49 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
 // 10. queue pressure — a bounded queue discards oldest metadata and keeps the dropped count visible.
 {
   serverMode = "unavailable";
-  const reporter = newReporter({ maxQueue: 2, maxAttempts: 1 });
+  const before = received.length;
+  const reporter = newReporter({ maxQueue: 2, maxAttempts: 2 });
   for (let i = 0; i < 5; i += 1) {
     reporter.enqueueReport(report([{ kind: "heartbeat" }]));
   }
   const underPressure = reporter.status();
+  // Wait for a real failed attempt and its queued retry, not merely selection
+  // of the fault mode before the reporter's asynchronous delivery starts.
+  const observedFailure = await waitUntil(() =>
+    received.slice(before).some((entry) => entry.response_status === 503) && reporter.status().queued === 2,
+  );
+  const failedAttempts = received.slice(before);
+  const recoveryStart = received.length;
   serverMode = "accept";
-  await settle(reporter, { expectRequests: 1 });
+  await settle(reporter, { expectRequests: observedFailure ? 2 : 0 });
+  const recovered = received.slice(recoveryStart);
   const afterDelivery = reporter.status();
   recordOutcome({
     outcome: "queue_pressure",
     evidence: "injected_fault",
-    injected_fault: "server responds 503 while five receipts are enqueued into a queue bounded to two",
-    fixture_id: "local-v1-unavailable",
+    injected_fault: "one queued receipt receives 503 before service recovers and the two retained receipts are accepted",
+    fixture_id: "local-v1-unavailable-then-accept",
     max_queue: 2,
     enqueued: 5,
     queued_under_pressure: underPressure.queued,
     dropped: underPressure.dropped,
-    dropped_still_visible_after_delivery: afterDelivery.dropped >= underPressure.dropped,
+    unavailable_responses: failedAttempts.filter((entry) => entry.response_status === 503).length,
+    accepted_after_recovery: recovered.filter((entry) => entry.response_status === 200).length,
+    retry_preserved_identity: Boolean(failedAttempts[0]?.idempotency_key) &&
+      recovered[0]?.idempotency_key === failedAttempts[0].idempotency_key &&
+      recovered[0]?.body?.event_id === failedAttempts[0]?.body?.event_id,
+    queued_after_delivery: afterDelivery.queued,
+    dropped_still_visible_after_delivery: afterDelivery.dropped === underPressure.dropped,
     bounded: underPressure.queued <= 2,
   }, {
     bounded: true,
+    queued_under_pressure: 2,
+    unavailable_responses: 1,
+    accepted_after_recovery: 2,
+    retry_preserved_identity: true,
+    queued_after_delivery: 0,
     dropped_still_visible_after_delivery: true,
-    dropped: (value) => typeof value === "number" && value > 0,
+    dropped: 3,
   });
 }
 
@@ -459,22 +496,23 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
   });
 }
 
-// 12. Representative producer coverage. Each shipped producer is executed for real with no binding present.
-// An unenrolled installation must stay silent: no reporting state is created and no outcome is invented.
-// This is the one path every language shares, so it is the honest cross-language check to make without a
-// live handoff. Shell/Python/OpenClaw/enterprise behaviour under a real handoff is fixture-verified by the
-// collected integration suite, not re-attested here.
+// 12. Representative no-binding checks. Exercise the shell producer, Python presence helper and Node
+// status CLI. Enterprise delegation is inspected statically, not presented as an executed device test.
+// Bound producer behavior belongs to the collected integration suite, not this no-binding fixture.
 {
   const { execFileSync: run } = await import("node:child_process");
-  const { mkdtempSync: mkdtemp, rmSync: rm, existsSync: exists, readdirSync: readdir } = await import("node:fs");
+  const { mkdtempSync: mkdtemp, mkdirSync: mkdir, rmSync: rm, existsSync: exists, readdirSync: readdir } = await import("node:fs");
   const { tmpdir: tmp } = await import("node:os");
 
   const producers = [];
   const sandboxEnvBase = {
     PATH: process.env.PATH,
-    HOME: process.env.HOME,
     TMPDIR: process.env.TMPDIR,
-    APORT_GUARDRAIL_MODE: "local",
+    APORT_GUARDRAIL_MODE: "api",
+    APORT_REPORTING_DISABLED: "0",
+    APORT_API_URL: origin,
+    APORT_AGENT_ID: "ap_fixture_release",
+    APORT_ENFORCEMENT_MODE: "enforce",
   };
 
   function withConfigDir(fn) {
@@ -491,16 +529,40 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     withConfigDir((dir) => {
       let ok = true;
       let detail = "no reporting state created";
+      let withoutBinding = [], withMarker = [];
+      const decisionFile = join(dir, "decision.json");
+      const callsFile = join(dir, "calls.jsonl");
+      writeFileSync(decisionFile, JSON.stringify({ decision_id: "dec_release_fixture", allow: true }), { mode: 0o600 });
+      const calls = () => exists(callsFile)
+        ? readFileSync(callsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+        : [];
       try {
-        run(
-          "bash",
-          [
-            "-c",
-            `set -e; source "${join(root, "bin/lib/installation-reporting.sh")}"; ` +
-              `aport_report_decision "openclaw" "allow" "enforce" || true`,
-          ],
-          { env: { ...sandboxEnvBase, APORT_OPENCLAW_CONFIG_DIR: dir }, stdio: "pipe", timeout: 30000 },
-        );
+        const invoke = () => run("bash", ["-c", `
+          set -e
+          command -v node >/dev/null
+          command -v jq >/dev/null
+          source "$1/bin/lib/hook-runtime.sh"
+          source "$1/bin/lib/installation-reporting.sh"
+          calls_file="$3"
+          node() {
+            local input
+            input="$(cat)"
+            printf '%s\\n' "$input" | command jq -c --arg framework "$APORT_HOOK_FRAMEWORK" \
+              --arg mode "$APORT_ENFORCEMENT_MODE" --arg operation "$2" \
+              '{framework:$framework, mode:$mode, operation:$operation, decision_id, allow}' >> "$calls_file"
+            printf '%s\\n' "$input" | command node "$@"
+          }
+          aport_report_decision "$2" openclaw
+        `, "release-fixture", root, decisionFile, callsFile], {
+          env: { ...sandboxEnvBase, HOME: dir, APORT_CONFIG_DIR: dir }, stdio: "pipe", timeout: 30000,
+        });
+        invoke();
+        withoutBinding = calls();
+        // A marker is not a credential or binding. This control must cross the
+        // shell gate; the real Node runtime still has no authority to report.
+        mkdir(join(dir, ".aport-reporting"), { recursive: true });
+        invoke();
+        withMarker = calls().slice(withoutBinding.length);
       } catch (error) {
         ok = false;
         detail = `producer exited non-zero: ${error.status}`;
@@ -510,7 +572,17 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
         ok = false;
         detail = "created reporting state without a handoff";
       }
-      return { producer: "shell (bin/lib/installation-reporting.sh)", silent_without_binding: ok, detail };
+      const metadataValid = withMarker.length === 1 && withMarker[0].framework === "openclaw" &&
+        withMarker[0].mode === "enforce" && withMarker[0].operation === "pre" &&
+        withMarker[0].decision_id === "dec_release_fixture" && withMarker[0].allow === true;
+      return {
+        producer: "shell (bin/lib/installation-reporting.sh)",
+        silent_without_binding: ok && withoutBinding.length === 0 && metadataValid,
+        reporting_invocations_without_binding: withoutBinding.length,
+        reporting_invocations_with_marker: withMarker.length,
+        positive_control_metadata_valid: metadataValid,
+        detail,
+      };
     }),
   );
 
@@ -530,7 +602,7 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
             join(root, "python"),
             dir,
           ],
-          { env: sandboxEnvBase, encoding: "utf8", stdio: "pipe", timeout: 30000 },
+          { env: { ...sandboxEnvBase, HOME: dir }, encoding: "utf8", stdio: "pipe", timeout: 30000 },
         );
         if (stdout.trim() !== "absent") {
           ok = false;
@@ -551,13 +623,13 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
       let detail = "status reports 'not configured'";
       try {
         const stdout = run("node", [join(runtimeDir, "cli.js"), "status", "--framework", "openclaw"], {
-          env: { ...sandboxEnvBase, APORT_CONFIG_DIR: dir },
+          env: { ...sandboxEnvBase, HOME: dir, APORT_CONFIG_DIR: dir },
           encoding: "utf8",
           stdio: "pipe",
           timeout: 30000,
         });
         const states = JSON.parse(stdout).map((entry) => entry.state);
-        if (!states.every((state) => state === "not configured")) {
+        if (states.length !== 1 || states[0] !== "not configured") {
           ok = false;
           detail = `unexpected states: ${states.join(", ")}`;
         }
@@ -576,7 +648,7 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     const hasOwnClient = /api\/agent-installations/.test(bundled);
     producers.push({
       producer: "enterprise (enterprise-scripts/aport-device-core.mjs)",
-      silent_without_binding: delegates && !hasOwnClient,
+      static_delegation_verified: delegates && !hasOwnClient,
       detail: hasOwnClient
         ? "enterprise core constructs reporter endpoints itself instead of delegating"
         : "delegates reporting to the shared CLI and defines no reporter endpoints of its own",
@@ -588,10 +660,12 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     evidence: "local_only",
     fixture_id: null,
     producers,
-    all_silent_without_binding: producers.every((p) => p.silent_without_binding),
-    note: "representative shell/Python/Node-OpenClaw/enterprise producers, executed with no handoff present",
+    all_silent_without_binding: producers.slice(0, 3).every((p) => p.silent_without_binding),
+    enterprise_static_delegation_verified: producers[3].static_delegation_verified,
+    note: "shell producer, Python presence helper and Node status CLI checked without a binding; enterprise delegation inspected statically",
   }, {
     all_silent_without_binding: true,
+    enterprise_static_delegation_verified: true,
     producers: (value) => Array.isArray(value) && value.length === 4,
   });
 }
