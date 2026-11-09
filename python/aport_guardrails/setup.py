@@ -38,6 +38,17 @@ def _load_manifest(manifest_path: Path) -> list[tuple[str, str]]:
     return entries
 
 
+# VCS metadata and build caches must never reach a published distribution. `.git` is a directory in a
+# recursive clone and a gitlink file in a worktree checkout, so both shapes are excluded by name.
+_EXCLUDED_BUNDLE_NAMES = frozenset(
+    {".git", ".gitmodules", ".github", "__pycache__", ".pytest_cache", ".DS_Store"}
+)
+
+
+def _ignore_vcs_metadata(_directory: str, names: list[str]) -> set[str]:
+    return {name for name in names if name in _EXCLUDED_BUNDLE_NAMES}
+
+
 def _copy_runtime_bundle(dest_package_root: Path) -> None:
     source_root, manifest_path = _runtime_source()
     bundle_root = dest_package_root / _BUNDLE_DIRNAME
@@ -57,7 +68,10 @@ def _copy_runtime_bundle(dest_package_root: Path) -> None:
         elif kind == "tree":
             if dest.exists():
                 shutil.rmtree(dest)
-            shutil.copytree(src, dest)
+            # Manifest trees are submodule checkouts. Leave their VCS metadata and local caches behind:
+            # in a recursive CI checkout `.git` is a real directory, so copying it verbatim would publish
+            # the submodule's git object database and `.git/config` remote URLs inside the distribution.
+            shutil.copytree(src, dest, ignore=_ignore_vcs_metadata)
         elif kind == "mkdir":
             dest.mkdir(parents=True, exist_ok=True)
         else:

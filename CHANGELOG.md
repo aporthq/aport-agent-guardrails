@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.37] - 2026-11-09
+
+### Added
+- **Optional installation reporting:** Opt in by pointing `APORT_INSTALLATION_HANDOFF_FILE` at an owner-created Agent Passport handoff file. Nothing is reported without it. `APORT_REPORTING_DISABLED=1` stops producers and setup reporting, and `APORT_INSTALLATION_ROTATE=1` permits a rotated token for the same installation. Local authorization never requires reporting, a handoff, or connectivity. Shell, Node, Python, and OpenClaw producers share one runtime in `src/installation-reporting`; there is no per-framework reporter or HTTP client. See [docs/installation-reporting.md](docs/installation-reporting.md).
+- **Release-verification record** at `docs/reviews/installation-reporting-release-1.0.37.json`: artifact hashes, source revision, pinned contract digests, fixture identifiers, and the deterministic outcome matrix for the packaged candidate. Live deployment compatibility is recorded as not run, not as a pass.
+
+### Changed
+- **CI bootstrap order:** the `test` job now provisions pinned submodules, Node 22 with `npm ci`, and Python 3.11 with the declared `[dev]` extras before `make test`, so a dependency-free checkout no longer fails inside `tsc` with exit 127. The same job runs for pushes and pull requests against both `main` and `staging`; `release.yml` still publishes only from tag or dispatch runs reachable from `origin/main`.
+- **Unenrolled Python overhead:** `report_decision` and `report_completion` previously launched the Node reporter on every hosted decision, remember, and post call even with no binding, spawning three synchronous Node processes per verify/track/complete lifecycle. One shared presence check (`reporting_state_present` / `reporting_eligible`) now gates optional reporting; it uses `lstat` and a single non-recursive bounded `scandir`, never follows symlinks, and never creates, repairs, or reads binding state. Eligibility is re-evaluated per call, so enrollment, disable, re-enable, reset, and reinstall take effect immediately.
+
+### Fixed
+- **Failure isolation:** reporting cannot authorize or block a tool call. Malformed, symlinked, wrong-identity, or inaccessible reporting state either skips the reporter or is rejected by the Node runtime; authorization decisions, audit output, and enforcement modes are unchanged.
+- **Protected reporting state:** reporting state lives under `<active config dir>/.aport-reporting/`, separate from authorization state in `aport/`. Directories must be owned by the effective POSIX user with mode 0700; files must be regular, single-link, owned by that user, with no group or other access. Symlinked path components, FIFOs, oversized files, unsafe permissions, and corrupt JSON are refused, with no permissive fallback.
+- **Queue pressure:** the bounded spool enforces 100 receipts, 1 MiB serialized queue, 32 KiB per receipt, a 60-second age bound, three attempts, a 3-second request timeout, and an 8 KiB response body. Oldest metadata is discarded under pressure and the dropped count stays visible after later successful delivery. Status reports `null` counts when corrupt or locked state prevents trustworthy counting.
+
+### Known limitations
+- **No reliable host completion signal:** a pre-action hook result is not evidence that the host executed or enforced the call. Hosts without a trustworthy post-action signal, including the OpenClaw HTTP tool-invocation path, stay `not_reported`. Evaluator return values and shell exit codes are not host execution evidence, and unexpected completion after an enforce DENY stays `not_reported`.
+- **Unsigned failure receipts are unsupported:** the pinned v1 report references a server decision ID and has no unsigned `adapter_failure` or `unavailable` variant. This release does not invent one and never labels an unavailable response ALLOW or DENY; such calls can report only a heartbeat, with the detailed outcome left in the local authorization audit. Remedy: an Agent Passport owner must release an additive reporting contract for these outcome receipts, followed by client integration and compatibility tests.
+- **Windows reporting is unresolved:** this candidate has no verified equivalent ACL ownership checker, so Windows reporting fails closed as unresolved. Authorization itself still works on Windows.
+- **Live deployment compatibility is unverified:** validation for 1.0.37 used isolated local contract fixtures and synthetic credentials. No owner-created handoff or Agent Passport deployment identifier was supplied, so install, ALLOW, DENY, unavailable, mode-change, rotation, uninstall, dropped-queue, and no-handoff outcomes remain unverified against a live backend.
+
 ## [1.0.36] - 2026-10-02
 
 ### Changed

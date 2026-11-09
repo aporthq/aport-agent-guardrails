@@ -1,5 +1,17 @@
 # Changelog - APort OpenClaw Plugin
 
+## 1.0.37
+
+### Patch Changes
+
+- Complete optional installation reporting with a protected bounded disk spool,
+  detached delivery, shared shell/Node/Python/OpenClaw integration, declared coverage,
+  and receipts after committed mode, rotation and removal changes. Preserve
+  `not_reported` unless a correlated host completion callback supplies evidence.
+
+  The lockstep patch candidate is 1.0.37 (from 1.0.36). Sandbox qualification remains
+  required; publishing follows the normal post-merge release process.
+
 ## 1.0.36
 
 ## 1.0.35

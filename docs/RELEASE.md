@@ -1,6 +1,6 @@
 # Release process and version policy
 
-**Current release:** 1.0.36 (see [CHANGELOG.md](../CHANGELOG.md)).
+**Current release:** 1.0.37 (see [CHANGELOG.md](../CHANGELOG.md)).
 
 We keep **one version number** across all published packages (Node core, Python core, and every framework adapter). That avoids “core is 1.2 but CLI is 0.9” and keeps the story simple for users and support.
 
@@ -89,7 +89,45 @@ When you run `npm run version`, that changeset will drive a single version bump 
 
 ---
 
-## 5. Long-term flexibility
+## 5. Release verification records
+
+Each prepared candidate gets a sanitized JSON record under `docs/reviews/`,
+generated from the actual built artifacts rather than written by hand:
+
+```bash
+npm run build
+# pack the npm archives and build the three Python distributions first
+node scripts/validate-release-artifacts.mjs --npm-dir <dir> --out <artifacts.json>
+node scripts/validate-release-fixture-matrix.mjs --out <fixtures.json>
+node scripts/build-release-verification-record.mjs \
+  --artifacts <artifacts.json> --fixtures <fixtures.json> \
+  --out docs/reviews/installation-reporting-release-<version>.json
+```
+
+`scripts/check-release-verification-record.mjs` is the schema and sanitization
+gate, and `tests/unit/test-release-verification-record.sh` runs it against the
+committed record plus deliberately poisoned copies. The record keeps only
+bounded allowlisted metadata: identifiers, digests, counts, booleans, and
+authored constants. Credentials, private paths, prompts, commands, and raw tool
+inputs and outputs are rejected, as is fixture evidence labelled as a live run.
+
+The current record is
+[installation-reporting-release-1.0.37.json](reviews/installation-reporting-release-1.0.37.json).
+
+**1.0.37 scope.** Validation used isolated local contract fixtures and synthetic
+credentials. Live deployment compatibility is recorded as `not_run` with no
+deployment identifier, because the operator waived live sandbox qualification
+for that preparation task. Fixture success is not evidence of compatibility with
+a deployed Agent Passport backend. Unsigned `adapter_failure`/`unavailable`
+receipts stay deferred, Windows reporting stays unresolved, and hosts without a
+trustworthy post-action signal stay `not_reported`. See
+[docs/installation-reporting.md](installation-reporting.md) for the full list.
+Earlier qualification records keep their original unmet claims; the per-release
+record states the scope of its own run rather than retiring theirs.
+
+---
+
+## 6. Long-term flexibility
 
 If we later need finer control (e.g. enterprise adapters that shouldn’t force a full suite release), we can:
 
