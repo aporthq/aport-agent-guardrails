@@ -10,7 +10,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RECORD="$REPO_ROOT/docs/reviews/installation-reporting-release-1.0.37.json"
 VALIDATOR="$REPO_ROOT/scripts/check-release-verification-record.mjs"
 TEST_DIR="${APORT_TEST_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/aport-release-record.XXXXXX")}"
 mkdir -p "$TEST_DIR"
@@ -25,8 +24,10 @@ echo "  Unit - release verification record schema and sanitization"
 echo ""
 
 command -v node > /dev/null || fail "node is required"
+REPO_VERSION="$(node -p "require('$REPO_ROOT/packages/core/package.json').version")"
+RECORD="$REPO_ROOT/docs/reviews/installation-reporting-release-$REPO_VERSION.json"
 [ -f "$VALIDATOR" ] || fail "missing scripts/check-release-verification-record.mjs"
-[ -f "$RECORD" ] || fail "missing docs/reviews/installation-reporting-release-1.0.37.json"
+[ -f "$RECORD" ] || fail "missing docs/reviews/installation-reporting-release-$REPO_VERSION.json"
 
 # 1. The committed record passes.
 node "$VALIDATOR" "$RECORD" > "$TEST_DIR/clean.out" 2> "$TEST_DIR/clean.err" \
@@ -39,7 +40,6 @@ echo "  OK RECORD_IS_CLEAN: the committed record validates"
 
 # 2. The record must name this release and match the repository version.
 RECORD_VERSION="$(node -p "require('$RECORD').candidate_version")"
-REPO_VERSION="$(node -p "require('$REPO_ROOT/packages/core/package.json').version")"
 [ "$RECORD_VERSION" = "$REPO_VERSION" ] \
     || fail "RECORD_MATCHES_RELEASE: record is $RECORD_VERSION but the repository is $REPO_VERSION"
 echo "  OK RECORD_MATCHES_RELEASE: the record describes $REPO_VERSION"

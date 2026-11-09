@@ -45,6 +45,13 @@ if (artifacts.canonical_version !== version || fixtures.candidate_version !== ve
   process.exit(1);
 }
 
+// Inspection writes diagnostics even on failure. Require an explicit clean
+// result before converting those diagnostics into claims of absent content.
+if (!Array.isArray(artifacts.problems) || artifacts.problems.length !== 0) {
+  console.error("build-release-verification-record: artifact inspection must report an explicit empty problems list; refusing to build a release record");
+  process.exit(1);
+}
+
 // A fixture run that violated a scenario invariant is a failed validation, not publishable evidence.
 if (fixtures.scenario_invariants?.asserted !== true) {
   console.error(
@@ -53,7 +60,11 @@ if (fixtures.scenario_invariants?.asserted !== true) {
   );
   process.exit(1);
 }
-const fixtureViolations = fixtures.scenario_invariants.violations ?? [];
+const fixtureViolations = fixtures.scenario_invariants.violations;
+if (!Array.isArray(fixtureViolations)) {
+  console.error("build-release-verification-record: fixture scenario invariant violations must be an explicit list");
+  process.exit(1);
+}
 if (fixtureViolations.length > 0) {
   console.error(
     `build-release-verification-record: fixture matrix reported ${fixtureViolations.length} ` +
