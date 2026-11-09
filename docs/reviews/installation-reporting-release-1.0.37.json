@@ -2,7 +2,7 @@
   "record_schema": "aport-release-verification/v1",
   "candidate_version": "1.0.37",
   "prepared_from": {
-    "source_revision": "54842b8dc85c2b6ec365a4d262a9c601ee0ec37d",
+    "source_revision": "f6325a93b6b5014c2a7f3f2c6e8b0bd284c89302",
     "base_branch": "staging",
     "submodules": {
       "external/aport-policies": "0f9d5ab809ad23837548fed70c764e237784671c",
@@ -58,7 +58,7 @@
         "package": "@aporthq/aport-agent-guardrails",
         "version": "1.0.37",
         "filename": "aporthq-aport-agent-guardrails-1.0.37.tgz",
-        "sha256": "cc9e42721dd2d5547051be9ca98b6d6db2cb618ba8f9d9aae9ffb412f6a54bca",
+        "sha256": "f1918391da85dbc40bfec6de72c4245dd85f836d1dd7c5b4a5208744f6af734e",
         "total_entries": 313,
         "reporter_file_count": 20,
         "reporter_bytes_match_source": true
@@ -76,8 +76,8 @@
         "package": "@aporthq/aport-agent-guardrails-core",
         "version": "1.0.37",
         "filename": "aporthq-aport-agent-guardrails-core-1.0.37.tgz",
-        "sha256": "a97e70d3b24346a33de17c89a3bc726c60eb389765c6988259aa0c0eb7cb7a8f",
-        "total_entries": 119,
+        "sha256": "e1c39af685c6bf5e9015ef02173fe925f227b71cbd499354687f6a516dc3b521",
+        "total_entries": 114,
         "reporter_file_count": 10,
         "reporter_bytes_match_source": true
       },
@@ -103,8 +103,17 @@
         "package": "@aporthq/aport-agent-guardrails-langchain",
         "version": "1.0.37",
         "filename": "aporthq-aport-agent-guardrails-langchain-1.0.37.tgz",
-        "sha256": "b0923a5d137b7a3526698965aba7a519da7428993604dfab58a83cb5a3caa97a",
-        "total_entries": 14,
+        "sha256": "d6e39070b4e813be64291b3543765a322f32a856df0582c023d0db5bdb513a18",
+        "total_entries": 13,
+        "reporter_file_count": 0,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "@aporthq/aport-agent-guardrails-n8n",
+        "version": "1.0.37",
+        "filename": "aporthq-aport-agent-guardrails-n8n-1.0.37.tgz",
+        "sha256": "a78b96ec163425d818f4cf28c4131fe07639de04df4086899c8c78e798509152",
+        "total_entries": 7,
         "reporter_file_count": 0,
         "reporter_bytes_match_source": true
       },
@@ -123,7 +132,7 @@
         "package": "aport-agent-guardrails",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails-1.0.37-py3-none-any.whl",
-        "sha256": "6d454cac859f14385e4968b55cde710c31860b0c384ec66e4023f778e728161d",
+        "sha256": "c84f933e38d5f23f7dd445305cf936b8e69ad7e832658ebcdb2f699f9b1f602c",
         "total_entries": 164,
         "reporter_file_count": 10,
         "reporter_bytes_match_source": true
@@ -132,7 +141,7 @@
         "package": "aport-agent-guardrails-langchain",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails_langchain-1.0.37-py3-none-any.whl",
-        "sha256": "fbe35ce8f18f7e3a6e29f55c874ddc9a439bb0444d071a9f0d79ecf76a0fdae2",
+        "sha256": "f2987f29c6b624b69ad6a674c943d3a9d3bf1819f92f38d3fcf94c7186508094",
         "total_entries": 8,
         "reporter_file_count": 0,
         "reporter_bytes_match_source": true
@@ -141,7 +150,7 @@
         "package": "aport-agent-guardrails-crewai",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails_crewai-1.0.37-py3-none-any.whl",
-        "sha256": "e02d3bc176e060aebf7b0c6f2780a557f0bd3cf49986000b824875076609e7c4",
+        "sha256": "62142c0bac0f01cbe2e7d9a3e62ba81f458673e25cd63bed8e36ce4fc8a5176f",
         "total_entries": 9,
         "reporter_file_count": 0,
         "reporter_bytes_match_source": true
@@ -367,7 +376,9 @@
         "evidence": "fixture_response",
         "fixture_id": "local-v1-accept",
         "rotated_token_same_installation_accepted": true,
-        "different_installation_refused": true
+        "different_installation_refused": true,
+        "different_installation_enqueue_rejected": true,
+        "different_installation_requests_sent": 0
       },
       {
         "outcome": "uninstall",
@@ -448,7 +459,7 @@
         "note": "representative shell/Python/Node-OpenClaw/enterprise producers, executed with no handoff present"
       }
     ],
-    "total_fixture_requests": 11,
+    "total_fixture_requests": 12,
     "scenario_invariants": {
       "asserted": true,
       "violations": []
