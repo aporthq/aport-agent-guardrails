@@ -2,7 +2,7 @@
   "record_schema": "aport-release-verification/v1",
   "candidate_version": "1.0.37",
   "prepared_from": {
-    "source_revision": "f6325a93b6b5014c2a7f3f2c6e8b0bd284c89302",
+    "source_revision": "e7b6939fbec8b952c7172fb2a8cbae7c799ba191",
     "base_branch": "staging",
     "submodules": {
       "external/aport-policies": "0f9d5ab809ad23837548fed70c764e237784671c",
@@ -58,7 +58,7 @@
         "package": "@aporthq/aport-agent-guardrails",
         "version": "1.0.37",
         "filename": "aporthq-aport-agent-guardrails-1.0.37.tgz",
-        "sha256": "f1918391da85dbc40bfec6de72c4245dd85f836d1dd7c5b4a5208744f6af734e",
+        "sha256": "5f06432ea4e9a4d6ac01af32ef26fbc8803c1c1b07a97a7a68f576fdc95939a7",
         "total_entries": 313,
         "reporter_file_count": 20,
         "reporter_bytes_match_source": true
@@ -132,7 +132,7 @@
         "package": "aport-agent-guardrails",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails-1.0.37-py3-none-any.whl",
-        "sha256": "c84f933e38d5f23f7dd445305cf936b8e69ad7e832658ebcdb2f699f9b1f602c",
+        "sha256": "57995d1c8353f5e28c54b21137bb24f405d94de76f8ab62dcb3e3e0966bc8c0b",
         "total_entries": 164,
         "reporter_file_count": 10,
         "reporter_bytes_match_source": true
@@ -141,7 +141,7 @@
         "package": "aport-agent-guardrails-langchain",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails_langchain-1.0.37-py3-none-any.whl",
-        "sha256": "f2987f29c6b624b69ad6a674c943d3a9d3bf1819f92f38d3fcf94c7186508094",
+        "sha256": "a4e4b08026715854aa065c03e8ddd1bf14fc76b494fb7c955ef5e7793095ae58",
         "total_entries": 8,
         "reporter_file_count": 0,
         "reporter_bytes_match_source": true
@@ -150,7 +150,7 @@
         "package": "aport-agent-guardrails-crewai",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails_crewai-1.0.37-py3-none-any.whl",
-        "sha256": "62142c0bac0f01cbe2e7d9a3e62ba81f458673e25cd63bed8e36ce4fc8a5176f",
+        "sha256": "2aabfb4d12d048cc59f7e40d72ad48943f21496f08cd71f631d91a8fafe01b18",
         "total_entries": 9,
         "reporter_file_count": 0,
         "reporter_bytes_match_source": true
@@ -338,6 +338,9 @@
         "injected_fault": "server responds 503 to every report",
         "reported_state": "unresolved",
         "queued_after_failure": 0,
+        "response_statuses": [
+          503
+        ],
         "forged_allow_or_deny": false,
         "note": "the pinned v1 contract has no unsigned adapter_failure/unavailable receipt; the outcome stays unresolved"
       },
@@ -347,7 +350,10 @@
         "fixture_id": "local-v1-old-server",
         "injected_fault": "server rejects the pinned schema version with 400",
         "reported_state": "unresolved",
-        "retried": true,
+        "retried": false,
+        "response_statuses": [
+          400
+        ],
         "forged_allow_or_deny": false,
         "note": "a non-retryable rejection is not reported as a policy outcome"
       },
@@ -391,12 +397,16 @@
       {
         "outcome": "queue_pressure",
         "evidence": "injected_fault",
-        "fixture_id": "local-v1-unavailable",
-        "injected_fault": "server responds 503 while five receipts are enqueued into a queue bounded to two",
+        "fixture_id": "local-v1-unavailable-then-accept",
+        "injected_fault": "one queued receipt receives 503 before service recovers and the two retained receipts are accepted",
         "max_queue": 2,
         "enqueued": 5,
         "queued_under_pressure": 2,
         "dropped": 3,
+        "unavailable_responses": 1,
+        "accepted_after_recovery": 2,
+        "retry_preserved_identity": true,
+        "queued_after_delivery": 0,
         "dropped_still_visible_after_delivery": true,
         "bounded": true
       },
@@ -437,6 +447,9 @@
           {
             "producer": "shell (bin/lib/installation-reporting.sh)",
             "silent_without_binding": true,
+            "reporting_invocations_without_binding": 0,
+            "reporting_invocations_with_marker": 1,
+            "positive_control_metadata_valid": true,
             "detail": "no reporting state created"
           },
           {
@@ -451,15 +464,16 @@
           },
           {
             "producer": "enterprise (enterprise-scripts/aport-device-core.mjs)",
-            "silent_without_binding": true,
+            "static_delegation_verified": true,
             "detail": "delegates reporting to the shared CLI and defines no reporter endpoints of its own"
           }
         ],
         "all_silent_without_binding": true,
-        "note": "representative shell/Python/Node-OpenClaw/enterprise producers, executed with no handoff present"
+        "enterprise_static_delegation_verified": true,
+        "note": "shell producer, Python presence helper and Node status CLI checked without a binding; enterprise delegation inspected statically"
       }
     ],
-    "total_fixture_requests": 12,
+    "total_fixture_requests": 13,
     "scenario_invariants": {
       "asserted": true,
       "violations": []
