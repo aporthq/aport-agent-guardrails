@@ -67,6 +67,41 @@ function checkForbidden(artifact, entries) {
   }
 }
 
+// Packages that must carry the shared reporter runtime, keyed by published name. Framework adapters depend on
+// core and legitimately ship none, so an empty reporter set is only acceptable for them. Checking byte equality
+// alone is not enough: an archive missing the directory entirely would otherwise pass with zero files compared.
+const REPORTER_BUNDLING_PACKAGES = new Map([
+  // The CLI ships the shared source and the bundled OpenClaw copy, so it carries the inventory twice.
+  ["@aporthq/aport-agent-guardrails", { roots: ["package/src/installation-reporting", "package/extensions/openclaw-aport/installation-reporting"] }],
+  ["@aporthq/aport-agent-guardrails-core", { roots: ["package/dist/installation-reporting"] }],
+  ["@aporthq/openclaw-aport", { roots: ["package/installation-reporting"] }],
+  ["aport-agent-guardrails", { roots: ["aport_guardrails/runtime-bundle/src/installation-reporting"] }],
+]);
+
+// Compare the complete source inventory against each root the package must bundle.
+function checkReporterCompleteness(artifact, packageName, entries) {
+  const expected = REPORTER_BUNDLING_PACKAGES.get(packageName);
+  if (!expected) {
+    return { required: false, complete_roots: [] };
+  }
+  const present = new Set(entries);
+  const completeRoots = [];
+  for (const root of expected.roots) {
+    const missing = [...reporterSource.keys()]
+      .filter((name) => !present.has(`${root}/${name}`))
+      .sort();
+    if (missing.length > 0) {
+      fail(
+        `${artifact}: ${packageName} must bundle the shared reporter at ${root}, missing ` +
+          `${missing.length}/${reporterSource.size}: ${missing.join(", ")}`,
+      );
+    } else {
+      completeRoots.push(root);
+    }
+  }
+  return { required: true, complete_roots: completeRoots };
+}
+
 // --- npm archives -----------------------------------------------------------------------------------------
 function inspectTarball(tgzPath) {
   const filename = basename(tgzPath);
@@ -113,6 +148,8 @@ function inspectTarball(tgzPath) {
     }
   }
 
+  const completeness = checkReporterCompleteness(filename, manifest.name, listing);
+
   return {
     package: manifest.name,
     version: manifest.version,
@@ -121,6 +158,8 @@ function inspectTarball(tgzPath) {
     total_entries: listing.length,
     reporter_files: verified.sort(),
     reporter_bytes_match_source: verified.length === reporterEntries.length,
+    reporter_bundling_required: completeness.required,
+    reporter_roots_complete: completeness.complete_roots,
   };
 }
 
@@ -186,14 +225,19 @@ function inspectWheel(wheelPath) {
     }
   }
 
+  const packageName = nameMatch ? nameMatch[1].trim() : null;
+  const completeness = checkReporterCompleteness(filename, packageName, listing);
+
   return {
-    package: nameMatch ? nameMatch[1].trim() : null,
+    package: packageName,
     version: declaredVersion,
     filename,
     sha256: sha256(readFileSync(wheelPath)),
     total_entries: listing.length,
     reporter_files: verified.sort(),
     reporter_bytes_match_source: verified.length === reporterEntries.length,
+    reporter_bundling_required: completeness.required,
+    reporter_roots_complete: completeness.complete_roots,
   };
 }
 
@@ -301,6 +345,15 @@ for (const pkg of ["aport_guardrails", "langchain_adapter", "crewai_adapter"]) {
 }
 if (wheelArtifacts.length !== 3) {
   fail(`expected three Python wheels at ${canonicalVersion}, inspected ${wheelArtifacts.length}`);
+}
+
+// Per-artifact completeness only runs for artifacts that were handed to this script. An omitted archive would
+// otherwise produce successful evidence by simply not being inspected, so require each bundling package.
+const inspectedPackages = new Set([...npmArtifacts, ...wheelArtifacts].map((entry) => entry.package));
+for (const packageName of REPORTER_BUNDLING_PACKAGES.keys()) {
+  if (!inspectedPackages.has(packageName)) {
+    fail(`${packageName} must bundle the shared reporter but no ${canonicalVersion} artifact was inspected`);
+  }
 }
 
 const enterprise = inspectEnterpriseBundle();

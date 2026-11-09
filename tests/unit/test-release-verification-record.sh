@@ -130,6 +130,18 @@ poison "an API key" REJECTS_CREDENTIALS \
 poison "a private home path" REJECTS_PRIVATE_PATHS \
     "$WRITE r.deterministic_validation.runtime_under_test='/Users/someone/secret-checkout/src/installation-reporting'; $SAVE"
 
+# Prose keys (note/detail/reason) buy a longer length bound, never an exemption from the value scans. The
+# record builder copies outcome strings verbatim, so a diagnostic hidden in a note would otherwise be
+# committed under docs/reviews/.
+poison "a credential hidden in a prose note" REJECTS_CREDENTIALS \
+    "$WRITE r.deterministic_validation.outcomes[0].note='Authorization: Bearer synthetic-private-token /home/alice/private-checkout'; $SAVE"
+
+poison "a private path hidden in a prose detail" REJECTS_PRIVATE_PATHS \
+    "$WRITE r.unresolved_and_deferred.windows_reporting.detail='Checked from /Users/alice/private-checkout during the run.'; $SAVE"
+
+poison "a reporter token hidden in a prose reason" REJECTS_CREDENTIALS \
+    "$WRITE r.unresolved_and_deferred.live_deployment_compatibility.reason='Waived; token air1.eyJ2IjoxfQ.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA was unused.'; $SAVE"
+
 poison "a prompt" REJECTS_PROMPTS \
     "$WRITE r.deterministic_validation.outcomes[0].prompt='Draw a safe badge for the release'; $SAVE"
 
@@ -159,6 +171,14 @@ poison "an invented deployment identity" REJECTS_FIXTURE_CLAIMED_LIVE \
 
 poison "a fixture outcome relabelled live" REJECTS_FIXTURE_CLAIMED_LIVE \
     "$WRITE r.deterministic_validation.outcomes[0].evidence='live_deployment'; $SAVE"
+
+# Recorded observations are diagnostics; the assertion result is the gate. A run whose scenario invariants
+# were violated, or one that never asserted them, must not read as successful evidence.
+poison "a violated fixture scenario invariant" REJECTS_VIOLATED_FIXTURE_RUN \
+    "$WRITE r.deterministic_validation.scenario_invariants.violations=['rejected_metadata.all_rejected: expected true, got false']; $SAVE"
+
+poison "a fixture run that never asserted its invariants" REJECTS_VIOLATED_FIXTURE_RUN \
+    "$WRITE r.deterministic_validation.scenario_invariants.asserted=false; $SAVE"
 
 echo ""
 echo "  All release verification record tests passed."

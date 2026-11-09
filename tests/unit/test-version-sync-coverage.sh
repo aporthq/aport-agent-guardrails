@@ -279,11 +279,18 @@ done
 [ "$workspace_changelogs" -gt 0 ] || fail "found no workspace changelogs to check"
 echo "  OK $workspace_changelogs workspace changelogs record $VERSION"
 
-# --- Consumed changesets ---
-# A leftover changeset means the release notes for this version were not actually generated.
+# --- Consumed changesets (release preparation only) ---
+# A pending changeset is the normal state of an ordinary PR: .changeset/README.md tells contributors to commit
+# one, and this script is collected by tests/run.sh for every CI run. So this is not a lockstep invariant and
+# must not fail a feature PR. It only holds while a release is being prepared, which the release owner asserts
+# explicitly with APORT_ASSERT_RELEASE_PREPARED=1.
 leftover="$(find "$REPO_ROOT/.changeset" -maxdepth 1 -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ')"
-[ "$leftover" = "0" ] || fail "$leftover unconsumed changeset(s) remain after the version bump"
-echo "  OK no unconsumed changesets remain"
+if [ "${APORT_ASSERT_RELEASE_PREPARED:-0}" = "1" ]; then
+    [ "$leftover" = "0" ] || fail "$leftover unconsumed changeset(s) remain after the version bump"
+    echo "  OK no unconsumed changesets remain"
+else
+    echo "  SKIP unconsumed-changeset check ($leftover pending; set APORT_ASSERT_RELEASE_PREPARED=1 to assert)"
+fi
 
 echo ""
 echo "  All lockstep version sync coverage tests passed."
