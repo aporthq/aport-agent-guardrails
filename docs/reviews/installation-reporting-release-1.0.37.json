@@ -2,7 +2,7 @@
   "record_schema": "aport-release-verification/v1",
   "candidate_version": "1.0.37",
   "prepared_from": {
-    "source_revision": "3eb759d4715092a0848c1bf6ad17b4b684d3b2e2",
+    "source_revision": "54842b8dc85c2b6ec365a4d262a9c601ee0ec37d",
     "base_branch": "staging",
     "submodules": {
       "external/aport-policies": "0f9d5ab809ad23837548fed70c764e237784671c",
@@ -58,7 +58,7 @@
         "package": "@aporthq/aport-agent-guardrails",
         "version": "1.0.37",
         "filename": "aporthq-aport-agent-guardrails-1.0.37.tgz",
-        "sha256": "2833545b4531d88b7f2b77771df58e6894c12dfe7c164ec838bad9acb53cac5c",
+        "sha256": "cc9e42721dd2d5547051be9ca98b6d6db2cb618ba8f9d9aae9ffb412f6a54bca",
         "total_entries": 313,
         "reporter_file_count": 20,
         "reporter_bytes_match_source": true
@@ -123,7 +123,7 @@
         "package": "aport-agent-guardrails",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails-1.0.37-py3-none-any.whl",
-        "sha256": "16360027c3ae8adbf07149b55e4e5dca32603128d26555334d46bdbdff9c1276",
+        "sha256": "6d454cac859f14385e4968b55cde710c31860b0c384ec66e4023f778e728161d",
         "total_entries": 164,
         "reporter_file_count": 10,
         "reporter_bytes_match_source": true
@@ -132,7 +132,7 @@
         "package": "aport-agent-guardrails-langchain",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails_langchain-1.0.37-py3-none-any.whl",
-        "sha256": "80963f7fb9236007aa038ae299d21197b6174397c6435e7815fd15b85c9e6b5c",
+        "sha256": "fbe35ce8f18f7e3a6e29f55c874ddc9a439bb0444d071a9f0d79ecf76a0fdae2",
         "total_entries": 8,
         "reporter_file_count": 0,
         "reporter_bytes_match_source": true
@@ -141,7 +141,7 @@
         "package": "aport-agent-guardrails-crewai",
         "version": "1.0.37",
         "filename": "aport_agent_guardrails_crewai-1.0.37-py3-none-any.whl",
-        "sha256": "db37df4412718aef3f70c13ba6f1d8c83d221ff0e6ea00d57e11e6280846fa90",
+        "sha256": "e02d3bc176e060aebf7b0c6f2780a557f0bd3cf49986000b824875076609e7c4",
         "total_entries": 9,
         "reporter_file_count": 0,
         "reporter_bytes_match_source": true
