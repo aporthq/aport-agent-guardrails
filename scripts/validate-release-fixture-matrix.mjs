@@ -126,8 +126,27 @@ const fixtureFetch = async (url, init) => fixtureServer(url, init);
 
 // --- Outcome recording --------------------------------------------------------------------------------------
 const outcomes = [];
-function recordOutcome(entry) {
+const violations = [];
+
+// Recording an outcome is diagnostics; asserting it is the gate. A scenario that produced the wrong result
+// must fail the run, otherwise the documented release-validation sequence can succeed despite a reporting
+// regression and the resulting matrix still satisfies the record validator.
+function recordOutcome(entry, expectations = {}) {
   outcomes.push(entry);
+  for (const [field, expected] of Object.entries(expectations)) {
+    const actual = entry[field];
+    const ok =
+      typeof expected === "function"
+        ? expected(actual)
+        : JSON.stringify(actual) === JSON.stringify(expected);
+    if (!ok) {
+      violations.push(
+        `${entry.outcome}.${field}: expected ${
+          typeof expected === "function" ? "the scenario invariant to hold" : JSON.stringify(expected)
+        }, got ${JSON.stringify(actual)}`,
+      );
+    }
+  }
 }
 
 function lastDelivered() {
@@ -168,6 +187,11 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     accepted_reports: delivered?.body?.reports?.length ?? 0,
     authorization_header_present: delivered?.authorization_present ?? false,
     reported_state: reporter.status().state,
+  }, {
+    delivered: true,
+    accepted_reports: 1,
+    authorization_header_present: true,
+    reported_state: "connected",
   });
 }
 
@@ -185,6 +209,9 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     host_disposition: body?.reports?.[0]?.host_disposition ?? null,
     decision_id_present: Boolean(body?.reports?.[0]?.decision_id),
     note: "host_disposition comes from the supplied completion record, not from a pre-action result",
+  }, {
+    host_disposition: "allowed",
+    decision_id_present: true,
   });
 }
 
@@ -201,6 +228,8 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     fixture_id: "local-v1-accept",
     host_disposition: body?.reports?.[0]?.host_disposition ?? null,
     note: "a pre-action DENY alone is never reported as blocked",
+  }, {
+    host_disposition: "blocked",
   });
 }
 
@@ -225,6 +254,10 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     requests_sent: received.length - before,
     host_disposition: "not_reported",
     note: "no request is attempted and no ALLOW/DENY is synthesized without an owner handoff",
+  }, {
+    reporter_constructed: false,
+    requests_sent: 0,
+    host_disposition: "not_reported",
   });
 }
 
@@ -244,6 +277,9 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     queued_after_failure: status.queued,
     forged_allow_or_deny: false,
     note: "the pinned v1 contract has no unsigned adapter_failure/unavailable receipt; the outcome stays unresolved",
+  }, {
+    reported_state: "unresolved",
+    forged_allow_or_deny: false,
   });
 }
 
@@ -263,6 +299,9 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     retried: status.queued === 0,
     forged_allow_or_deny: false,
     note: "a non-retryable rejection is not reported as a policy outcome",
+  }, {
+    reported_state: "unresolved",
+    forged_allow_or_deny: false,
   });
 }
 
@@ -282,6 +321,9 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     fixture_id: "local-v1-accept",
     modes,
     all_modes_match: modes.every((m) => m.requested === m.delivered),
+  }, {
+    all_modes_match: true,
+    modes: (value) => Array.isArray(value) && value.length === 3,
   });
 }
 
@@ -315,6 +357,9 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     fixture_id: "local-v1-accept",
     rotated_token_same_installation_accepted: rotatedAccepted,
     different_installation_refused: foreignRefused,
+  }, {
+    rotated_token_same_installation_accepted: true,
+    different_installation_refused: true,
   });
 }
 
@@ -340,6 +385,10 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     lifecycle_state: body?.reports?.[0]?.state ?? null,
     only_report_in_event: body?.reports?.length === 1,
     rejects_lifecycle_combined_with_other_reports: rejectedWhenCombined,
+  }, {
+    lifecycle_state: "removed",
+    only_report_in_event: true,
+    rejects_lifecycle_combined_with_other_reports: true,
   });
 }
 
@@ -365,6 +414,10 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     dropped: underPressure.dropped,
     dropped_still_visible_after_delivery: afterDelivery.dropped >= underPressure.dropped,
     bounded: underPressure.queued <= 2,
+  }, {
+    bounded: true,
+    dropped_still_visible_after_delivery: true,
+    dropped: (value) => typeof value === "number" && value > 0,
   });
 }
 
@@ -395,6 +448,10 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     cases: rejections,
     all_rejected: rejections.every((r) => r.rejected),
     no_input_echoed_in_errors: rejections.every((r) => !r.error_message_leaks_input),
+  }, {
+    all_rejected: true,
+    no_input_echoed_in_errors: true,
+    cases: (value) => Array.isArray(value) && value.length === cases.length,
   });
 }
 
@@ -529,14 +586,15 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
     producers,
     all_silent_without_binding: producers.every((p) => p.silent_without_binding),
     note: "representative shell/Python/Node-OpenClaw/enterprise producers, executed with no handoff present",
+  }, {
+    all_silent_without_binding: true,
+    producers: (value) => Array.isArray(value) && value.length === 4,
   });
 }
 
 // --- Finish ------------------------------------------------------------------------------------------------
-if (escapedRequests.length > 0) {
-  console.error("validate-release-fixture-matrix: requests escaped the isolated fixture origin:");
-  for (const url of escapedRequests) console.error(`  - ${url}`);
-  process.exit(1);
+for (const url of escapedRequests) {
+  violations.push(`a request escaped the isolated fixture origin: ${url}`);
 }
 
 const matrix = {
@@ -560,8 +618,13 @@ const matrix = {
   },
   outcomes,
   total_requests_received: received.length,
+  scenario_invariants: {
+    asserted: true,
+    violations,
+  },
 };
 
+// The matrix is still written when an invariant fails: it is the diagnostic for what the candidate did.
 const json = JSON.stringify(matrix, null, 2);
 if (outPath) {
   writeFileSync(outPath, json + "\n");
@@ -569,6 +632,16 @@ if (outPath) {
 } else {
   console.log(json);
 }
+
+if (violations.length > 0) {
+  console.error(
+    `validate-release-fixture-matrix: ${violations.length} scenario invariant violation(s) at ${canonicalVersion}:`,
+  );
+  for (const violation of violations) console.error(`  - ${violation}`);
+  process.exit(1);
+}
+
 console.error(
-  `validate-release-fixture-matrix: ${outcomes.length} outcomes, ${received.length} fixture requests at ${canonicalVersion}`,
+  `validate-release-fixture-matrix: ${outcomes.length} outcomes, ${received.length} fixture requests at ${canonicalVersion}, ` +
+    `all scenario invariants held`,
 );

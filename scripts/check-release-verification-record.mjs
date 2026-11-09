@@ -111,6 +111,21 @@ if (!Array.isArray(outcomes) || outcomes.length === 0) {
   }
 }
 
+// The fixture run must have asserted its scenario invariants, with none violated. Recorded observations alone
+// are diagnostics; without this the record could publish a run that produced the wrong results.
+const invariants = record.deterministic_validation?.scenario_invariants;
+if (invariants?.asserted !== true) {
+  fail("deterministic_validation.scenario_invariants.asserted must be true");
+}
+if (!Array.isArray(invariants?.violations)) {
+  fail("deterministic_validation.scenario_invariants.violations must be a list");
+} else if (invariants.violations.length > 0) {
+  fail(
+    `deterministic_validation.scenario_invariants reports ${invariants.violations.length} violation(s); ` +
+      "a violated fixture run is not successful evidence",
+  );
+}
+
 // --- Live qualification must stay honest -------------------------------------------------------------------
 const live = record.unresolved_and_deferred?.live_deployment_compatibility;
 if (!live) {
@@ -153,8 +168,27 @@ const FORBIDDEN_VALUES = [
 ];
 
 // Authored constants in this repository are allowed to describe behaviour in prose. Only these keys may hold
-// explanatory text; everything else must be an identifier, digest, count, boolean or fixed string.
+// explanatory text; everything else must be an identifier, digest, count, boolean or fixed string. Being a
+// prose key buys a longer length bound and nothing else: every forbidden value shape is scanned everywhere,
+// because the record builder copies outcome strings verbatim, so an exemption here would let real diagnostics
+// reach a file committed under docs/reviews/.
 const PROSE_KEYS = new Set(["detail", "reason", "note", "network", "credential_material", "kind"]);
+
+// The only literal placeholders prose may contain. These are the documented token-presentation strings from
+// the pinned contract, not credentials: the angle brackets are part of the literal. Anything else that matches
+// a forbidden shape is rejected even inside prose.
+const ALLOWED_PLACEHOLDERS = [
+  "Authorization: Bearer <reporter_token>",
+  "Bearer <reporter_token>",
+];
+
+function withoutAllowedPlaceholders(value) {
+  let text = value;
+  for (const placeholder of ALLOWED_PLACEHOLDERS) {
+    text = text.split(placeholder).join("");
+  }
+  return text;
+}
 
 function walk(value, pathParts) {
   const where = pathParts.join(".") || "(root)";
@@ -163,15 +197,13 @@ function walk(value, pathParts) {
   if (typeof value === "string") {
     const key = pathParts[pathParts.length - 1] ?? "";
     const isProse = PROSE_KEYS.has(String(key).replace(/\[\d+\]$/, ""));
+    // Strip only the documented literal placeholders, then scan prose exactly like every other field.
+    const scanned = withoutAllowedPlaceholders(value);
     for (const { label, re } of FORBIDDEN_VALUES) {
-      // Prose may name a mechanism ("Authorization: Bearer <reporter_token>" style placeholders are not
-      // credentials), so only non-prose fields are scanned for shell/path shapes; secrets are scanned
-      // everywhere.
-      const secretOnly = ["reporter token", "APort API key", "private key block"].includes(label);
-      if (!secretOnly && isProse) continue;
-      if (re.test(value)) fail(`${where} contains a ${label}`);
+      if (re.test(scanned)) fail(`${where} contains a ${label}`);
     }
-    if (!isProse && value.length > 512) fail(`${where} holds an unbounded string (${value.length} chars)`);
+    const limit = isProse ? 2048 : 512;
+    if (value.length > limit) fail(`${where} holds an unbounded string (${value.length} chars)`);
     return;
   }
 

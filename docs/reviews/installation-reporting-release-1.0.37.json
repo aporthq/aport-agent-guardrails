@@ -2,7 +2,7 @@
   "record_schema": "aport-release-verification/v1",
   "candidate_version": "1.0.37",
   "prepared_from": {
-    "source_revision": "297c4ea8ee1643045cb117a8943c7968ec698878",
+    "source_revision": "3eb759d4715092a0848c1bf6ad17b4b684d3b2e2",
     "base_branch": "staging",
     "submodules": {
       "external/aport-policies": "0f9d5ab809ad23837548fed70c764e237784671c",
@@ -448,7 +448,11 @@
         "note": "representative shell/Python/Node-OpenClaw/enterprise producers, executed with no handoff present"
       }
     ],
-    "total_fixture_requests": 11
+    "total_fixture_requests": 11,
+    "scenario_invariants": {
+      "asserted": true,
+      "violations": []
+    }
   },
   "unresolved_and_deferred": {
     "unsigned_failure_receipts": {

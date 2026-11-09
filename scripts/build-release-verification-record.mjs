@@ -45,6 +45,24 @@ if (artifacts.canonical_version !== version || fixtures.candidate_version !== ve
   process.exit(1);
 }
 
+// A fixture run that violated a scenario invariant is a failed validation, not publishable evidence.
+if (fixtures.scenario_invariants?.asserted !== true) {
+  console.error(
+    "build-release-verification-record: fixture matrix did not assert its scenario invariants; " +
+      "regenerate it with the current scripts/validate-release-fixture-matrix.mjs",
+  );
+  process.exit(1);
+}
+const fixtureViolations = fixtures.scenario_invariants.violations ?? [];
+if (fixtureViolations.length > 0) {
+  console.error(
+    `build-release-verification-record: fixture matrix reported ${fixtureViolations.length} ` +
+      "scenario invariant violation(s); refusing to build a release record:",
+  );
+  for (const violation of fixtureViolations) console.error(`  - ${violation}`);
+  process.exit(1);
+}
+
 const git = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" }).trim();
 
 // Source identity: the exact revision the artifacts were produced from, plus the pinned submodules.
@@ -140,6 +158,12 @@ const record = {
     runtime_under_test: fixtures.runtime_under_test,
     outcomes: fixtures.outcomes.map(outcomeRecord),
     total_fixture_requests: fixtures.total_requests_received,
+    // Carry the assertion result, not just the observations: a record built from a run whose scenario
+    // invariants were violated must not read as successful evidence.
+    scenario_invariants: {
+      asserted: fixtures.scenario_invariants?.asserted === true,
+      violations: fixtures.scenario_invariants?.violations ?? [],
+    },
   },
   unresolved_and_deferred: {
     unsigned_failure_receipts: {
