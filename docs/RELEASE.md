@@ -106,7 +106,19 @@ node scripts/build-release-verification-record.mjs \
 
 `scripts/check-release-verification-record.mjs` is the schema and sanitization
 gate, and `tests/unit/test-release-verification-record.sh` runs it against the
-committed record plus deliberately poisoned copies. The record keeps only
+current version's committed record plus deliberately poisoned copies. The test
+derives the filename from `packages/core/package.json`; a version bump needs
+its own record and never rewrites or substitutes an older release's evidence.
+The builder requires explicit empty artifact-problem and fixture-violation
+lists before writing a record. Inspection commands retain failed diagnostics,
+but those files are not successful release evidence.
+
+`tests/unit/test-release-validation-regressions.sh` exercises that boundary,
+including a temporary runtime with installation-scope checks removed. The
+rotation fixture requires the foreign enqueue to reject and send zero requests;
+the rotated token for the same installation must actually deliver successfully.
+
+The record keeps only
 bounded allowlisted metadata: identifiers, digests, counts, booleans, and
 authored constants. Credentials, private paths, prompts, commands, and raw tool
 inputs and outputs are rejected, as is fixture evidence labelled as a live run.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Deterministic contract validation for the packaged 1.0.37 candidate against an isolated local server.
+// Deterministic contract validation for the packaged candidate against an isolated local server.
 //
 // Scope and honesty rules, enforced by construction:
 //   * The contract server runs in-process behind the transport's injectable `fetch` seam and answers only for
@@ -42,7 +42,7 @@ const contractBaseline = contractSource.match(/Agent Passport staging merge ([a-
 
 // --- Synthetic credentials ---------------------------------------------------------------------------------
 // Generated per run. These are not real tokens and grant nothing; the only consumer is the local listener.
-const INSTALLATION_ID = "ai_fixture_release_1_0_37";
+const INSTALLATION_ID = `ai_fixture_release_${canonicalVersion.replaceAll(".", "_")}`;
 function syntheticHandoff(origin, { installationId = INSTALLATION_ID, region = "US" } = {}) {
   const claims = Buffer.from(
     JSON.stringify({ v: 1, installation_id: installationId, owner_id: "ap_org_fixture_release", region }),
@@ -58,7 +58,7 @@ function syntheticHandoff(origin, { installationId = INSTALLATION_ID, region = "
   };
 }
 
-const CONFIG_DIGEST = createHash("sha256").update("release-1.0.37-fixture-config").digest("hex");
+const CONFIG_DIGEST = createHash("sha256").update(`release-${canonicalVersion}-fixture-config`).digest("hex");
 
 function report(reports, { mode = "enforce" } = {}) {
   return {
@@ -333,33 +333,37 @@ async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
   serverMode = "accept";
   const rotated = syntheticHandoff(origin);
   rotated.reporter_token = rotated.reporter_token.slice(0, -43) + "B".repeat(43);
-  let rotatedAccepted = true;
+  const rotatedBefore = received.length;
+  const rotatedReporter = new InstallationReporter(rotated, origin, { fetch: fixtureFetch });
+  rotatedReporter.enqueueReport(report([{ kind: "heartbeat" }]));
+  await settle(rotatedReporter, { expectRequests: 1 });
+  const rotatedAccepted = received.length === rotatedBefore + 1 && rotatedReporter.status().state === "connected";
+  const foreign = syntheticHandoff(origin, { installationId: "ai_fixture_other_installation" });
+  const reporter = new InstallationReporter(foreign, origin, { fetch: fixtureFetch });
+  const foreignBefore = received.length;
+  let foreignEnqueueRejected = false;
   try {
-    new InstallationReporter(rotated, origin, { fetch: fixtureFetch });
-  } catch {
-    rotatedAccepted = false;
-  }
-  let foreignRefused = false;
-  try {
-    const foreign = syntheticHandoff(origin, { installationId: "ai_fixture_other_installation" });
     // Claims and endpoints agree with each other, but the installation is a different identity. Sending a
-    // report scoped to the original installation through it must be refused by the transport scope check.
-    const reporter = new InstallationReporter(foreign, origin, { fetch: fixtureFetch });
+    // report scoped to the original installation must fail at enqueue, before any request is sent.
     reporter.enqueueReport(report([{ kind: "heartbeat" }]));
-    await settle(reporter, { expectRequests: 1 });
-    foreignRefused = reporter.status().state !== "verified";
-  } catch {
-    foreignRefused = true;
+  } catch (error) {
+    foreignEnqueueRejected = error instanceof TypeError && error.message === "Invalid installation reporting scope";
   }
+  await settle(reporter);
+  const foreignRequests = received.length - foreignBefore;
   recordOutcome({
     outcome: "rotation",
     evidence: "fixture_response",
     fixture_id: "local-v1-accept",
     rotated_token_same_installation_accepted: rotatedAccepted,
-    different_installation_refused: foreignRefused,
+    different_installation_refused: foreignEnqueueRejected && foreignRequests === 0,
+    different_installation_enqueue_rejected: foreignEnqueueRejected,
+    different_installation_requests_sent: foreignRequests,
   }, {
     rotated_token_same_installation_accepted: true,
     different_installation_refused: true,
+    different_installation_enqueue_rejected: true,
+    different_installation_requests_sent: 0,
   });
 }
 
