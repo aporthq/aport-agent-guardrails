@@ -71,6 +71,21 @@ _runtime_copy_tree() {
     rm -rf "$dest"
     mkdir -p "$(dirname "$dest")"
     cp -R "$src" "$dest"
+    # Manifest trees are submodule checkouts. Their VCS metadata is not runtime material: in a recursive
+    # clone `.git` is a directory holding the object database and `.git/config` remote URLs, and in a
+    # worktree checkout it is a gitlink file. Neither belongs in an installed runtime.
+    _runtime_strip_vcs_metadata "$dest"
+}
+
+_runtime_strip_vcs_metadata() {
+    local dest="$1"
+    # No depth bound: a submodule may nest its own submodules, and the Python copiers that share this rule
+    # exclude these names at every level. -prune stops find from descending into a matched directory.
+    find "$dest" \
+        \( -name .git -o -name .gitmodules -o -name .github \
+        -o -name __pycache__ -o -name .pytest_cache -o -name .DS_Store \) \
+        -prune -print0 2> /dev/null \
+        | xargs -0 rm -rf 2> /dev/null || true
 }
 
 install_runtime_tree() {

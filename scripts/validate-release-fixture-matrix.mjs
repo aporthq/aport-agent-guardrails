@@ -1,0 +1,725 @@
+#!/usr/bin/env node
+// Deterministic contract validation for the packaged candidate against an isolated local server.
+//
+// Scope and honesty rules, enforced by construction:
+//   * The contract server runs in-process behind the transport's injectable `fetch` seam and answers only for
+//     a reserved `.invalid` origin. It speaks the pinned v1 contract. No socket is bound, no name is resolved,
+//     and a request to any other origin fails the run, so no Agent Passport deployment can be contacted.
+//   * Every credential is synthetic and generated here. No real reporter token or owner handoff is used.
+//   * Each outcome records how it was established. `fixture_response` means the local server answered;
+//     `injected_fault` means this script deliberately broke the transport; `local_only` means no request was
+//     made at all. Nothing here is live-deployment evidence, and no outcome is inferred from a pre-action
+//     result: host dispositions come only from what the producer actually sent.
+//
+// Writes a JSON matrix to --out for the release-verification record. Never publishes or mutates the repo.
+
+import { createHash, randomUUID } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const args = process.argv.slice(2);
+const outIndex = args.indexOf("--out");
+const outPath = outIndex === -1 ? null : args[outIndex + 1];
+
+// --- The packaged candidate under test ---------------------------------------------------------------------
+// Load the reporter from the installed runtime if one is supplied, otherwise from the repository owner. The
+// record states which, so fixture evidence is never confused with an installed-artifact claim.
+const runtimeDirIndex = args.indexOf("--runtime-dir");
+const runtimeDir = runtimeDirIndex === -1 ? join(root, "src/installation-reporting") : args[runtimeDirIndex + 1];
+const { InstallationReporter } = await import(join(runtimeDir, "reporter.js"));
+const contract = await import(join(runtimeDir, "contract.js"));
+
+const canonicalVersion = JSON.parse(readFileSync(join(root, "packages/core/package.json"), "utf8")).version;
+
+// Contract digests are pinned in the shipped contract owner; record them rather than restating them.
+const contractSource = readFileSync(join(runtimeDir, "contract.js"), "utf8");
+const contractDigests = Object.fromEntries(
+  [...contractSource.matchAll(/^\/\/ (.+?) SHA-256: ([a-f0-9]{64})$/gm)].map((m) => [m[1], m[2]]),
+);
+const contractBaseline = contractSource.match(/Agent Passport staging merge ([a-f0-9]{40})/)?.[1] ?? null;
+
+// --- Synthetic credentials ---------------------------------------------------------------------------------
+// Generated per run. These are not real tokens and grant nothing; the only consumer is the local listener.
+const INSTALLATION_ID = `ai_fixture_release_${canonicalVersion.replaceAll(".", "_")}`;
+function syntheticHandoff(origin, { installationId = INSTALLATION_ID, region = "US" } = {}) {
+  const claims = Buffer.from(
+    JSON.stringify({ v: 1, installation_id: installationId, owner_id: "ap_org_fixture_release", region }),
+  ).toString("base64url");
+  const binding = { installation_id: installationId, reporter_token: `air1.${claims}.${"A".repeat(43)}` };
+  const base = `${origin}/api/agent-installations/${installationId}`;
+  return {
+    schema_version: "agent-installation-handoff/v1",
+    ...binding,
+    reporter_endpoint: `${base}/reports`,
+    test_result_endpoint: `${base}/tests/{test_id}/results`,
+    token_presentation: "Authorization: Bearer <reporter_token>",
+  };
+}
+
+const CONFIG_DIGEST = createHash("sha256").update(`release-${canonicalVersion}-fixture-config`).digest("hex");
+
+function report(reports, { mode = "enforce" } = {}) {
+  return {
+    schema_version: "agent-installation-report/v1",
+    event_id: randomUUID().replace(/-/g, ""),
+    timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    source_id: INSTALLATION_ID,
+    config_digest: CONFIG_DIGEST,
+    adapter_version: canonicalVersion,
+    mode,
+    reports,
+  };
+}
+
+// --- Isolated local contract server ------------------------------------------------------------------------
+// The server runs in-process behind the transport's injectable `fetch` seam, which is the same seam the
+// repository's own reporter tests use. No socket is bound and no name is resolved, so this cannot reach a
+// deployed backend even by misconfiguration: any request to an origin other than the fixture origin below
+// is recorded as an escape and fails the run.
+const origin = "https://fixture.invalid";
+
+// Server behaviour is switched per scenario. It only ever speaks the pinned v1 acknowledgement shape.
+let serverMode = "accept";
+const received = [];
+const escapedRequests = [];
+
+function fixtureServer(url, init) {
+  if (!url.startsWith(`${origin}/`)) {
+    escapedRequests.push(url);
+    throw new Error("fixture server refused a request outside the isolated origin");
+  }
+  const path = url.slice(origin.length);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(init.body);
+  } catch {
+    /* Recorded as unparsable below. */
+  }
+  received.push({
+    url: path,
+    authorization_present: typeof init.headers?.Authorization === "string",
+    idempotency_key: init.headers?.["Idempotency-Key"] ?? null,
+    body: parsed,
+  });
+
+  if (serverMode === "unavailable") {
+    // Injected fault: the reporting backend is unreachable in a retryable way.
+    return new Response(JSON.stringify({ error: "unavailable" }), { status: 503 });
+  }
+  if (serverMode === "old_server") {
+    // Injected fault: a server that predates this contract rejects the schema version outright.
+    return new Response(JSON.stringify({ error: "unsupported_schema_version" }), { status: 400 });
+  }
+  if (path.endsWith("/reports")) {
+    return new Response(
+      JSON.stringify({ event_id: parsed?.event_id, accepted: parsed?.reports?.length ?? 0 }),
+      { status: 200 },
+    );
+  }
+  const testId = path.match(/\/tests\/([^/]+)\/results$/)?.[1];
+  return new Response(JSON.stringify({ test_id: testId, result: "passed" }), { status: 200 });
+}
+
+const fixtureFetch = async (url, init) => {
+  const response = fixtureServer(url, init);
+  received[received.length - 1].response_status = response.status;
+  return response;
+};
+
+// --- Outcome recording --------------------------------------------------------------------------------------
+const outcomes = [];
+const violations = [];
+
+// Recording an outcome is diagnostics; asserting it is the gate. A scenario that produced the wrong result
+// must fail the run, otherwise the documented release-validation sequence can succeed despite a reporting
+// regression and the resulting matrix still satisfies the record validator.
+function recordOutcome(entry, expectations = {}) {
+  outcomes.push(entry);
+  for (const [field, expected] of Object.entries(expectations)) {
+    const actual = entry[field];
+    const ok =
+      typeof expected === "function"
+        ? expected(actual)
+        : JSON.stringify(actual) === JSON.stringify(expected);
+    if (!ok) {
+      violations.push(
+        `${entry.outcome}.${field}: expected ${
+          typeof expected === "function" ? "the scenario invariant to hold" : JSON.stringify(expected)
+        }, got ${JSON.stringify(actual)}`,
+      );
+    }
+  }
+}
+
+function lastDelivered() {
+  return received.length ? received[received.length - 1] : null;
+}
+
+function newReporter(extra = {}) {
+  return new InstallationReporter(syntheticHandoff(origin), origin, { fetch: fixtureFetch, ...extra });
+}
+
+async function waitUntil(predicate, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return false;
+}
+
+// Delivery is scheduled on the event loop and never blocks the producer, so there is no flush() to await.
+async function settle(reporter, { expectRequests = 0, timeoutMs = 8000 } = {}) {
+  const before = received.length;
+  const settled = await waitUntil(() => reporter.status().queued === 0 && received.length - before >= expectRequests, timeoutMs);
+  if (!settled) {
+    violations.push(`delivery_settle: queue did not drain with ${expectRequests} expected new request(s)`);
+  }
+  return reporter.status();
+}
+
+// 1. install — a first heartbeat establishes the installation against the pinned contract.
+{
+  serverMode = "accept";
+  const before = received.length;
+  const reporter = newReporter();
+  reporter.enqueueReport(report([{ kind: "heartbeat" }]));
+  await settle(reporter, { expectRequests: 1 });
+  const delivered = lastDelivered();
+  recordOutcome({
+    outcome: "install",
+    evidence: "fixture_response",
+    fixture_id: "local-v1-accept",
+    delivered: received.length > before,
+    accepted_reports: delivered?.body?.reports?.length ?? 0,
+    authorization_header_present: delivered?.authorization_present ?? false,
+    reported_state: reporter.status().state,
+  }, {
+    delivered: true,
+    accepted_reports: 1,
+    authorization_header_present: true,
+    reported_state: "connected",
+  });
+}
+
+// 2. ALLOW — a correlated host completion says the call was allowed.
+{
+  serverMode = "accept";
+  const reporter = newReporter();
+  reporter.enqueueReport(report([{ kind: "decision", decision_id: "dec_allow_fixture", host_disposition: "allowed" }]));
+  await settle(reporter, { expectRequests: 1 });
+  const body = lastDelivered()?.body;
+  recordOutcome({
+    outcome: "allow",
+    evidence: "fixture_response",
+    fixture_id: "local-v1-accept",
+    host_disposition: body?.reports?.[0]?.host_disposition ?? null,
+    decision_id_present: Boolean(body?.reports?.[0]?.decision_id),
+    note: "host_disposition comes from the supplied completion record, not from a pre-action result",
+  }, {
+    host_disposition: "allowed",
+    decision_id_present: true,
+  });
+}
+
+// 3. DENY — an enforced block, reported as blocked only because a completion record said so.
+{
+  serverMode = "accept";
+  const reporter = newReporter();
+  reporter.enqueueReport(report([{ kind: "decision", decision_id: "dec_deny_fixture", host_disposition: "blocked" }]));
+  await settle(reporter, { expectRequests: 1 });
+  const body = lastDelivered()?.body;
+  recordOutcome({
+    outcome: "deny",
+    evidence: "fixture_response",
+    fixture_id: "local-v1-accept",
+    host_disposition: body?.reports?.[0]?.host_disposition ?? null,
+    note: "a pre-action DENY alone is never reported as blocked",
+  }, {
+    host_disposition: "blocked",
+  });
+}
+
+// 4. no-handoff — without a handoff the producer has no reporting identity and sends nothing.
+{
+  const before = received.length;
+  let constructed = true;
+  let failureClass = null;
+  try {
+    // An absent handoff cannot be validated into a binding; the contract refuses it.
+    new InstallationReporter({}, origin, { fetch: fixtureFetch });
+  } catch (error) {
+    constructed = false;
+    failureClass = error instanceof TypeError ? "TypeError" : error?.constructor?.name ?? "Error";
+  }
+  recordOutcome({
+    outcome: "no_handoff",
+    evidence: "local_only",
+    fixture_id: null,
+    reporter_constructed: constructed,
+    rejected_with: failureClass,
+    requests_sent: received.length - before,
+    host_disposition: "not_reported",
+    note: "no request is attempted and no ALLOW/DENY is synthesized without an owner handoff",
+  }, {
+    reporter_constructed: false,
+    requests_sent: 0,
+    host_disposition: "not_reported",
+  });
+}
+
+// 5. reporting unavailability — an injected retryable 503. The outcome must stay unresolved, never ALLOW/DENY.
+{
+  serverMode = "unavailable";
+  const before = received.length;
+  const reporter = newReporter({ maxAttempts: 1 });
+  reporter.enqueueReport(report([{ kind: "decision", decision_id: "dec_unavailable", host_disposition: "allowed" }]));
+  await settle(reporter, { expectRequests: 1 });
+  const status = reporter.status();
+  recordOutcome({
+    outcome: "reporting_unavailable",
+    evidence: "injected_fault",
+    injected_fault: "server responds 503 to every report",
+    fixture_id: "local-v1-unavailable",
+    reported_state: status.state,
+    queued_after_failure: status.queued,
+    response_statuses: received.slice(before).map((entry) => entry.response_status),
+    forged_allow_or_deny: false,
+    note: "the pinned v1 contract has no unsigned adapter_failure/unavailable receipt; the outcome stays unresolved",
+  }, {
+    reported_state: "unresolved",
+    queued_after_failure: 0,
+    response_statuses: [503],
+    forged_allow_or_deny: false,
+  });
+}
+
+// 6. verification unavailability — a server that predates this contract rejects the schema outright.
+{
+  serverMode = "old_server";
+  const before = received.length;
+  const reporter = newReporter({ maxAttempts: 1 });
+  reporter.enqueueReport(report([{ kind: "heartbeat" }]));
+  await settle(reporter, { expectRequests: 1 });
+  const status = reporter.status();
+  recordOutcome({
+    outcome: "verification_unavailable",
+    evidence: "injected_fault",
+    injected_fault: "server rejects the pinned schema version with 400",
+    fixture_id: "local-v1-old-server",
+    reported_state: status.state,
+    retried: received.length - before > 1,
+    response_statuses: received.slice(before).map((entry) => entry.response_status),
+    forged_allow_or_deny: false,
+    note: "a non-retryable rejection is not reported as a policy outcome",
+  }, {
+    reported_state: "unresolved",
+    retried: false,
+    response_statuses: [400],
+    forged_allow_or_deny: false,
+  });
+}
+
+// 7. mode change — the committed enforcement mode travels with the receipt.
+{
+  serverMode = "accept";
+  const modes = [];
+  for (const mode of ["enforce", "warn", "observe"]) {
+    const reporter = newReporter();
+    reporter.enqueueReport(report([{ kind: "heartbeat" }], { mode }));
+    await settle(reporter, { expectRequests: 1 });
+    modes.push({ requested: mode, delivered: lastDelivered()?.body?.mode ?? null });
+  }
+  recordOutcome({
+    outcome: "mode_change",
+    evidence: "fixture_response",
+    fixture_id: "local-v1-accept",
+    modes,
+    all_modes_match: modes.every((m) => m.requested === m.delivered),
+  }, {
+    all_modes_match: true,
+    modes: (value) => Array.isArray(value) && value.length === 3,
+  });
+}
+
+// 8. rotation — a rotated token for the same installation keeps the binding identity; a different
+//    installation id is refused by the contract.
+{
+  serverMode = "accept";
+  const rotated = syntheticHandoff(origin);
+  rotated.reporter_token = rotated.reporter_token.slice(0, -43) + "B".repeat(43);
+  const rotatedBefore = received.length;
+  const rotatedReporter = new InstallationReporter(rotated, origin, { fetch: fixtureFetch });
+  rotatedReporter.enqueueReport(report([{ kind: "heartbeat" }]));
+  await settle(rotatedReporter, { expectRequests: 1 });
+  const rotatedAccepted = received.length === rotatedBefore + 1 && rotatedReporter.status().state === "connected";
+  const foreign = syntheticHandoff(origin, { installationId: "ai_fixture_other_installation" });
+  const reporter = new InstallationReporter(foreign, origin, { fetch: fixtureFetch });
+  const foreignBefore = received.length;
+  let foreignEnqueueRejected = false;
+  try {
+    // Claims and endpoints agree with each other, but the installation is a different identity. Sending a
+    // report scoped to the original installation must fail at enqueue, before any request is sent.
+    reporter.enqueueReport(report([{ kind: "heartbeat" }]));
+  } catch (error) {
+    foreignEnqueueRejected = error instanceof TypeError && error.message === "Invalid installation reporting scope";
+  }
+  await settle(reporter);
+  const foreignRequests = received.length - foreignBefore;
+  recordOutcome({
+    outcome: "rotation",
+    evidence: "fixture_response",
+    fixture_id: "local-v1-accept",
+    rotated_token_same_installation_accepted: rotatedAccepted,
+    different_installation_refused: foreignEnqueueRejected && foreignRequests === 0,
+    different_installation_enqueue_rejected: foreignEnqueueRejected,
+    different_installation_requests_sent: foreignRequests,
+  }, {
+    rotated_token_same_installation_accepted: true,
+    different_installation_refused: true,
+    different_installation_enqueue_rejected: true,
+    different_installation_requests_sent: 0,
+  });
+}
+
+// 9. uninstall — removal is a single lifecycle report and nothing else.
+{
+  serverMode = "accept";
+  const reporter = newReporter();
+  reporter.enqueueReport(report([{ kind: "lifecycle", state: "removed" }]));
+  await settle(reporter, { expectRequests: 1 });
+  const body = lastDelivered()?.body;
+  let rejectedWhenCombined = false;
+  try {
+    contract.serializeReport(
+      report([{ kind: "lifecycle", state: "removed" }, { kind: "heartbeat" }]),
+    );
+  } catch {
+    rejectedWhenCombined = true;
+  }
+  recordOutcome({
+    outcome: "uninstall",
+    evidence: "fixture_response",
+    fixture_id: "local-v1-accept",
+    lifecycle_state: body?.reports?.[0]?.state ?? null,
+    only_report_in_event: body?.reports?.length === 1,
+    rejects_lifecycle_combined_with_other_reports: rejectedWhenCombined,
+  }, {
+    lifecycle_state: "removed",
+    only_report_in_event: true,
+    rejects_lifecycle_combined_with_other_reports: true,
+  });
+}
+
+// 10. queue pressure — a bounded queue discards oldest metadata and keeps the dropped count visible.
+{
+  serverMode = "unavailable";
+  const before = received.length;
+  const reporter = newReporter({ maxQueue: 2, maxAttempts: 2 });
+  for (let i = 0; i < 5; i += 1) {
+    reporter.enqueueReport(report([{ kind: "heartbeat" }]));
+  }
+  const underPressure = reporter.status();
+  // Wait for a real failed attempt and its queued retry, not merely selection
+  // of the fault mode before the reporter's asynchronous delivery starts.
+  const observedFailure = await waitUntil(() =>
+    received.slice(before).some((entry) => entry.response_status === 503) && reporter.status().queued === 2,
+  );
+  const failedAttempts = received.slice(before);
+  const recoveryStart = received.length;
+  serverMode = "accept";
+  await settle(reporter, { expectRequests: observedFailure ? 2 : 0 });
+  const recovered = received.slice(recoveryStart);
+  const afterDelivery = reporter.status();
+  recordOutcome({
+    outcome: "queue_pressure",
+    evidence: "injected_fault",
+    injected_fault: "one queued receipt receives 503 before service recovers and the two retained receipts are accepted",
+    fixture_id: "local-v1-unavailable-then-accept",
+    max_queue: 2,
+    enqueued: 5,
+    queued_under_pressure: underPressure.queued,
+    dropped: underPressure.dropped,
+    unavailable_responses: failedAttempts.filter((entry) => entry.response_status === 503).length,
+    accepted_after_recovery: recovered.filter((entry) => entry.response_status === 200).length,
+    retry_preserved_identity: Boolean(failedAttempts[0]?.idempotency_key) &&
+      recovered[0]?.idempotency_key === failedAttempts[0].idempotency_key &&
+      recovered[0]?.body?.event_id === failedAttempts[0]?.body?.event_id,
+    queued_after_delivery: afterDelivery.queued,
+    dropped_still_visible_after_delivery: afterDelivery.dropped === underPressure.dropped,
+    bounded: underPressure.queued <= 2,
+  }, {
+    bounded: true,
+    queued_under_pressure: 2,
+    unavailable_responses: 1,
+    accepted_after_recovery: 2,
+    retry_preserved_identity: true,
+    queued_after_delivery: 0,
+    dropped_still_visible_after_delivery: true,
+    dropped: 3,
+  });
+}
+
+// 11. rejected metadata — the serializer refuses anything outside the allowlisted shape.
+{
+  const rejections = [];
+  const cases = [
+    ["url in report", () => contract.serializeReport(report([{ kind: "heartbeat", url: "https://example.invalid" }]))],
+    ["unknown disposition", () => contract.serializeReport(report([{ kind: "decision", decision_id: "d", host_disposition: "executed" }]))],
+    ["invented adapter_failure variant", () => contract.serializeReport(report([{ kind: "adapter_failure" }]))],
+    ["invented unavailable variant", () => contract.serializeReport(report([{ kind: "unavailable" }]))],
+  ];
+  for (const [label, run] of cases) {
+    let rejected = false;
+    let leaked = false;
+    try {
+      run();
+    } catch (error) {
+      rejected = true;
+      leaked = /example\.invalid|executed|adapter_failure|unavailable/.test(String(error?.message ?? ""));
+    }
+    rejections.push({ case: label, rejected, error_message_leaks_input: leaked });
+  }
+  recordOutcome({
+    outcome: "rejected_metadata",
+    evidence: "local_only",
+    fixture_id: null,
+    cases: rejections,
+    all_rejected: rejections.every((r) => r.rejected),
+    no_input_echoed_in_errors: rejections.every((r) => !r.error_message_leaks_input),
+  }, {
+    all_rejected: true,
+    no_input_echoed_in_errors: true,
+    cases: (value) => Array.isArray(value) && value.length === cases.length,
+  });
+}
+
+// 12. Representative no-binding checks. Exercise the shell producer, Python presence helper and Node
+// status CLI. Enterprise delegation is inspected statically, not presented as an executed device test.
+// Bound producer behavior belongs to the collected integration suite, not this no-binding fixture.
+{
+  const { execFileSync: run } = await import("node:child_process");
+  const { mkdtempSync: mkdtemp, mkdirSync: mkdir, rmSync: rm, existsSync: exists, readdirSync: readdir } = await import("node:fs");
+  const { tmpdir: tmp } = await import("node:os");
+
+  const producers = [];
+  const sandboxEnvBase = {
+    PATH: process.env.PATH,
+    TMPDIR: process.env.TMPDIR,
+    APORT_GUARDRAIL_MODE: "api",
+    APORT_REPORTING_DISABLED: "0",
+    APORT_API_URL: origin,
+    APORT_AGENT_ID: "ap_fixture_release",
+    APORT_ENFORCEMENT_MODE: "enforce",
+  };
+
+  function withConfigDir(fn) {
+    const dir = mkdtemp(join(process.env.TMPDIR || tmp(), "aport-producer-"));
+    try {
+      return fn(dir);
+    } finally {
+      rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  // Shell producer: the shared library's decision reporter.
+  producers.push(
+    withConfigDir((dir) => {
+      let ok = true;
+      let detail = "no reporting state created";
+      let withoutBinding = [], withMarker = [];
+      const decisionFile = join(dir, "decision.json");
+      const callsFile = join(dir, "calls.jsonl");
+      writeFileSync(decisionFile, JSON.stringify({ decision_id: "dec_release_fixture", allow: true }), { mode: 0o600 });
+      const calls = () => exists(callsFile)
+        ? readFileSync(callsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+        : [];
+      try {
+        const invoke = () => run("bash", ["-c", `
+          set -e
+          command -v node >/dev/null
+          command -v jq >/dev/null
+          source "$1/bin/lib/hook-runtime.sh"
+          source "$1/bin/lib/installation-reporting.sh"
+          calls_file="$3"
+          node() {
+            local input
+            input="$(cat)"
+            printf '%s\\n' "$input" | command jq -c --arg framework "$APORT_HOOK_FRAMEWORK" \
+              --arg mode "$APORT_ENFORCEMENT_MODE" --arg operation "$2" \
+              '{framework:$framework, mode:$mode, operation:$operation, decision_id, allow}' >> "$calls_file"
+            printf '%s\\n' "$input" | command node "$@"
+          }
+          aport_report_decision "$2" openclaw
+        `, "release-fixture", root, decisionFile, callsFile], {
+          env: { ...sandboxEnvBase, HOME: dir, APORT_CONFIG_DIR: dir }, stdio: "pipe", timeout: 30000,
+        });
+        invoke();
+        withoutBinding = calls();
+        // A marker is not a credential or binding. This control must cross the
+        // shell gate; the real Node runtime still has no authority to report.
+        mkdir(join(dir, ".aport-reporting"), { recursive: true });
+        invoke();
+        withMarker = calls().slice(withoutBinding.length);
+      } catch (error) {
+        ok = false;
+        detail = `producer exited non-zero: ${error.status}`;
+      }
+      const reportingDir = join(dir, ".aport-reporting");
+      if (exists(reportingDir) && readdir(reportingDir).length > 0) {
+        ok = false;
+        detail = "created reporting state without a handoff";
+      }
+      const metadataValid = withMarker.length === 1 && withMarker[0].framework === "openclaw" &&
+        withMarker[0].mode === "enforce" && withMarker[0].operation === "pre" &&
+        withMarker[0].decision_id === "dec_release_fixture" && withMarker[0].allow === true;
+      return {
+        producer: "shell (bin/lib/installation-reporting.sh)",
+        silent_without_binding: ok && withoutBinding.length === 0 && metadataValid,
+        reporting_invocations_without_binding: withoutBinding.length,
+        reporting_invocations_with_marker: withMarker.length,
+        positive_control_metadata_valid: metadataValid,
+        detail,
+      };
+    }),
+  );
+
+  // Python producer: the shared presence check that gates optional reporting.
+  producers.push(
+    withConfigDir((dir) => {
+      let ok = true;
+      let detail = "reporting_state_present() is false with no binding";
+      try {
+        const stdout = run(
+          "python3",
+          [
+            "-c",
+            "import sys;sys.path.insert(0,sys.argv[1]);" +
+              "from aport_guardrails.core.installation_reporting import reporting_state_present;" +
+              "print('present' if reporting_state_present(sys.argv[2]) else 'absent')",
+            join(root, "python"),
+            dir,
+          ],
+          { env: { ...sandboxEnvBase, HOME: dir }, encoding: "utf8", stdio: "pipe", timeout: 30000 },
+        );
+        if (stdout.trim() !== "absent") {
+          ok = false;
+          detail = `presence check returned ${stdout.trim()} with no binding`;
+        }
+      } catch (error) {
+        ok = false;
+        detail = `presence check failed: ${error.status}`;
+      }
+      return { producer: "python (core/installation_reporting.py)", silent_without_binding: ok, detail };
+    }),
+  );
+
+  // OpenClaw / shared Node runtime: reporting status for an unbound installation.
+  producers.push(
+    withConfigDir((dir) => {
+      let ok = true;
+      let detail = "status reports 'not configured'";
+      try {
+        const stdout = run("node", [join(runtimeDir, "cli.js"), "status", "--framework", "openclaw"], {
+          env: { ...sandboxEnvBase, HOME: dir, APORT_CONFIG_DIR: dir },
+          encoding: "utf8",
+          stdio: "pipe",
+          timeout: 30000,
+        });
+        const states = JSON.parse(stdout).map((entry) => entry.state);
+        if (states.length !== 1 || states[0] !== "not configured") {
+          ok = false;
+          detail = `unexpected states: ${states.join(", ")}`;
+        }
+      } catch (error) {
+        ok = false;
+        detail = `status failed: ${error.status}`;
+      }
+      return { producer: "node/openclaw shared runtime (cli.js status)", silent_without_binding: ok, detail };
+    }),
+  );
+
+  // Enterprise device scripts: they must delegate to the shared CLI, not carry their own reporting client.
+  {
+    const bundled = readFileSync(join(root, "enterprise-scripts/aport-device-core.mjs"), "utf8");
+    const delegates = /reporting/.test(bundled);
+    const hasOwnClient = /api\/agent-installations/.test(bundled);
+    producers.push({
+      producer: "enterprise (enterprise-scripts/aport-device-core.mjs)",
+      static_delegation_verified: delegates && !hasOwnClient,
+      detail: hasOwnClient
+        ? "enterprise core constructs reporter endpoints itself instead of delegating"
+        : "delegates reporting to the shared CLI and defines no reporter endpoints of its own",
+    });
+  }
+
+  recordOutcome({
+    outcome: "producer_coverage_no_binding",
+    evidence: "local_only",
+    fixture_id: null,
+    producers,
+    all_silent_without_binding: producers.slice(0, 3).every((p) => p.silent_without_binding),
+    enterprise_static_delegation_verified: producers[3].static_delegation_verified,
+    note: "shell producer, Python presence helper and Node status CLI checked without a binding; enterprise delegation inspected statically",
+  }, {
+    all_silent_without_binding: true,
+    enterprise_static_delegation_verified: true,
+    producers: (value) => Array.isArray(value) && value.length === 4,
+  });
+}
+
+// --- Finish ------------------------------------------------------------------------------------------------
+for (const url of escapedRequests) {
+  violations.push(`a request escaped the isolated fixture origin: ${url}`);
+}
+
+const matrix = {
+  candidate_version: canonicalVersion,
+  runtime_under_test: runtimeDir === join(root, "src/installation-reporting") ? "repository-source" : runtimeDir,
+  live_qualification: {
+    run: false,
+    reason: "operator waived live sandbox qualification for this release-preparation task",
+    deployment_identifier: null,
+  },
+  contract: {
+    baseline_revision: contractBaseline,
+    digests: contractDigests,
+  },
+  fixture_server: {
+    kind: "in-process contract server behind the transport's injectable fetch seam",
+    origin,
+    network: "no socket bound and no name resolved; a request to any other origin fails the run",
+    credential_material: "synthetic, generated per run",
+    requests_outside_fixture_origin: escapedRequests.length,
+  },
+  outcomes,
+  total_requests_received: received.length,
+  scenario_invariants: {
+    asserted: true,
+    violations,
+  },
+};
+
+// The matrix is still written when an invariant fails: it is the diagnostic for what the candidate did.
+const json = JSON.stringify(matrix, null, 2);
+if (outPath) {
+  writeFileSync(outPath, json + "\n");
+  console.log(`validate-release-fixture-matrix: wrote ${outPath}`);
+} else {
+  console.log(json);
+}
+
+if (violations.length > 0) {
+  console.error(
+    `validate-release-fixture-matrix: ${violations.length} scenario invariant violation(s) at ${canonicalVersion}:`,
+  );
+  for (const violation of violations) console.error(`  - ${violation}`);
+  process.exit(1);
+}
+
+console.error(
+  `validate-release-fixture-matrix: ${outcomes.length} outcomes, ${received.length} fixture requests at ${canonicalVersion}, ` +
+    `all scenario invariants held`,
+);

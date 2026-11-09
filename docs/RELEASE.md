@@ -1,6 +1,6 @@
 # Release process and version policy
 
-**Current release:** 1.0.36 (see [CHANGELOG.md](../CHANGELOG.md)).
+**Current release:** 1.0.37 (see [CHANGELOG.md](../CHANGELOG.md)).
 
 We keep **one version number** across all published packages (Node core, Python core, and every framework adapter). That avoids “core is 1.2 but CLI is 0.9” and keeps the story simple for users and support.
 
@@ -89,7 +89,63 @@ When you run `npm run version`, that changeset will drive a single version bump 
 
 ---
 
-## 5. Long-term flexibility
+## 5. Release verification records
+
+Each prepared candidate gets a sanitized JSON record under `docs/reviews/`,
+generated from the actual built artifacts rather than written by hand:
+
+```bash
+npm run build
+# pack the npm archives and build the three Python distributions first
+node scripts/validate-release-artifacts.mjs --npm-dir <dir> --out <artifacts.json>
+node scripts/validate-release-fixture-matrix.mjs --out <fixtures.json>
+node scripts/build-release-verification-record.mjs \
+  --artifacts <artifacts.json> --fixtures <fixtures.json> \
+  --out docs/reviews/installation-reporting-release-<version>.json
+```
+
+`scripts/check-release-verification-record.mjs` is the schema and sanitization
+gate, and `tests/unit/test-release-verification-record.sh` runs it against the
+current version's committed record plus deliberately poisoned copies. The test
+derives the filename from `packages/core/package.json`; a version bump needs
+its own record and never rewrites or substitutes an older release's evidence.
+The builder requires explicit empty artifact-problem and fixture-violation
+lists before writing a record. Inspection commands retain failed diagnostics,
+but those files are not successful release evidence.
+
+`tests/unit/test-release-validation-regressions.sh` exercises that boundary,
+including a temporary runtime with installation-scope checks removed. The
+rotation fixture requires the foreign enqueue to reject and send zero requests;
+the rotated token for the same installation must actually deliver successfully.
+The shell no-binding fixture enables API reporting, supplies a synthetic
+decision, and checks an instrumented positive control so an early return cannot
+masquerade as binding enforcement. Queue-pressure evidence waits for an actual
+503 before recovery, then checks delivery and retry identity. A delivery timeout
+fails validation instead of allowing a previous scenario's receipt to count.
+Enterprise delegation in this matrix is static inspection, not a device run.
+
+The record keeps only
+bounded allowlisted metadata: identifiers, digests, counts, booleans, and
+authored constants. Credentials, private paths, prompts, commands, and raw tool
+inputs and outputs are rejected, as is fixture evidence labelled as a live run.
+
+The current record is
+[installation-reporting-release-1.0.37.json](reviews/installation-reporting-release-1.0.37.json).
+
+**1.0.37 scope.** Validation used isolated local contract fixtures and synthetic
+credentials. Live deployment compatibility is recorded as `not_run` with no
+deployment identifier, because the operator waived live sandbox qualification
+for that preparation task. Fixture success is not evidence of compatibility with
+a deployed Agent Passport backend. Unsigned `adapter_failure`/`unavailable`
+receipts stay deferred, Windows reporting stays unresolved, and hosts without a
+trustworthy post-action signal stay `not_reported`. See
+[docs/installation-reporting.md](installation-reporting.md) for the full list.
+Earlier qualification records keep their original unmet claims; the per-release
+record states the scope of its own run rather than retiring theirs.
+
+---
+
+## 6. Long-term flexibility
 
 If we later need finer control (e.g. enterprise adapters that shouldn’t force a full suite release), we can:
 

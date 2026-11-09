@@ -6,6 +6,17 @@ import shutil
 from pathlib import Path
 
 
+# VCS metadata and build caches are not runtime material. `.git` is a directory in a recursive clone and a
+# gitlink file in a worktree checkout, so both shapes are excluded by name.
+_EXCLUDED_RUNTIME_NAMES = frozenset(
+    {".git", ".gitmodules", ".github", "__pycache__", ".pytest_cache", ".DS_Store"}
+)
+
+
+def _ignore_vcs_metadata(_directory: str, names: list[str]) -> set[str]:
+    return {name for name in names if name in _EXCLUDED_RUNTIME_NAMES}
+
+
 def find_runtime_root() -> Path | None:
     """Return the runtime root from the source repo or the installed wheel bundle."""
     package_root = Path(__file__).resolve().parent.parent
@@ -59,7 +70,7 @@ def install_runtime_tree(config_dir: Path) -> Path | None:
         elif kind == "tree":
             if dest.exists():
                 shutil.rmtree(dest)
-            shutil.copytree(src, dest)
+            shutil.copytree(src, dest, ignore=_ignore_vcs_metadata)
         elif kind == "mkdir":
             dest.mkdir(parents=True, exist_ok=True)
         else:
