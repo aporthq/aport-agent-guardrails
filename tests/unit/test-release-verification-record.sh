@@ -44,6 +44,24 @@ REPO_VERSION="$(node -p "require('$REPO_ROOT/packages/core/package.json').versio
     || fail "RECORD_MATCHES_RELEASE: record is $RECORD_VERSION but the repository is $REPO_VERSION"
 echo "  OK RECORD_MATCHES_RELEASE: the record describes $REPO_VERSION"
 
+# The recorded source revision must be a real commit in this history that already carries the release
+# version. It is the commit the inspected artifacts were built from, so it is the parent of the commit that
+# adds the record itself rather than HEAD; requiring it to equal HEAD would have no fixpoint.
+RECORD_REVISION="$(node -p "require('$RECORD').prepared_from.source_revision")"
+if git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+    if git -C "$REPO_ROOT" cat-file -e "$RECORD_REVISION" 2> /dev/null; then
+        REVISION_VERSION="$(git -C "$REPO_ROOT" show "$RECORD_REVISION:packages/core/package.json" 2> /dev/null \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).version||'')}catch{console.log('')}})")"
+        [ "$REVISION_VERSION" = "$REPO_VERSION" ] \
+            || fail "RECORD_REVISION_CARRIES_RELEASE: ${RECORD_REVISION} declares '${REVISION_VERSION}', expected $REPO_VERSION"
+        echo "  OK RECORD_REVISION_CARRIES_RELEASE: the recorded revision exists and declares $REPO_VERSION"
+    else
+        # A shallow clone or a record built on another branch cannot resolve the revision; the shape is
+        # still checked by the validator, so this is reported rather than failed.
+        echo "  SKIP RECORD_REVISION_CARRIES_RELEASE: ${RECORD_REVISION} is not present in this checkout"
+    fi
+fi
+
 # 3. Live qualification must be recorded as not run, with no invented deployment identity.
 node -e '
 const record = require(process.argv[1]);
