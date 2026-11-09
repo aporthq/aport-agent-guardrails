@@ -73,6 +73,13 @@ cd aport-agent-guardrails
 # Install dependencies
 make install
 
+# Test prerequisites: locked npm packages and the declared Python dev extras.
+# `make test` builds the TypeScript workspaces and drives the Python evaluator,
+# so run these first (CI does the same before its test step).
+git submodule update --init --recursive
+npm ci
+pip install -e "python/aport_guardrails[dev]" -e "python/langchain_adapter[dev]"
+
 # Run tests
 make test
 ```
