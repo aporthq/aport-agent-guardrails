@@ -1,0 +1,490 @@
+{
+  "record_schema": "aport-release-verification/v1",
+  "candidate_version": "1.0.37",
+  "prepared_from": {
+    "source_revision": "284fe64df54055bc7ec2c4281649a7f57e52c69c",
+    "base_branch": "staging",
+    "submodules": {
+      "external/aport-policies": "0f9d5ab809ad23837548fed70c764e237784671c",
+      "external/aport-spec": "9ace05433ee00e95c5dd938c32a098adeb293b6c"
+    }
+  },
+  "release_preparation": {
+    "version_command": "npm run version",
+    "sync_owner": "scripts/sync-version.mjs",
+    "idempotent_resync": true,
+    "published": false,
+    "tags_created": false,
+    "release_workflow_dispatched": false
+  },
+  "contract": {
+    "baseline_revision": "6425f967f928f66202cc33489c350d1b99952dc0",
+    "digests": {
+      "handoff schema": "8698089f04abf76a797a9a2c45308798600de22637ecce6efcee36ae1759c815",
+      "server contract.ts": "6f9c8cc5848e05950728a4a08dc37795ff9affc192540ade70d2418372a40e23",
+      "server api.ts": "eed0448380d43eb56d02717159ce69543453a9be6b5432da9a7e135014668491",
+      "OpenAPI": "775903af487a8f80eeaf27b216c237fefb7232742a591ddebbd4e8c16a041976"
+    },
+    "owner": "src/installation-reporting/contract.js"
+  },
+  "reporter_source": {
+    "directory": "src/installation-reporting",
+    "file_count": 10,
+    "sha256": {
+      "bind-openclaw.js": "e8164e967cccf9b486cd08d4def83d331ce47995a4e431d9417060cd068c3354",
+      "binding.js": "3aca6adc2bd5d7185487d8d3c40ec738c515427e972b99c3eda88072cce07b54",
+      "cli.js": "508b2848889a86b2a6e11faec600f05bfaabb7a893b7e0133ac0dde3e3eaaaca",
+      "contract.js": "b0223c55e26b5907a6b67f219adef0b0ead704cda34d0a5da7b3e8a0d0085be1",
+      "reporter.js": "7fa32d4ffd32d9f14810306c33a4c0e568bbba0bd5c3fb245032e72e43eba3c7",
+      "runtime.js": "8cd431afd3454ed6aff153610c899e5031cff149c9f0fb5e6247afbc7563d931",
+      "spool.js": "c3cb423110f5e0d820a70f757823081c6f9d39de6587d9391c829c9a234db391",
+      "status-openclaw.js": "da26b461d440275080e12efd1189080a413cda842bb93a452b4408776f564723",
+      "transport.js": "8d6fecf65f4aa6258bce1322fc6ad3a41724ae4efae49fc31a5636999449a047",
+      "worker.js": "fcabfa5d15e607ce7fd539cfc515b820fda8831c906beaa9d1d1406ddff53bb0"
+    }
+  },
+  "artifacts": {
+    "npm": [
+      {
+        "package": "@aporthq/agent-guardrails",
+        "version": "1.0.37",
+        "filename": "aporthq-agent-guardrails-1.0.37.tgz",
+        "sha256": "e6f02d9555d795d6b4c5202813fe5f0036ad99b3c13d88de2aef122eb2586fe9",
+        "total_entries": 4,
+        "reporter_file_count": 0,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "@aporthq/aport-agent-guardrails",
+        "version": "1.0.37",
+        "filename": "aporthq-aport-agent-guardrails-1.0.37.tgz",
+        "sha256": "db4098906a29ed73613a59e1cfc18c7e085d83754d592e88c56534129f265097",
+        "total_entries": 312,
+        "reporter_file_count": 20,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "@aporthq/aport-agent-guardrails-claude-code",
+        "version": "1.0.37",
+        "filename": "aporthq-aport-agent-guardrails-claude-code-1.0.37.tgz",
+        "sha256": "49e01a3510f3af88f48a2da7a6d053c2c035666b6145e10eba754f01d71240ee",
+        "total_entries": 10,
+        "reporter_file_count": 0,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "@aporthq/aport-agent-guardrails-core",
+        "version": "1.0.37",
+        "filename": "aporthq-aport-agent-guardrails-core-1.0.37.tgz",
+        "sha256": "a97e70d3b24346a33de17c89a3bc726c60eb389765c6988259aa0c0eb7cb7a8f",
+        "total_entries": 119,
+        "reporter_file_count": 10,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "@aporthq/aport-agent-guardrails-crewai",
+        "version": "1.0.37",
+        "filename": "aporthq-aport-agent-guardrails-crewai-1.0.37.tgz",
+        "sha256": "c585c822df18454e0fa56b2f91c6bea16f09602212fbe181e8782f963e34fb3f",
+        "total_entries": 10,
+        "reporter_file_count": 0,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "@aporthq/aport-agent-guardrails-cursor",
+        "version": "1.0.37",
+        "filename": "aporthq-aport-agent-guardrails-cursor-1.0.37.tgz",
+        "sha256": "cdaa83753285f74386467a3a74f21f68d3c33c507c547f46b27c9535cb57d57d",
+        "total_entries": 7,
+        "reporter_file_count": 0,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "@aporthq/aport-agent-guardrails-langchain",
+        "version": "1.0.37",
+        "filename": "aporthq-aport-agent-guardrails-langchain-1.0.37.tgz",
+        "sha256": "b0923a5d137b7a3526698965aba7a519da7428993604dfab58a83cb5a3caa97a",
+        "total_entries": 14,
+        "reporter_file_count": 0,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "@aporthq/openclaw-aport",
+        "version": "1.0.37",
+        "filename": "aporthq-openclaw-aport-1.0.37.tgz",
+        "sha256": "3a771e7d97a9c37dae6d03233c2daffbf4efac3f62d4ec664aa31723ba602761",
+        "total_entries": 23,
+        "reporter_file_count": 10,
+        "reporter_bytes_match_source": true
+      }
+    ],
+    "python_wheels": [
+      {
+        "package": "aport-agent-guardrails",
+        "version": "1.0.37",
+        "filename": "aport_agent_guardrails-1.0.37-py3-none-any.whl",
+        "sha256": "a9b3bf17a95f71157473d575d862e9f275920cc0c0af40cd14180bd04f55edbc",
+        "total_entries": 164,
+        "reporter_file_count": 10,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "aport-agent-guardrails-langchain",
+        "version": "1.0.37",
+        "filename": "aport_agent_guardrails_langchain-1.0.37-py3-none-any.whl",
+        "sha256": "dba690540ccea8c1b848b3dacbc961024c6ca8add5a7f1102c6099507444bc3c",
+        "total_entries": 8,
+        "reporter_file_count": 0,
+        "reporter_bytes_match_source": true
+      },
+      {
+        "package": "aport-agent-guardrails-crewai",
+        "version": "1.0.37",
+        "filename": "aport_agent_guardrails_crewai-1.0.37-py3-none-any.whl",
+        "sha256": "9d6e93c2f4dbb3a30fd3018fccffd6702ed87d05c43dd871d89e9b1d4038c6d8",
+        "total_entries": 9,
+        "reporter_file_count": 0,
+        "reporter_bytes_match_source": true
+      }
+    ],
+    "enterprise_bundle": {
+      "version": "1.0.37",
+      "manifest_version": "1.0.37",
+      "file_count": 27,
+      "files": [
+        {
+          "filename": "aport-device-core.mjs",
+          "sha256": "653005f8e2dcb313e477d17e93ed6c97a105909ac2534fbd4cd9ca5eea07a410"
+        },
+        {
+          "filename": "aport-device-core.mjs.sha256",
+          "sha256": "ef5904833f72f5a5d2e6d84c889bd2df6add7214a9ce517fb4c1656ea07fe5ef"
+        },
+        {
+          "filename": "aport-device-deploy.bundled.ps1",
+          "sha256": "cb5125f8333be5aaaa351b207bf51917be044d1280159bc97ec5758f5dc34022"
+        },
+        {
+          "filename": "aport-device-deploy.bundled.ps1.sha256",
+          "sha256": "8d7c81fe59c2f9d8f1db7b1e32186d650edb9c218432be4345ecc22986c805bb"
+        },
+        {
+          "filename": "aport-device-deploy.bundled.ps1.version",
+          "sha256": "1d912c00a83c8a55c9a7f4ec0fb15879f667eeab734b7663e3099c40a8741d8b"
+        },
+        {
+          "filename": "aport-device-deploy.bundled.sh",
+          "sha256": "0a115eefa6cf18643fab80fbe910f351e110afac67717807cf24f9883b34b2c7"
+        },
+        {
+          "filename": "aport-device-deploy.bundled.sh.sha256",
+          "sha256": "85bbee0753b5caf5ee9aad320531285b113eb31d682f7f07f2c8141f83a9f6c8"
+        },
+        {
+          "filename": "aport-device-deploy.ps1",
+          "sha256": "580cbac8d2a399ff8197dd1489358bc90c29d1a26f618091c152247164d4f184"
+        },
+        {
+          "filename": "aport-device-deploy.ps1.sha256",
+          "sha256": "c80fdc8f4dc94978b6afb6e02d7e84424f555b80765ab361c1645a9714c83aaf"
+        },
+        {
+          "filename": "aport-device-deploy.ps1.version",
+          "sha256": "1d912c00a83c8a55c9a7f4ec0fb15879f667eeab734b7663e3099c40a8741d8b"
+        },
+        {
+          "filename": "aport-device-enforce.bundled.ps1",
+          "sha256": "e448694f1bd1a042f4b93d27bf08131a2b794302ed7207c1ecf1d4be757740d0"
+        },
+        {
+          "filename": "aport-device-enforce.bundled.ps1.sha256",
+          "sha256": "d1b95826eec039dbdeb2ae1725e750b39e72b9c959753a86648dbdccd80e54a6"
+        },
+        {
+          "filename": "aport-device-enforce.bundled.ps1.version",
+          "sha256": "1d912c00a83c8a55c9a7f4ec0fb15879f667eeab734b7663e3099c40a8741d8b"
+        },
+        {
+          "filename": "aport-device-enforce.bundled.sh",
+          "sha256": "ad9c8544b475bf0824c906e4630fa0adbba432049575f2d2e8118eff157909f9"
+        },
+        {
+          "filename": "aport-device-enforce.bundled.sh.sha256",
+          "sha256": "03b05ce33a12159b3d6bae383109ee153e18391e5557757eb4808d20630c2c8e"
+        },
+        {
+          "filename": "aport-device-enforce.ps1",
+          "sha256": "949da41e28d5a5f1205f82b98bf010e9ae5b2bdfb914c795d1496ed94022a4cd"
+        },
+        {
+          "filename": "aport-device-enforce.ps1.sha256",
+          "sha256": "d28056da8cf78af0407ef286895e9bb77f86e8aeec9e37185ab05652a42e3f76"
+        },
+        {
+          "filename": "aport-device-enforce.ps1.version",
+          "sha256": "1d912c00a83c8a55c9a7f4ec0fb15879f667eeab734b7663e3099c40a8741d8b"
+        },
+        {
+          "filename": "aport-device-uninstall.bundled.ps1",
+          "sha256": "ebce064696f59d10c59203185d351ba4f93df6b521e1fba08325792d8218d5a9"
+        },
+        {
+          "filename": "aport-device-uninstall.bundled.ps1.sha256",
+          "sha256": "e6234aeb9e7e9ca0a66107f662d02714a311d80a910c913a8f45dc2cedf8be2e"
+        },
+        {
+          "filename": "aport-device-uninstall.bundled.ps1.version",
+          "sha256": "1d912c00a83c8a55c9a7f4ec0fb15879f667eeab734b7663e3099c40a8741d8b"
+        },
+        {
+          "filename": "aport-device-uninstall.bundled.sh",
+          "sha256": "1d5af7f479dadf634c5494f98450ae305f46f9a07bea2aa9ac91866fcea2e047"
+        },
+        {
+          "filename": "aport-device-uninstall.bundled.sh.sha256",
+          "sha256": "5d88280d9102a76a9f507b2f4d32bd8a0552bbbeb1f2a7db22717564ab190b16"
+        },
+        {
+          "filename": "aport-device-uninstall.ps1",
+          "sha256": "ceeaeecf80e3a6bc2813938ee6131271501cd570115a9e634cd2ded3f5899e0d"
+        },
+        {
+          "filename": "aport-device-uninstall.ps1.sha256",
+          "sha256": "50fdeb27e9fb260f2b87373b68adec4c74caadfc16df462918fbb91242b9504e"
+        },
+        {
+          "filename": "aport-device-uninstall.ps1.version",
+          "sha256": "1d912c00a83c8a55c9a7f4ec0fb15879f667eeab734b7663e3099c40a8741d8b"
+        },
+        {
+          "filename": "enterprise-scripts-manifest.json",
+          "sha256": "a0991a7376d79eede3de16489a6aebe838f7c1b5a052c767e8a41deacef7e403"
+        }
+      ],
+      "bundled_variants_pinning_release": [
+        "aport-device-deploy.bundled.ps1",
+        "aport-device-deploy.bundled.sh",
+        "aport-device-enforce.bundled.ps1",
+        "aport-device-enforce.bundled.sh",
+        "aport-device-uninstall.bundled.ps1",
+        "aport-device-uninstall.bundled.sh"
+      ]
+    },
+    "excluded_content_checks": {
+      "handoffs": "absent",
+      "credential_material": "absent",
+      "user_state": "absent",
+      "temporary_artifacts": "absent",
+      "forked_reporter_implementation": "absent"
+    }
+  },
+  "deterministic_validation": {
+    "fixture_server": {
+      "kind": "in-process contract server behind the transport's injectable fetch seam",
+      "origin": "https://fixture.invalid",
+      "network": "no socket bound and no name resolved; a request to any other origin fails the run",
+      "credential_material": "synthetic, generated per run",
+      "requests_outside_fixture_origin": 0
+    },
+    "runtime_under_test": "repository-source",
+    "outcomes": [
+      {
+        "outcome": "install",
+        "evidence": "fixture_response",
+        "fixture_id": "local-v1-accept",
+        "delivered": true,
+        "accepted_reports": 1,
+        "authorization_header_present": true,
+        "reported_state": "connected"
+      },
+      {
+        "outcome": "allow",
+        "evidence": "fixture_response",
+        "fixture_id": "local-v1-accept",
+        "host_disposition": "allowed",
+        "decision_id_present": true,
+        "note": "host_disposition comes from the supplied completion record, not from a pre-action result"
+      },
+      {
+        "outcome": "deny",
+        "evidence": "fixture_response",
+        "fixture_id": "local-v1-accept",
+        "host_disposition": "blocked",
+        "note": "a pre-action DENY alone is never reported as blocked"
+      },
+      {
+        "outcome": "no_handoff",
+        "evidence": "local_only",
+        "fixture_id": null,
+        "reporter_constructed": false,
+        "rejected_with": "TypeError",
+        "requests_sent": 0,
+        "host_disposition": "not_reported",
+        "note": "no request is attempted and no ALLOW/DENY is synthesized without an owner handoff"
+      },
+      {
+        "outcome": "reporting_unavailable",
+        "evidence": "injected_fault",
+        "fixture_id": "local-v1-unavailable",
+        "injected_fault": "server responds 503 to every report",
+        "reported_state": "unresolved",
+        "queued_after_failure": 0,
+        "forged_allow_or_deny": false,
+        "note": "the pinned v1 contract has no unsigned adapter_failure/unavailable receipt; the outcome stays unresolved"
+      },
+      {
+        "outcome": "verification_unavailable",
+        "evidence": "injected_fault",
+        "fixture_id": "local-v1-old-server",
+        "injected_fault": "server rejects the pinned schema version with 400",
+        "reported_state": "unresolved",
+        "retried": true,
+        "forged_allow_or_deny": false,
+        "note": "a non-retryable rejection is not reported as a policy outcome"
+      },
+      {
+        "outcome": "mode_change",
+        "evidence": "fixture_response",
+        "fixture_id": "local-v1-accept",
+        "modes": [
+          {
+            "requested": "enforce",
+            "delivered": "enforce"
+          },
+          {
+            "requested": "warn",
+            "delivered": "warn"
+          },
+          {
+            "requested": "observe",
+            "delivered": "observe"
+          }
+        ],
+        "all_modes_match": true
+      },
+      {
+        "outcome": "rotation",
+        "evidence": "fixture_response",
+        "fixture_id": "local-v1-accept",
+        "rotated_token_same_installation_accepted": true,
+        "different_installation_refused": true
+      },
+      {
+        "outcome": "uninstall",
+        "evidence": "fixture_response",
+        "fixture_id": "local-v1-accept",
+        "lifecycle_state": "removed",
+        "only_report_in_event": true,
+        "rejects_lifecycle_combined_with_other_reports": true
+      },
+      {
+        "outcome": "queue_pressure",
+        "evidence": "injected_fault",
+        "fixture_id": "local-v1-unavailable",
+        "injected_fault": "server responds 503 while five receipts are enqueued into a queue bounded to two",
+        "max_queue": 2,
+        "enqueued": 5,
+        "queued_under_pressure": 2,
+        "dropped": 3,
+        "dropped_still_visible_after_delivery": true,
+        "bounded": true
+      },
+      {
+        "outcome": "rejected_metadata",
+        "evidence": "local_only",
+        "fixture_id": null,
+        "cases": [
+          {
+            "case": "url in report",
+            "rejected": true,
+            "error_message_leaks_input": false
+          },
+          {
+            "case": "unknown disposition",
+            "rejected": true,
+            "error_message_leaks_input": false
+          },
+          {
+            "case": "invented adapter_failure variant",
+            "rejected": true,
+            "error_message_leaks_input": false
+          },
+          {
+            "case": "invented unavailable variant",
+            "rejected": true,
+            "error_message_leaks_input": false
+          }
+        ],
+        "all_rejected": true,
+        "no_input_echoed_in_errors": true
+      },
+      {
+        "outcome": "producer_coverage_no_binding",
+        "evidence": "local_only",
+        "fixture_id": null,
+        "producers": [
+          {
+            "producer": "shell (bin/lib/installation-reporting.sh)",
+            "silent_without_binding": true,
+            "detail": "no reporting state created"
+          },
+          {
+            "producer": "python (core/installation_reporting.py)",
+            "silent_without_binding": true,
+            "detail": "reporting_state_present() is false with no binding"
+          },
+          {
+            "producer": "node/openclaw shared runtime (cli.js status)",
+            "silent_without_binding": true,
+            "detail": "status reports 'not configured'"
+          },
+          {
+            "producer": "enterprise (enterprise-scripts/aport-device-core.mjs)",
+            "silent_without_binding": true,
+            "detail": "delegates reporting to the shared CLI and defines no reporter endpoints of its own"
+          }
+        ],
+        "all_silent_without_binding": true,
+        "note": "representative shell/Python/Node-OpenClaw/enterprise producers, executed with no handoff present"
+      }
+    ],
+    "total_fixture_requests": 11
+  },
+  "unresolved_and_deferred": {
+    "unsigned_failure_receipts": {
+      "status": "deferred",
+      "detail": "The pinned v1 report references a server decision ID and has no unsigned adapter_failure or unavailable variant. Unavailable and adapter-failure calls report a heartbeat only and remain unresolved; no ALLOW/DENY is synthesized. Remedy: an Agent Passport owner must release an additive reporting contract for these outcome receipts, then client integration and compatibility tests follow."
+    },
+    "windows_reporting": {
+      "status": "unresolved",
+      "detail": "No verified equivalent ACL ownership checker exists for this candidate, so Windows reporting fails closed as unresolved. Authorization is unaffected."
+    },
+    "hosts_without_completion_signal": {
+      "status": "not_reported",
+      "detail": "Hosts with no trustworthy post-action signal, including the OpenClaw HTTP tool-invocation path, stay not_reported. A pre-action result is never treated as host execution evidence."
+    },
+    "live_deployment_compatibility": {
+      "status": "not_run",
+      "waived_by_operator": true,
+      "reason": "The operator waived live sandbox qualification for this release-preparation task. No owner-created handoff was requested and no production or sandbox reporting call was made.",
+      "deployment_identifier": null,
+      "unverified_outcomes": [
+        "install",
+        "ALLOW",
+        "DENY",
+        "unavailable",
+        "mode-change",
+        "rotation",
+        "uninstall",
+        "dropped-queue",
+        "no-handoff"
+      ],
+      "detail": "Every outcome above is fixture-verified only. Fixture success is not evidence of compatibility with a deployed Agent Passport backend. Earlier qualification records keep their original unmet claims; this entry records the current task scope, it does not retire them."
+    }
+  },
+  "evidence_sources": {
+    "artifact_inspection": "scripts/validate-release-artifacts.mjs",
+    "deterministic_fixtures": "scripts/validate-release-fixture-matrix.mjs",
+    "schema_and_sanitization": "tests/unit/test-release-verification-record.sh"
+  }
+}

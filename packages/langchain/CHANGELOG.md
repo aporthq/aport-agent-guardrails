@@ -1,5 +1,26 @@
 # @aporthq/aport-agent-guardrails-langchain
 
+## 1.0.37
+
+### Patch Changes
+
+- Complete optional installation reporting with a protected bounded disk spool,
+  detached delivery, shared shell/Node/Python/OpenClaw integration, declared coverage,
+  and receipts after committed mode, rotation and removal changes. Preserve
+  `not_reported` unless a correlated host completion callback supplies evidence.
+
+  The lockstep patch candidate is 1.0.37 (from 1.0.36). Sandbox qualification remains
+  required; publishing follows the normal post-merge release process.
+
+- Provision Node and Python prerequisites before `make test` in CI, run the full
+  test job for staging and main, and stop unenrolled hosted Python evaluators from
+  launching the Node reporter on every decision, remember and post call. One shared
+  Python presence check now gates optional reporting; binding and schema validation
+  stay in the shared Node runtime.
+- Updated dependencies
+- Updated dependencies
+  - @aporthq/aport-agent-guardrails-core@1.0.37
+
 ## 1.0.36
 
 ### Patch Changes
