@@ -14,6 +14,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Identify checked-out integrity target
+        id: integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check Git integrity before repository execution
+        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        with:
+          head: ${{ steps.integrity-revision.outputs.sha }}
 
       - name: Install dependencies
         run: |

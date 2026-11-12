@@ -25,6 +25,15 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          persist-credentials: true # Required by the authenticated main/tag fetch below.
+      - name: Identify checked-out integrity target
+        id: integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check Git integrity before repository execution
+        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        with:
+          head: ${{ steps.integrity-revision.outputs.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -95,6 +104,15 @@ jobs:
           git checkout --detach "$TAG"
           git submodule update --init --recursive
 
+      - name: Identify recovered release integrity target
+        id: recovered-integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check recovered release before repository execution
+        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        with:
+          head: ${{ steps.recovered-integrity-revision.outputs.sha }}
+
       - name: Install dependencies
         run: npm ci
 
@@ -133,6 +151,15 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          persist-credentials: true # Preserve authenticated fetch and tag publication.
+      - name: Identify checked-out integrity target
+        id: integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check Git integrity before repository execution
+        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        with:
+          head: ${{ steps.integrity-revision.outputs.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -172,6 +199,15 @@ jobs:
           echo "Recovering existing ${TAG} at ${TAG_SHA}; ensuring artifacts from tagged source."
           git checkout --detach "$TAG"
           git submodule update --init --recursive
+
+      - name: Identify recovered release integrity target
+        id: recovered-integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check recovered release before repository execution
+        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        with:
+          head: ${{ steps.recovered-integrity-revision.outputs.sha }}
 
       - name: Verify version matches release version
         run: |
@@ -237,6 +273,15 @@ jobs:
           ref: ${{ needs.ensure-release-tag.outputs.release_ref }}
           fetch-depth: 0
           submodules: recursive
+          persist-credentials: false
+      - name: Identify checked-out integrity target
+        id: integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check Git integrity before repository execution
+        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        with:
+          head: ${{ steps.integrity-revision.outputs.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -391,6 +436,15 @@ jobs:
           ref: ${{ needs.ensure-release-tag.outputs.release_ref }}
           fetch-depth: 0
           submodules: recursive
+          persist-credentials: false
+      - name: Identify checked-out integrity target
+        id: integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check Git integrity before repository execution
+        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        with:
+          head: ${{ steps.integrity-revision.outputs.sha }}
 
       - name: Set version from tag
         id: version
@@ -475,6 +529,15 @@ jobs:
         with:
           ref: ${{ needs.ensure-release-tag.outputs.release_ref }}
           fetch-depth: 0
+          persist-credentials: false
+      - name: Identify checked-out integrity target
+        id: integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check Git integrity before repository execution
+        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        with:
+          head: ${{ steps.integrity-revision.outputs.sha }}
 
       - name: Resolve version
         id: version
