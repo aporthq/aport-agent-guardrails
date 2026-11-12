@@ -7,9 +7,9 @@ import sys
 import yaml
 
 root = pathlib.Path(sys.argv[1])
-pin = 'aporthq/policy-verify-action/integrity@37dd76eca6695c504eb1a53d1e0a5d4fda16dfb2'
+pin = 'aporthq/policy-verify-action/integrity@d1ccc3aa355c449018ee1adef5a59b3b79c92fb2'
 # These static analysis tools read source, rather than executing repository code.
-read_only = {'shellcheck.yml', 'secrets-scan.yml'}
+read_only = {'shellcheck.yml'}
 seen = 0
 for file in (root / '.github/workflows').glob('*.yml'):
     if file.name in read_only:
@@ -41,7 +41,7 @@ for file in (root / '.github/workflows').glob('*.yml'):
             assert steps[recovery + 2].get('with') == {'head': '${{ steps.recovered-integrity-revision.outputs.sha }}'}, label
         else:
             assert checkout['with']['persist-credentials'] == 'false', f'{label}: no persisted checkout token'
-assert seen == 13, f'Expected 13 checkout jobs, reached {seen}'
+assert seen == 15, f'Expected 15 checkout jobs, reached {seen}'
 monitor = yaml.load((root / '.github/workflows/repository-integrity.yml').read_text(), Loader=yaml.BaseLoader)
 assert monitor['on']['push'] == {'branches': ['**'], 'tags': ['**']}
 assert all(event in monitor['on'] for event in ['pull_request', 'merge_group', 'schedule', 'workflow_dispatch'])
