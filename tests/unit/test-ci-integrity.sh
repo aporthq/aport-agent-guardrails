@@ -7,7 +7,7 @@ import sys
 import yaml
 
 root = pathlib.Path(sys.argv[1])
-pin = 'aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471'
+pin = 'aporthq/policy-verify-action/integrity@37dd76eca6695c504eb1a53d1e0a5d4fda16dfb2'
 # These static analysis tools read source, rather than executing repository code.
 read_only = {'shellcheck.yml', 'secrets-scan.yml'}
 seen = 0

@@ -26,6 +26,6 @@ jobs:
         shell: bash
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Check Git integrity before repository execution
-        uses: aporthq/policy-verify-action/integrity@9e41e4d832521828f86f5ce2d2c7027bb44c3471
+        uses: aporthq/policy-verify-action/integrity@37dd76eca6695c504eb1a53d1e0a5d4fda16dfb2
         with:
           head: ${{ steps.integrity-revision.outputs.sha }}
