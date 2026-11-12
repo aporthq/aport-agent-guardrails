@@ -39,6 +39,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Identify checked-out integrity target
+        id: integrity-revision
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check Git integrity before repository execution
+        uses: aporthq/policy-verify-action/integrity@d1ccc3aa355c449018ee1adef5a59b3b79c92fb2
+        with:
+          head: ${{ steps.integrity-revision.outputs.sha }}
       - name: Detect first-time APort guard install
         id: bootstrap
         if: github.event_name == 'pull_request'
