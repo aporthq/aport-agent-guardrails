@@ -41,4 +41,3 @@ with tempfile.TemporaryDirectory(prefix="aport-pypi-verification-") as directory
             assert visited == packages, "PYPI_ALL_PACKAGES_QUERIED: success must check every package"
 print("PASS: all three Python packages are required; each missing-package position fails")
 PY
-
