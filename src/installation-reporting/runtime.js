@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const { createHash, randomUUID } = require('node:crypto');
 const { bindHandoff, bindingStatus, loadBinding, identityName, readProtected } = require('./binding');
 const spool = require('./spool');
-const VERSION = '1.0.37'; // Updated by the normal lockstep release script.
+const VERSION = '1.0.38'; // Updated by the normal lockstep release script.
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 function location(options) {

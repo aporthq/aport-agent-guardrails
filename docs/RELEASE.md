@@ -1,6 +1,6 @@
 # Release process and version policy
 
-**Current release:** 1.0.37 (see [CHANGELOG.md](../CHANGELOG.md)).
+**Current release:** 1.0.38 (see [CHANGELOG.md](../CHANGELOG.md)).
 
 We keep **one version number** across all published packages (Node core, Python core, and every framework adapter). That avoids “core is 1.2 but CLI is 0.9” and keeps the story simple for users and support.
 
@@ -104,6 +104,12 @@ node scripts/build-release-verification-record.mjs \
   --out docs/reviews/installation-reporting-release-<version>.json
 ```
 
+The fixture record marks live deployment compatibility as `not_run`; it does
+not invent operator approval or inherit a previous release's waiver. The
+existing publishing workflow uses local regression and artifact checks, not a
+live sandbox check. Qualify and record deployed reporting compatibility
+separately before claiming it works against a specific backend deployment.
+
 `scripts/check-release-verification-record.mjs` is the schema and sanitization
 gate, and `tests/unit/test-release-verification-record.sh` runs it against the
 current version's committed record plus deliberately poisoned copies. The test
@@ -130,7 +136,12 @@ authored constants. Credentials, private paths, prompts, commands, and raw tool
 inputs and outputs are rejected, as is fixture evidence labelled as a live run.
 
 The current record is
-[installation-reporting-release-1.0.37.json](reviews/installation-reporting-release-1.0.37.json).
+[installation-reporting-release-1.0.38.json](reviews/installation-reporting-release-1.0.38.json).
+
+**1.0.38 scope.** Local artifact inspection and deterministic reporting fixtures
+are recorded for this version. Live deployment compatibility remains `not_run`,
+without an inherited operator waiver. No backend deployment is certified by
+these results. The historical 1.0.37 record below is preserved unchanged.
 
 **1.0.37 scope.** Validation used isolated local contract fixtures and synthetic
 credentials. Live deployment compatibility is recorded as `not_run` with no

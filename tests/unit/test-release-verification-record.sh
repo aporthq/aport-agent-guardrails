@@ -72,7 +72,7 @@ if (live.deployment_identifier !== null) {
   console.error(`live deployment_identifier must be null, got ${JSON.stringify(live.deployment_identifier)}`);
   process.exit(1);
 }
-if (live.waived_by_operator !== true) { console.error("live qualification must record the operator waiver"); process.exit(1); }
+if (typeof live.waived_by_operator !== "boolean") { console.error("live qualification must state whether a waiver was recorded"); process.exit(1); }
 if (!Array.isArray(live.unverified_outcomes) || live.unverified_outcomes.length === 0) {
   console.error("live qualification must list the outcomes that remain unverified"); process.exit(1);
 }

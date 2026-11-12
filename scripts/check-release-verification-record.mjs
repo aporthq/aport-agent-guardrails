@@ -137,6 +137,9 @@ if (!live) {
   if (live.deployment_identifier !== null) {
     fail("live_deployment_compatibility.deployment_identifier must be null when no live run happened");
   }
+  if (typeof live.waived_by_operator !== "boolean") {
+    fail("live_deployment_compatibility.waived_by_operator must state whether a waiver was recorded");
+  }
   if (!Array.isArray(live.unverified_outcomes) || live.unverified_outcomes.length === 0) {
     fail("live_deployment_compatibility must list the outcomes that remain unverified");
   }

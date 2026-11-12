@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.38] - 2026-11-12
+
+### Changed
+
+- Refresh bundled spec and policy commits with authorization-scope configuration, data-age context and export row-count fields.
+- Gate repository execution on immutable Git-history integrity checks, including deleted and renamed configuration paths.
+- Isolate secrets-scanner downloads from checkout files and verify their pinned archive checksums before execution.
+
 ## [1.0.37] - 2026-11-09
 
 ### Added

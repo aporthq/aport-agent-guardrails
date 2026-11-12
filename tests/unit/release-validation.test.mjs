@@ -54,6 +54,10 @@ test('builder accepts a successful inspection and its output passes the record v
   const {result, out} = build(scratch(t), inputs());
   success(result);
   success(run('scripts/check-release-verification-record.mjs', [out]));
+  const live = JSON.parse(readFileSync(out)).unresolved_and_deferred.live_deployment_compatibility;
+  assert.equal(live.status, 'not_run');
+  assert.equal(live.waived_by_operator, false, 'LIVE_WAIVER_NOT_INHERITED: generating fixture evidence must not invent operator approval');
+  assert.equal(live.deployment_identifier, null);
 });
 for (const [name, value] of [['failure', ['credential-material inspection failed']], ['missing', undefined], ['null', null], ['object', {}], ['empty-string', '']]) {
   test(`builder refuses ${name} artifact inspection result without writing a clean record`, t => {

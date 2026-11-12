@@ -1,5 +1,11 @@
 # @aporthq/aport-agent-guardrails-core
 
+## 1.0.38
+
+### Patch Changes
+
+- Refresh the bundled Open Agent Passport schema and policy packs with authorization-scope configuration, data-age context and export row-count fields. Gate repository execution on immutable Git-history integrity checks and isolate checksum-verified secrets-scanner bootstraps from checkout contents. These CI checks do not certify every dependency or binary.
+
 ## 1.0.37
 
 ### Patch Changes
