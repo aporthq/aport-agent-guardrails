@@ -1,5 +1,7 @@
 # Changelog - APort OpenClaw Plugin
 
+## 1.0.38
+
 ## 1.0.37
 
 ### Patch Changes

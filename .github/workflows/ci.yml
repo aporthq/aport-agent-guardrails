@@ -25,12 +25,6 @@ jobs:
         with:
           head: ${{ steps.integrity-revision.outputs.sha }}
 
-      - name: Install dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 update
-          sudo apt-get install -y --no-install-recommends curl jq uuid-runtime
-
       - name: Make scripts executable
         run: |
           chmod +x bin/*.sh bin/lib/*.sh enterprise-scripts/*.sh enterprise-scripts/*.mjs scripts/*.sh tests/*.sh tests/unit/*.sh tests/frameworks/openclaw/setup.sh 2>/dev/null || true
@@ -56,12 +50,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python test prerequisites
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install --disable-pip-version-check --no-input build -e "python/aport_guardrails[dev]" -e "python/langchain_adapter[dev]"
-          python -m pip check
+      - name: Install test prerequisites
+        run: bash scripts/install-test-prerequisites.sh
 
       - name: Validate passport schema
         run: |

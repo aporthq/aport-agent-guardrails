@@ -200,10 +200,10 @@ const record = {
     },
     live_deployment_compatibility: {
       status: "not_run",
-      waived_by_operator: true,
+      waived_by_operator: false,
       reason:
-        "The operator waived live sandbox qualification for this release-preparation task. No owner-created " +
-        "handoff was requested and no production or sandbox reporting call was made.",
+        "This record contains local fixture evidence only. No production or sandbox reporting call was " +
+        "made, and generating this record does not establish an operator waiver or live compatibility.",
       deployment_identifier: null,
       unverified_outcomes: [
         "install",
