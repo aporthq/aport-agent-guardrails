@@ -509,7 +509,7 @@ jobs:
           verify_py() {
             local pkg
             for pkg in aport-agent-guardrails aport-agent-guardrails-langchain aport-agent-guardrails-crewai; do
-              PKG="$pkg" VERSION="$VERSION" python -c "import json, os, urllib.request as u, sys; v=os.environ['VERSION']; p=os.environ['PKG']; d=json.loads(u.urlopen('https://pypi.org/pypi/'+p+'/json').read().decode()); sys.exit(0 if v in d.get('releases',{}) else 1)"
+              PKG="$pkg" VERSION="$VERSION" python -c "import json, os, urllib.request as u, sys; v=os.environ['VERSION']; p=os.environ['PKG']; d=json.loads(u.urlopen('https://pypi.org/pypi/'+p+'/json').read().decode()); sys.exit(0 if v in d.get('releases',{}) else 1)" || return $?
             done
           }
 
